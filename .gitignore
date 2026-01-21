@@ -1,0 +1,8 @@
+node_modules/
+dist/
+assets/esri/
+public/assets/esri/
+public/assets/**/calcite*
+test-results/
+public/
+*.tsbuildinfo
