@@ -274,7 +274,9 @@ const importConfig: ImportConfig = {
   getView: () => view,
   createGraphicForType,
   createImportedLayer,
-  zoomToLayers: (layers) => zoomToLayersRef(layers)
+  zoomToLayers: (layers) => zoomToLayersRef(layers),
+  applyProjectSnapshot,
+  setProjectError
 };
 const animationPlaybackConfig = {
   getGraphicsLayers: () => graphicsLayers,

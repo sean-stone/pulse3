@@ -11,6 +11,8 @@ type ImportConfig = {
   createGraphicForType: (type: LayerType, geometry: any, attributes?: Record<string, any>) => Graphic;
   createImportedLayer: (type: LayerType, name: string, graphics: Graphic[]) => LayerData | null;
   zoomToLayers: (layers: LayerData[]) => void;
+  applyProjectSnapshot?: (snapshot: unknown) => void | Promise<void>;
+  setProjectError?: (message: string | null) => void;
 };
 
 const importGeoJson = (config: ImportConfig, fileName: string, content: string) => {
@@ -21,6 +23,20 @@ const importGeoJson = (config: ImportConfig, fileName: string, content: string) 
     data = JSON.parse(content);
   } catch (error) {
     alert("Unable to read GeoJSON.");
+    return;
+  }
+
+  const isPulseProject =
+    data?.type === "FeatureCollection" &&
+    typeof data?.properties?._pulse === "object" &&
+    Array.isArray(data?.properties?._pulse?.layers);
+  if (isPulseProject && config.applyProjectSnapshot) {
+    try {
+      void Promise.resolve(config.applyProjectSnapshot(data));
+    } catch (error) {
+      config.setProjectError?.("Unable to import project file.");
+      alert("Unable to import project file.");
+    }
     return;
   }
 
