@@ -296,6 +296,36 @@ body {
   color: var(--color-primary);
 }
 
+.panel-github-link {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--color-primary);
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.panel-github-link svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.panel-github-link:hover {
+  color: var(--color-primary-dark);
+  background: rgba(10, 76, 102, 0.08);
+  border-color: rgba(10, 76, 102, 0.2);
+}
+
+.panel-github-link:focus-visible {
+  outline: 2px solid var(--color-secondary);
+  outline-offset: 2px;
+}
+
 .panel-tag {
   font-size: 11px;
   text-transform: uppercase;
