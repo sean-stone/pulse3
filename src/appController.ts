@@ -53,6 +53,11 @@ import { setupResponsiveLayout } from "./app/layout";
 import { createLoadingOverlayController } from "./app/loading";
 import { createPlaybackController } from "./app/playback";
 import {
+  handleExportProject,
+  handleImportProjectClick,
+  handleProjectFileChange
+} from "./app/projectIo";
+import {
   applyProjectSnapshot as applyProjectSnapshotFromState,
   buildProjectSnapshot as buildProjectSnapshotFromState
 } from "./app/snapshot";
@@ -253,6 +258,18 @@ const exportConfig: ExportConfig = {
   stopCanvasRecording
 };
 const startExportRecording = () => startExportRecordingFromState(exportState, exportConfig);
+const projectIoConfig = {
+  getEl,
+  buildProjectSnapshot: () => buildProjectSnapshotRef(),
+  getProjectFileName: () => {
+    const safeName = sanitizePlainText(projectName, "pulse-project")
+      .replace(/[<>:"/\\|?*]/g, "")
+      .trim();
+    return `${safeName || "pulse-project"}.json`;
+  },
+  setProjectError,
+  applyProjectSnapshot
+};
 const importConfig: ImportConfig = {
   getView: () => view,
   createGraphicForType,
@@ -1023,6 +1040,13 @@ function setupEventListeners() {
       saveProjectToStorage(storageState, storageConfig, projectName, Boolean(view));
     }
   });
+  getEl("timeline-save-as-btn").addEventListener("click", () => handleExportProject(projectIoConfig));
+  getEl("timeline-import-btn").addEventListener("click", () =>
+    handleImportProjectClick(projectIoConfig)
+  );
+  getEl("project-file-input").addEventListener("change", (event: Event) =>
+    handleProjectFileChange(projectIoConfig, event)
+  );
   getEl("timeline-duplicate-btn").addEventListener("click", duplicateSelectedTimelineAnimation);
   getEl("timeline-start-btn").addEventListener("click", goToStart);
   getEl("timeline-end-btn").addEventListener("click", goToEnd);

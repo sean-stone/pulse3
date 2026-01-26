@@ -151,7 +151,45 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       config.applyFeatureLayerAnimation(layerData, time);
       return;
     }
-    if (!layerData.animations?.length && !config.hasPointKeyframes(layerData)) {
+    const isPreviewing = isPlaying || isScrubbingTimeline;
+    const hasRealAnimations = layerData.animations?.some((anim) => anim.type !== "__placeholder__") ?? false;
+    if (!hasRealAnimations && !config.hasPointKeyframes(layerData)) {
+      layerData.layer.opacity = 1;
+      return;
+    }
+    if (!isPreviewing) {
+      layerData.layer.opacity = 1;
+      layerData.layer.graphics.forEach((graphic: any) => {
+        if (graphic.__originalGeometry) {
+          graphic.geometry = graphic.__originalGeometry.clone();
+        }
+      });
+      if (layerData.type === "point") {
+        const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
+        const baseAngle = layerData.pointStyle?.angle ?? 0;
+        layerData.layer.graphics.forEach((graphic: any) => {
+          if (!graphic?.symbol || graphic.symbol.type !== "simple-marker") return;
+          const symbol = graphic.symbol.clone();
+          symbol.size = baseSize;
+          symbol.angle = baseAngle;
+          graphic.symbol = symbol;
+        });
+      }
+      if (layerData.type === "text") {
+        const baseText = layerData.textContent || "Text";
+        const baseSize = layerData.textSize ?? 14;
+        layerData.layer.graphics.forEach((graphic: any) => {
+          if (!graphic?.symbol || graphic.symbol.type !== "text") return;
+          const symbol = graphic.symbol.clone();
+          symbol.text = baseText;
+          symbol.font = symbol.font || { size: baseSize, family: "sans-serif" };
+          symbol.font.size = baseSize;
+          graphic.symbol = symbol;
+        });
+      }
+      if (config.hasPointKeyframes(layerData)) {
+        applyPointKeyframes(layerData, time, config.getPointKeyframeAtTime);
+      }
       return;
     }
     let layerVisible = false;
