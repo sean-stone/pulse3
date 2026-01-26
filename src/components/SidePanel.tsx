@@ -8,13 +8,13 @@ function SidePanel() {
 
       <div id="primary-controls">
         <div className="panel-header" id="panel-header">
-          <div className="panel-title">Pulse 3.1.0</div>
+          <div className="panel-title">Pulse 3.2.0</div>
           <a
             className="panel-github-link"
             href="https://github.com/sean-stone/pulse3"
             target="_blank"
             rel="noreferrer"
-            aria-label="Pulse 3.1.0 on GitHub"
+            aria-label="Pulse 3.2.0 on GitHub"
             title="View on GitHub"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">

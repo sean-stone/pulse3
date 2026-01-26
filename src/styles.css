@@ -535,6 +535,50 @@ arcgis-map {
   gap: 12px;
 }
 
+.style-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.style-grid-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.style-grid-label {
+  font-weight: 600;
+}
+
+.style-grid-control {
+  width: 100%;
+}
+
+.style-grid-colors {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.style-grid-color {
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .style-grid-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .style-grid-colors {
+    justify-content: flex-start;
+  }
+}
+
 .color-alpha-input {
   width: 72px;
 }
@@ -713,6 +757,15 @@ arcgis-map {
   margin-top: 6px;
 }
 
+.style-option-section-title {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  margin-top: 6px;
+}
+
 .style-option-btn {
   font-size: 12px;
   border: 1px solid var(--color-border);
@@ -851,6 +904,14 @@ arcgis-map {
   flex: 0 0 auto;
 }
 
+.point-style-swatch-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--preview-point-color, var(--color-primary));
+  fill: currentColor;
+  flex: 0 0 auto;
+}
+
 .point-style-swatch--square {
   border-radius: 2px;
 }
@@ -910,6 +971,56 @@ arcgis-map {
     2% 35%,
     39% 35%
   );
+}
+
+.point-style-swatch--hexagon {
+  border-radius: 0;
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+.point-style-swatch--pentagon {
+  border-radius: 0;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.point-style-swatch--octagon {
+  border-radius: 0;
+  clip-path: polygon(
+    30% 0%,
+    70% 0%,
+    100% 30%,
+    100% 70%,
+    70% 100%,
+    30% 100%,
+    0% 70%,
+    0% 30%
+  );
+}
+
+.point-style-swatch--heart {
+  border-radius: 0;
+  clip-path: polygon(
+    50% 10%,
+    61% 0%,
+    80% 0%,
+    100% 20%,
+    100% 45%,
+    50% 100%,
+    0% 45%,
+    0% 20%,
+    20% 0%,
+    39% 0%
+  );
+}
+
+.point-style-swatch--drop {
+  border-radius: 0;
+  clip-path: polygon(50% 0%, 80% 30%, 90% 60%, 50% 100%, 10% 60%, 20% 30%);
+}
+
+.point-style-swatch--shield {
+  border-radius: 0;
+  clip-path: polygon(50% 0%, 90% 15%, 90% 55%, 50% 100%, 10% 55%, 10% 15%);
 }
 
 .point-style-swatch--home {
@@ -1328,6 +1439,20 @@ calcite-accordion-item::part(toggle-icon) {
   box-shadow: 0 0 0 1px var(--preview-outline-color, rgba(10, 76, 102, 0.25));
 }
 
+.animation-type-preview--icon {
+  background: none;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.animation-type-preview--icon svg {
+  width: 12px;
+  height: 12px;
+  fill: var(--preview-color, var(--color-primary));
+}
+
 .animation-type-preview--point.point-style-circle {
   border-radius: 999px;
 }
@@ -1397,6 +1522,62 @@ calcite-accordion-item::part(toggle-icon) {
     39% 35%
   );
   background: var(--preview-color, var(--color-primary));
+}
+
+.animation-type-preview--point.point-style-hexagon {
+  background: var(--preview-color, var(--color-primary));
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+  box-shadow: none;
+}
+
+.animation-type-preview--point.point-style-pentagon {
+  background: var(--preview-color, var(--color-primary));
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+  box-shadow: none;
+}
+
+.animation-type-preview--point.point-style-octagon {
+  background: var(--preview-color, var(--color-primary));
+  clip-path: polygon(
+    30% 0%,
+    70% 0%,
+    100% 30%,
+    100% 70%,
+    70% 100%,
+    30% 100%,
+    0% 70%,
+    0% 30%
+  );
+  box-shadow: none;
+}
+
+.animation-type-preview--point.point-style-heart {
+  background: var(--preview-color, var(--color-primary));
+  clip-path: polygon(
+    50% 10%,
+    61% 0%,
+    80% 0%,
+    100% 20%,
+    100% 45%,
+    50% 100%,
+    0% 45%,
+    0% 20%,
+    20% 0%,
+    39% 0%
+  );
+  box-shadow: none;
+}
+
+.animation-type-preview--point.point-style-drop {
+  background: var(--preview-color, var(--color-primary));
+  clip-path: polygon(50% 0%, 80% 30%, 90% 60%, 50% 100%, 10% 60%, 20% 30%);
+  box-shadow: none;
+}
+
+.animation-type-preview--point.point-style-shield {
+  background: var(--preview-color, var(--color-primary));
+  clip-path: polygon(50% 0%, 90% 15%, 90% 55%, 50% 100%, 10% 55%, 10% 15%);
+  box-shadow: none;
 }
 
 .animation-type-preview--point.point-style-home {
