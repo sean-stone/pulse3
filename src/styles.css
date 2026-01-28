@@ -572,6 +572,20 @@ arcgis-map {
   --calcite-dialog-max-size-y: 100%;
 }
 
+body.is-mobile #ai-ask-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  --calcite-dialog-size-x: 100%;
+  --calcite-dialog-size-y: 100%;
+  --calcite-dialog-max-size-x: 100%;
+  --calcite-dialog-max-size-y: 100%;
+  --calcite-dialog-scrim-background-color: rgba(0, 0, 0, 0.35);
+}
+
 .dialog-footer {
   display: flex;
   gap: 8px;

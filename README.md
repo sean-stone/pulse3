@@ -1,5 +1,5 @@
-# Pulse 3.3.1
-Pulse 3.3.1 is a Vite + React application for building and previewing animated
+# Pulse 3.3.2
+Pulse 3.3.2 is a Vite + React application for building and previewing animated
 map layers. It uses the ArcGIS Maps SDK for JavaScript and Calcite UI components to handle
 mapping, layer styling, and timeline-based animation controls.
 
@@ -152,7 +152,7 @@ Pulse includes an AI prompt flow that generates a `ProjectSnapshot` via `agent/a
 
 Environment variables:
 - `OPENAI_API_KEY` (required)
-- `OPENAI_MODEL` (optional, defaults to `gpt-4.1-mini`)
+- `OPENAI_MODEL` (optional, defaults to `gpt-5-mini`)
 - `PULSE_ALLOWED_ORIGIN` (optional, for CORS during dev)
 - `PULSE_SHARED_SECRET` (optional, shared-secret header gate)
 
@@ -192,7 +192,7 @@ This app uses **two** places for secrets:
 ```apacheconf
 # .htaccess (webspace)
 SetEnv OPENAI_API_KEY "your_openai_key_here"
-SetEnv OPENAI_MODEL "gpt-4.1-mini"
+SetEnv OPENAI_MODEL "gpt-5-mini"
 SetEnv PULSE_ALLOWED_ORIGIN "https://seanst.one"
 SetEnv PULSE_SHARED_SECRET "your_long_random_string"
 #SetEnv ARCGIS_API_KEY "your_arcgis_key_here"

@@ -983,6 +983,7 @@ function setupEventListeners() {
 
   getEl("ai-ask-btn").addEventListener("click", openAiModal);
   getEl("ai-cancel-btn").addEventListener("click", closeAiModal);
+  getEl("ai-clear-btn").addEventListener("click", clearAiPrompt);
   getEl("ai-generate-btn").addEventListener("click", handleAiGenerate);
   getEl("ai-prompt-input").addEventListener("keydown", (event: KeyboardEvent) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -2887,18 +2888,31 @@ function setAiError(message: string | null) {
   errorEl.textContent = message;
 }
 
+function clearAiPrompt() {
+  const promptInput = getEl("ai-prompt-input") as any;
+  if (promptInput) {
+    promptInput.value = "";
+  }
+  window.localStorage?.removeItem(aiPromptStorageKey);
+  setAiError(null);
+  promptInput?.focus?.();
+}
+
 function setAiLoading(loading: boolean) {
   const generateBtn = getEl("ai-generate-btn");
   const cancelBtn = getEl("ai-cancel-btn");
+  const clearBtn = getEl("ai-clear-btn");
   const promptInput = getEl("ai-prompt-input");
   if (loading) {
     generateBtn.setAttribute("disabled", "");
     cancelBtn.setAttribute("disabled", "");
+    clearBtn.setAttribute("disabled", "");
     promptInput.setAttribute("disabled", "");
     generateBtn.textContent = "Generating...";
   } else {
     generateBtn.removeAttribute("disabled");
     cancelBtn.removeAttribute("disabled");
+    clearBtn.removeAttribute("disabled");
     promptInput.removeAttribute("disabled");
     generateBtn.textContent = "Generate";
   }

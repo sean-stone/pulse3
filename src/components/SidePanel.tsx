@@ -8,7 +8,7 @@ function SidePanel() {
 
       <div id="primary-controls">
         <div className="panel-header" id="panel-header">
-          <div className="panel-title">Pulse 3.3.1</div>
+          <div className="panel-title">Pulse 3.3.2</div>
           <div className="panel-header-actions">
             <calcite-button
               id="ai-ask-btn"
@@ -23,7 +23,7 @@ function SidePanel() {
               href="https://github.com/sean-stone/pulse3"
               target="_blank"
               rel="noreferrer"
-              aria-label="Pulse 3.3.1 on GitHub"
+              aria-label="Pulse 3.3.2 on GitHub"
               title="View on GitHub"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">

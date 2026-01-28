@@ -1173,6 +1173,9 @@ function Modals() {
           <calcite-button id="ai-cancel-btn" appearance="outline">
             Cancel
           </calcite-button>
+          <calcite-button id="ai-clear-btn" appearance="outline">
+            Clear
+          </calcite-button>
           <calcite-button id="ai-generate-btn">
             Generate
           </calcite-button>
