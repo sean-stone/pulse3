@@ -140,7 +140,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
       const geometries = explodeGeoJsonGeometry(geometry);
       const properties = { ...(graphic.attributes ?? {}) };
       properties._pulse = { layerId };
-      geometries.forEach((geom) => {
+      geometries.forEach((geom: any) => {
         features.push({
           type: "Feature",
           geometry: geom,
