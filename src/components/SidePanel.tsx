@@ -8,21 +8,31 @@ function SidePanel() {
 
       <div id="primary-controls">
         <div className="panel-header" id="panel-header">
-          <div className="panel-title">Pulse 3.2.1</div>
-          <a
-            className="panel-github-link"
-            href="https://github.com/sean-stone/pulse3"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Pulse 3.2.1 on GitHub"
-            title="View on GitHub"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M12 1.5c-5.8 0-10.5 4.7-10.5 10.5 0 4.6 3 8.5 7.1 9.9.5.1.7-.2.7-.5v-2.1c-2.9.6-3.5-1.2-3.5-1.2-.5-1.1-1.2-1.4-1.2-1.4-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 .1 1.6.7 1.9 1.2.1-.8.4-1.4.7-1.7-2.3-.2-4.6-1.1-4.6-5.1 0-1.1.4-2 1.1-2.8-.1-.2-.5-1.3.1-2.7 0 0 .9-.3 2.8 1.1.8-.2 1.7-.3 2.6-.3s1.8.1 2.6.3c1.9-1.4 2.8-1.1 2.8-1.1.6 1.4.2 2.5.1 2.7.7.7 1.1 1.7 1.1 2.8 0 4-2.3 4.9-4.6 5.1.4.3.8 1 .8 2v3c0 .3.2.6.7.5 4.2-1.4 7.1-5.3 7.1-9.9 0-5.8-4.7-10.5-10.5-10.5z"
-              />
-            </svg>
-          </a>
+          <div className="panel-title">Pulse 3.3.1</div>
+          <div className="panel-header-actions">
+            <calcite-button
+              id="ai-ask-btn"
+              scale="s"
+              appearance="solid"
+              className="panel-ai-btn"
+            >
+              AI Animation Agent
+            </calcite-button>
+            <a
+              className="panel-github-link"
+              href="https://github.com/sean-stone/pulse3"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Pulse 3.3.1 on GitHub"
+              title="View on GitHub"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 1.5c-5.8 0-10.5 4.7-10.5 10.5 0 4.6 3 8.5 7.1 9.9.5.1.7-.2.7-.5v-2.1c-2.9.6-3.5-1.2-3.5-1.2-.5-1.1-1.2-1.4-1.2-1.4-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 .1 1.6.7 1.9 1.2.1-.8.4-1.4.7-1.7-2.3-.2-4.6-1.1-4.6-5.1 0-1.1.4-2 1.1-2.8-.1-.2-.5-1.3.1-2.7 0 0 .9-.3 2.8 1.1.8-.2 1.7-.3 2.6-.3s1.8.1 2.6.3c1.9-1.4 2.8-1.1 2.8-1.1.6 1.4.2 2.5.1 2.7.7.7 1.1 1.7 1.1 2.8 0 4-2.3 4.9-4.6 5.1.4.3.8 1 .8 2v3c0 .3.2.6.7.5 4.2-1.4 7.1-5.3 7.1-9.9 0-5.8-4.7-10.5-10.5-10.5z"
+                />
+              </svg>
+            </a>
+          </div>
         </div>
 
         <div className="primary-action-bar">

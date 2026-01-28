@@ -6,6 +6,7 @@ import Graphic from "@arcgis/core/Graphic";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Sketch from "@arcgis/core/widgets/Sketch";
+import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 
 import { animationTypes } from "./animationTypes";
 import { applyAnimationsAtTime as applyAnimationsAtTimeFromState } from "./app/animationPlayback";
@@ -108,6 +109,8 @@ let projectSaveTimer: number | null = null;
 let pendingTextPlacement: { layerIndex: number } | null = null;
 let textPlacementHandle: { remove: () => void } | null = null;
 let activeTextLayerIndex: number | null = null;
+const aiPromptStorageKey = "pulse.ai.lastPrompt";
+const aiModelStorageKey = "pulse.ai.lastModel";
 let sketch: Sketch | null = null;
 let sketchHasUpdateHandler = false;
 let currentAspectRatio: { width: number; height: number } | null = null;
@@ -172,6 +175,7 @@ const timelineController = createTimelineController(timelineState, {
   updateAnimationOptions,
   updateExportWarning,
   selectLayer,
+  moveLayer,
   removeLayer,
   duplicateLayer,
   zoomToLayer: (layerData) => zoomToLayerRef(layerData),
@@ -880,6 +884,18 @@ function arcgisGeometryToGeoJSON(geometry: any) {
   return null;
 }
 
+function toGeographicGeometry(geometry: any) {
+  if (!geometry) return geometry;
+  const spatialRef = geometry.spatialReference;
+  if (spatialRef?.isGeographic || spatialRef?.wkid === 4326) {
+    return geometry;
+  }
+  if (spatialRef?.isWebMercator) {
+    return webMercatorUtils.webMercatorToGeographic(geometry);
+  }
+  return geometry;
+}
+
 function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   if (!geometry) return null;
   if (geometry.type === "Point") {
@@ -965,6 +981,15 @@ function setupEventListeners() {
 
   getEl("basemap-select").addEventListener("calciteSelectChange", handleBasemapChange as EventListener);
 
+  getEl("ai-ask-btn").addEventListener("click", openAiModal);
+  getEl("ai-cancel-btn").addEventListener("click", closeAiModal);
+  getEl("ai-generate-btn").addEventListener("click", handleAiGenerate);
+  getEl("ai-prompt-input").addEventListener("keydown", (event: KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      void handleAiGenerate();
+    }
+  });
 
   getEl("style-confirm").addEventListener("click", confirmStyleSettings);
   getEl("text-settings-confirm").addEventListener("click", confirmTextSettings);
@@ -1660,7 +1685,7 @@ function beginTextPlacement(layerIndex: number) {
 
   textPlacementHandle = view.on("click", (event: any) => {
     const graphic = new Graphic({
-      geometry: event.mapPoint,
+      geometry: toGeographicGeometry(event.mapPoint),
       symbol: {
         type: "text",
         text: layerData.textContent || "Text",
@@ -1761,6 +1786,7 @@ async function startDrawing(type: LayerType) {
     sketch.on("create", (event: any) => {
       if (event.state === "complete") {
         const graphic = event.graphic;
+        graphic.geometry = toGeographicGeometry(graphic.geometry);
             if (type === "point") {
               const style = layerData.pointStyle ?? defaultPointStyle;
               graphic.symbol = buildPointSymbol(style);
@@ -2014,6 +2040,44 @@ async function removeLayer(index: number, options?: { confirmHostId?: string }) 
   updateTimeline();
   updateAnimationOptions();
   scheduleProjectSave();
+}
+
+function moveLayer(index: number, direction: -1 | 1) {
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || index >= graphicsLayers.length || nextIndex >= graphicsLayers.length) {
+    return;
+  }
+  const temp = graphicsLayers[index];
+  graphicsLayers[index] = graphicsLayers[nextIndex];
+  graphicsLayers[nextIndex] = temp;
+
+  if (selectedLayerIndex === index) {
+    selectedLayerIndex = nextIndex;
+  } else if (selectedLayerIndex === nextIndex) {
+    selectedLayerIndex = index;
+  }
+
+  if (timelineState.selectedTimelineAnimation) {
+    if (timelineState.selectedTimelineAnimation.layerIdx === index) {
+      timelineState.selectedTimelineAnimation.layerIdx = nextIndex;
+    } else if (timelineState.selectedTimelineAnimation.layerIdx === nextIndex) {
+      timelineState.selectedTimelineAnimation.layerIdx = index;
+    }
+  }
+
+  if (view?.map?.reorder) {
+    graphicsLayers.forEach((layerData, layerIdx) => {
+      view.map.reorder(layerData.layer, layerIdx);
+    });
+  }
+
+  updateLayersList();
+  updateTimeline();
+  updateAnimationOptions();
+  scheduleProjectSave();
+  if (selectedLayerIndex >= 0) {
+    scrollTimelineToLayer(selectedLayerIndex);
+  }
 }
 
 function getDuplicateLayerName(base: string) {
@@ -2466,6 +2530,7 @@ function handleSketchUpdate(event: any) {
   if (event.state !== "complete") return;
   const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
   graphics.forEach((graphic: any) => {
+    graphic.geometry = toGeographicGeometry(graphic.geometry);
     const layerData = graphicsLayers.find((entry) => entry.layer === graphic.layer);
     if (!layerData) return;
     refreshGeometryCache(layerData, graphic);
@@ -2789,6 +2854,101 @@ function openTextSettingsModal() {
   activeTextLayerIndex = selectedLayerIndex;
 
   (getEl("text-settings-modal") as any).open = true;
+}
+
+function openAiModal() {
+  setAiError(null);
+  const modal = getEl("ai-ask-modal") as any;
+  modal.open = true;
+  const input = getEl("ai-prompt-input") as any;
+  const lastPrompt = window.localStorage?.getItem(aiPromptStorageKey);
+  if (lastPrompt) {
+    input.value = lastPrompt;
+  }
+  const modelNote = document.getElementById("ai-model-note");
+  if (modelNote) {
+    const lastModel = window.localStorage?.getItem(aiModelStorageKey);
+    const modelLabel = lastModel ? `Using ChatGPT Model ${lastModel}` : "Using ChatGPT Model (server configured)";
+    modelNote.textContent = `${modelLabel} and will create a new project each time.`;
+  }
+  setTimeout(() => input?.focus?.(), 0);
+}
+
+function closeAiModal() {
+  closeModal("ai-ask-modal");
+}
+
+function setAiError(message: string | null) {
+  const errorEl = getEl("ai-error");
+  if (!message) {
+    errorEl.textContent = "";
+    return;
+  }
+  errorEl.textContent = message;
+}
+
+function setAiLoading(loading: boolean) {
+  const generateBtn = getEl("ai-generate-btn");
+  const cancelBtn = getEl("ai-cancel-btn");
+  const promptInput = getEl("ai-prompt-input");
+  if (loading) {
+    generateBtn.setAttribute("disabled", "");
+    cancelBtn.setAttribute("disabled", "");
+    promptInput.setAttribute("disabled", "");
+    generateBtn.textContent = "Generating...";
+  } else {
+    generateBtn.removeAttribute("disabled");
+    cancelBtn.removeAttribute("disabled");
+    promptInput.removeAttribute("disabled");
+    generateBtn.textContent = "Generate";
+  }
+}
+
+async function handleAiGenerate() {
+  const promptInput = getEl("ai-prompt-input") as any;
+  const prompt = String(promptInput?.value || "").trim();
+  if (!prompt) {
+    setAiError("Enter a description to continue.");
+    return;
+  }
+
+  setAiError(null);
+  setAiLoading(true);
+
+  try {
+    const base = (import.meta as any).env?.BASE_URL || "/";
+    const endpoint = (import.meta as any).env?.DEV
+      ? "http://localhost:8000/agent/anim.php"
+      : `${base.replace(/\/?$/, "/")}anim.php`;
+    const sharedToken = (import.meta as any).env?.VITE_PULSE_SHARED_SECRET;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (sharedToken) {
+      headers["X-Pulse-Token"] = String(sharedToken);
+    }
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt })
+    });
+    const modelHeader = response.headers.get("X-OpenAI-Model");
+    if (modelHeader) {
+      window.localStorage?.setItem(aiModelStorageKey, modelHeader);
+    }
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = data?.error || `Request failed (${response.status})`;
+      setAiError(message);
+      return;
+    }
+    await applyProjectSnapshot(data);
+    window.localStorage?.setItem(aiPromptStorageKey, prompt);
+    promptInput.value = "";
+    closeAiModal();
+  } catch (error) {
+    setAiError("Request failed. Please try again.");
+  } finally {
+    setAiLoading(false);
+  }
 }
 
 function confirmTextSettings() {

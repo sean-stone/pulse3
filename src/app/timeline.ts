@@ -53,6 +53,7 @@ export type TimelineConfig = {
   updateAnimationOptions: () => void;
   updateExportWarning: () => void;
   selectLayer: (layerIdx: number, shouldFocus?: boolean) => void;
+  moveLayer: (layerIdx: number, direction: -1 | 1) => void;
   removeLayer: (layerIdx: number, options?: { confirmHostId?: string }) => void;
   duplicateLayer: (layerIdx: number) => Promise<void>;
   zoomToLayer: (layerData: LayerData) => void;
@@ -434,9 +435,49 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
         label.classList.add("selected");
       }
 
+      const reorder = document.createElement("div");
+      reorder.className = "timeline-layer-reorder";
+
+      const moveUpButton = document.createElement("calcite-button");
+      moveUpButton.className = "timeline-move-layer-btn timeline-move-layer-up";
+      moveUpButton.setAttribute("appearance", "transparent");
+      moveUpButton.setAttribute("scale", "s");
+      moveUpButton.setAttribute("icon-start", "chevron-up");
+      moveUpButton.title = "Move layer up";
+      moveUpButton.setAttribute("aria-label", "Move layer up");
+      if (layerIndex <= 0) {
+        moveUpButton.setAttribute("disabled", "true");
+      }
+      moveUpButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (layerIndex > 0) {
+          config.moveLayer(layerIndex, -1);
+        }
+      });
+      reorder.appendChild(moveUpButton);
+
+      const moveDownButton = document.createElement("calcite-button");
+      moveDownButton.className = "timeline-move-layer-btn timeline-move-layer-down";
+      moveDownButton.setAttribute("appearance", "transparent");
+      moveDownButton.setAttribute("scale", "s");
+      moveDownButton.setAttribute("icon-start", "chevron-down");
+      moveDownButton.title = "Move layer down";
+      moveDownButton.setAttribute("aria-label", "Move layer down");
+      if (layerIndex >= config.getGraphicsLayers().length - 1) {
+        moveDownButton.setAttribute("disabled", "true");
+      }
+      moveDownButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (layerIndex < config.getGraphicsLayers().length - 1) {
+          config.moveLayer(layerIndex, 1);
+        }
+      });
+      reorder.appendChild(moveDownButton);
+
       const name = document.createElement("span");
       name.className = "timeline-layer-name";
       name.textContent = layerData.name;
+      label.appendChild(reorder);
 
       const startRename = () => {
         const input = document.createElement("calcite-input") as any;
@@ -555,6 +596,11 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
           }
         });
         actions.appendChild(keyframeButton);
+      } else {
+        const keyframePlaceholder = document.createElement("span");
+        keyframePlaceholder.className = "timeline-keyframe-placeholder";
+        keyframePlaceholder.setAttribute("aria-hidden", "true");
+        actions.appendChild(keyframePlaceholder);
       }
 
       label.appendChild(actions);

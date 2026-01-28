@@ -1144,6 +1144,42 @@ function Modals() {
       </calcite-dialog>
 
       <calcite-dialog
+        id="ai-ask-modal"
+        heading="AI Animation Agent"
+        scale="s"
+        overlay-positioning="absolute"
+        placement="center"
+        embedded
+      >
+        <div className="ai-dialog-body">
+          <p className="ai-dialog-help">
+            Describe the animation you want. The AI will replace the current project with a new one.
+          </p>
+          <p id="ai-model-note" className="ai-dialog-note">
+            Using ChatGPT Model (server configured) and will create a new project each time.
+          </p>
+          <calcite-label>
+            Animation request
+            <calcite-text-area
+              id="ai-prompt-input"
+              placeholder="Example: A blue point moves east for 5 seconds, then fades out."
+              max-length="4000"
+              scale="s"
+            ></calcite-text-area>
+          </calcite-label>
+          <div id="ai-error" className="ai-error" role="status" aria-live="polite"></div>
+        </div>
+        <div slot="footer" className="dialog-footer">
+          <calcite-button id="ai-cancel-btn" appearance="outline">
+            Cancel
+          </calcite-button>
+          <calcite-button id="ai-generate-btn">
+            Generate
+          </calcite-button>
+        </div>
+      </calcite-dialog>
+
+      <calcite-dialog
         id="confirm-dialog"
         heading="Confirm"
         scale="s"

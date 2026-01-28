@@ -33,7 +33,11 @@ const updatePolylineDraw = (
 
     const original = graphic.__originalGeometry as Polyline;
     if (!isPlaying && !isScrubbingTimeline) {
-      graphic.geometry = original.clone();
+      const displayGeometry = (original.spatialReference as any)?.isGeographic
+        ? (graphic.__densifiedGeometry ?? densifyPolyline(original))
+        : original;
+      graphic.__densifiedGeometry = displayGeometry;
+      graphic.geometry = displayGeometry.clone();
       return;
     }
     const densified = graphic.__densifiedGeometry ?? densifyPolyline(original);
@@ -47,7 +51,8 @@ const updatePolylineDraw = (
     }
 
     if (time > maxDrawEnd) {
-      graphic.geometry = original.clone();
+      const displayGeometry = (original.spatialReference as any)?.isGeographic ? densified : original;
+      graphic.geometry = displayGeometry.clone();
     } else if (time < maxDrawEnd) {
       graphic.geometry = buildPartialPolyline(densified, 0, false);
     }

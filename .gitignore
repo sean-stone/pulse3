@@ -6,3 +6,4 @@ public/assets/**/calcite*
 test-results/
 public/
 *.tsbuildinfo
+.env

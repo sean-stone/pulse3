@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "php:serve": "php -S localhost:8000 -t .",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "postinstall": "node ./scripts/copy-arcgis-assets.cjs",
