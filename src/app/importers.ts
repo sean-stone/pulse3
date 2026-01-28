@@ -1,6 +1,7 @@
 import Point from "@arcgis/core/geometry/Point";
 import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
+import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 import type Graphic from "@arcgis/core/Graphic";
 
 import type { LayerData, LayerType } from "../types";
@@ -48,33 +49,71 @@ const importGeoJson = (config: ImportConfig, fileName: string, content: string) 
     feature: []
   };
 
+  const isLikelyWebMercator = (coords: number[]) => {
+    const [x, y] = coords;
+    return Math.abs(x) > 180 || Math.abs(y) > 90;
+  };
+
+  const normalizeGeometry = (geometry: any, spatialReference: any) => {
+    if (!geometry) return geometry;
+    if (geometry.spatialReference?.isWebMercator) {
+      return webMercatorUtils.webMercatorToGeographic(geometry);
+    }
+    if (spatialReference?.isWebMercator) {
+      return webMercatorUtils.webMercatorToGeographic(geometry);
+    }
+    return geometry;
+  };
+
   const pushGeometry = (geometry: any, properties?: Record<string, any>) => {
     if (!geometry) return;
     const type = geometry.type;
     const coords = geometry.coordinates;
-    const spatialReference = { wkid: 4326 };
     const addGraphic = (layerType: LayerType, geom: any) => {
       const graphic = config.createGraphicForType(layerType, geom, properties);
       graphicsByType[layerType].push(graphic);
     };
 
+    const addPoint = (point: number[]) => {
+      const sr = isLikelyWebMercator(point) ? { wkid: 3857 } : { wkid: 4326 };
+      let geom = new Point({ x: point[0], y: point[1], spatialReference: sr });
+      geom = normalizeGeometry(geom, sr);
+      addGraphic("point", geom);
+    };
+
+    const addLine = (path: number[][]) => {
+      const first = path?.[0] ?? [0, 0];
+      const sr = isLikelyWebMercator(first) ? { wkid: 3857 } : { wkid: 4326 };
+      let geom = new Polyline({ paths: [path], spatialReference: sr });
+      geom = normalizeGeometry(geom, sr);
+      addGraphic("polyline", geom);
+    };
+
+    const addPolygon = (rings: number[][][]) => {
+      const first = rings?.[0]?.[0] ?? [0, 0];
+      const sr = isLikelyWebMercator(first) ? { wkid: 3857 } : { wkid: 4326 };
+      let geom = new Polygon({ rings, spatialReference: sr });
+      geom = normalizeGeometry(geom, sr);
+      addGraphic("polygon", geom);
+    };
+
     if (type === "Point") {
-      addGraphic("point", new Point({ x: coords[0], y: coords[1], spatialReference }));
+      addPoint(coords);
     } else if (type === "MultiPoint") {
       coords.forEach((point: number[]) => {
-        addGraphic("point", new Point({ x: point[0], y: point[1], spatialReference }));
+        addPoint(point);
       });
     } else if (type === "LineString") {
-      addGraphic("polyline", new Polyline({ paths: [coords], spatialReference }));
+      addLine(coords);
     } else if (type === "MultiLineString") {
       coords.forEach((path: number[][]) => {
-        addGraphic("polyline", new Polyline({ paths: [path], spatialReference }));
+        addLine(path);
       });
     } else if (type === "Polygon") {
-      addGraphic("polygon", new Polygon({ rings: coords, spatialReference }));
+      addPolygon(coords);
     } else if (type === "MultiPolygon") {
       coords.forEach((rings: number[][][]) => {
-        addGraphic("polygon", new Polygon({ rings, spatialReference }));
+        addPolygon(rings);
       });
     }
   };

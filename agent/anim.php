@@ -301,7 +301,7 @@ if (function_exists("apcu_fetch")) {
     }
 }
 
-$model = getenv("OPENAI_MODEL") ?: "gpt-5-mini";
+$model = getenv("OPENAI_MODEL") ?: "gpt-4.1-mini";
 header("X-OpenAI-Model: " . $model);
 
 $schema = [

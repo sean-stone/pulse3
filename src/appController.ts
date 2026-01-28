@@ -1,5 +1,6 @@
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 import Point from "@arcgis/core/geometry/Point";
+import Multipoint from "@arcgis/core/geometry/Multipoint";
 import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import Graphic from "@arcgis/core/Graphic";
@@ -867,8 +868,14 @@ export function getAnimationSettingsSnapshot() {
 
 function arcgisGeometryToGeoJSON(geometry: any) {
   if (!geometry) return null;
+  if (geometry.spatialReference?.isWebMercator) {
+    geometry = webMercatorUtils.webMercatorToGeographic(geometry);
+  }
   if (geometry.type === "point") {
     return { type: "Point", coordinates: [geometry.x, geometry.y] };
+  }
+  if (geometry.type === "multipoint") {
+    return { type: "MultiPoint", coordinates: geometry.points ?? [] };
   }
   if (geometry.type === "polyline") {
     const paths = geometry.paths ?? [];
@@ -879,6 +886,9 @@ function arcgisGeometryToGeoJSON(geometry: any) {
   }
   if (geometry.type === "polygon") {
     const rings = geometry.rings ?? [];
+    if (geometry.isMultipart && rings.length > 1) {
+      return { type: "MultiPolygon", coordinates: rings.map((ring: any) => [ring]) };
+    }
     return { type: "Polygon", coordinates: rings };
   }
   return null;
@@ -901,6 +911,9 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   if (geometry.type === "Point") {
     const [x, y] = geometry.coordinates ?? [];
     return new Point({ x, y, spatialReference });
+  }
+  if (geometry.type === "MultiPoint") {
+    return new Multipoint({ points: geometry.coordinates ?? [], spatialReference });
   }
   if (geometry.type === "LineString") {
     return new Polyline({ paths: [geometry.coordinates ?? []], spatialReference });

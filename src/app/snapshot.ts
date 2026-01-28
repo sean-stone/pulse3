@@ -65,10 +65,37 @@ type SnapshotApplyConfig = {
   scheduleProjectSave: () => void;
 };
 
+const explodeGeoJsonGeometry = (geometry: any) => {
+  if (!geometry || typeof geometry.type !== "string") return [];
+  if (geometry.type === "MultiPoint") {
+    return (geometry.coordinates ?? []).map((coords: any) => ({
+      type: "Point",
+      coordinates: coords
+    }));
+  }
+  if (geometry.type === "MultiLineString") {
+    return (geometry.coordinates ?? []).map((coords: any) => ({
+      type: "LineString",
+      coordinates: coords
+    }));
+  }
+  if (geometry.type === "MultiPolygon") {
+    return (geometry.coordinates ?? []).map((coords: any) => ({
+      type: "Polygon",
+      coordinates: coords
+    }));
+  }
+  return [geometry];
+};
+
 const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | null => {
   if (!config.view) return null;
-  const spatialReference = config.view.spatialReference
-    ? { wkid: config.view.spatialReference.wkid }
+  const spatialReference = config.view?.spatialReference
+    ? {
+        wkid: config.view.spatialReference.isWebMercator
+          ? 4326
+          : config.view.spatialReference.wkid
+      }
     : undefined;
 
   const layers: ProjectLayerSnapshot[] = config.graphicsLayers.map((layerData, index) => ({
@@ -110,12 +137,15 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           : graphic.geometry;
       const geometry = config.arcgisGeometryToGeoJSON(sourceGeometry);
       if (!geometry) return;
+      const geometries = explodeGeoJsonGeometry(geometry);
       const properties = { ...(graphic.attributes ?? {}) };
       properties._pulse = { layerId };
-      features.push({
-        type: "Feature",
-        geometry,
-        properties
+      geometries.forEach((geom) => {
+        features.push({
+          type: "Feature",
+          geometry: geom,
+          properties
+        });
       });
     });
   });
