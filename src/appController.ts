@@ -4,6 +4,7 @@ import Multipoint from "@arcgis/core/geometry/Multipoint";
 import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import Graphic from "@arcgis/core/Graphic";
+import Color from "@arcgis/core/Color";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Sketch from "@arcgis/core/widgets/Sketch";
@@ -206,8 +207,11 @@ let exportDownloadExtension: string | null = null;
 let exportDefaultPreview: { type: "image" | "video"; src: string } | null = null;
 let exportCancelRequested = false;
 let exportResolutionRestore: (() => void) | null = null;
+let exportConstraintRestore: (() => void) | null = null;
 let activeGifEncoder: any | null = null;
 let exportExtentSnapshot: any | null = null;
+let preExportExtentSnapshot: any | null = null;
+let preExportViewpoint: any | null = null;
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoaded = false;
 let pendingImportType: "geojson" | "csv" | null = null;
@@ -563,6 +567,7 @@ async function applyProjectSnapshot(snapshot: unknown) {
 const storageConfig = {
   setProjectStatus,
   setProjectError,
+  setProjectStorageWarning,
   updateRecentProjectsUI,
   applyProjectSnapshot,
   buildProjectSnapshot: () => buildProjectSnapshotRef()
@@ -617,6 +622,17 @@ function setProjectStatus(state: "saved" | "dirty") {
     }, 250);
   } else {
     applyStatus();
+  }
+}
+
+function setProjectStorageWarning(visible: boolean) {
+  const warning = document.getElementById("project-status-warning");
+  if (!warning) return;
+  warning.toggleAttribute("hidden", !visible);
+  if (visible) {
+    const message = "Storage full. Export to GeoJSON to save.";
+    warning.setAttribute("title", message);
+    warning.setAttribute("aria-label", message);
   }
 }
 
@@ -704,7 +720,7 @@ function setGifPreview(src: string, mode: "gif" | "frame", type: "image" | "vide
       video.onerror = () => {
         if (exportDownloadExtension !== "mp4") return;
         setGifExportStatus(
-          'looks like codecs are not available. Try refreshing the page and exporting again. <a href="https://support.microsoft.com/en-us/windows/codecs-in-windows-10-what-are-codecs-84255ecf-1e1d-419e-8b5f-1321b4ee21b9" target="_blank" rel="noreferrer">Learn about codecs</a>',
+          'looks like codecs are not available. Try refreshing the page and exporting again.',
           true
         );
       };
@@ -854,6 +870,131 @@ function updateExportResolutionLabel(viewAny: any) {
   }
 }
 
+function getBasemapBackgroundColor() {
+  const input = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
+  const raw = input?.value || "#ffffff";
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : "#ffffff";
+}
+
+function getBasemapBackgroundTransparent() {
+  const input = document.getElementById("basemap-bg-transparent") as HTMLInputElement | null;
+  return Boolean(input?.checked);
+}
+
+function handleBasemapBackgroundChange(forcedColor?: string) {
+  const select = document.getElementById("basemap-select") as any;
+  const rawValue = String(select?.value || "");
+  const normalized = normalizeBasemap(rawValue || "gray-vector");
+  const isNone = rawValue === "none" || normalized === "none";
+  if (!isNone) {
+    resetBasemapBackgroundColor();
+    return;
+  }
+  if (getBasemapBackgroundTransparent()) {
+    applyBasemapBackgroundColor("transparent");
+  } else {
+    const color = forcedColor || getBasemapBackgroundColor();
+    applyBasemapBackgroundColor(color);
+  }
+  requestAnimationFrame(() => {
+    if (getBasemapBackgroundTransparent()) {
+      applyBasemapBackgroundColor("transparent");
+    } else {
+      const color = forcedColor || getBasemapBackgroundColor();
+      applyBasemapBackgroundColor(color);
+    }
+  });
+}
+
+function applyBasemapBackgroundColor(color: string) {
+  if (!view) return;
+  const viewAny = view as any;
+  const resolvedColor = color === "transparent" ? new Color([0, 0, 0, 0]) : new Color(color);
+  if (viewAny.background && "color" in viewAny.background) {
+    viewAny.background.color = resolvedColor;
+  } else {
+    viewAny.background = { type: "color", color: resolvedColor };
+  }
+  viewAny.background = { type: "color", color: resolvedColor };
+  if ("environment" in viewAny) {
+    const env = viewAny.environment || {};
+    viewAny.environment = { ...env, background: { type: "color", color: resolvedColor } };
+  }
+  const mapWrapper = document.getElementById("map-wrapper");
+  if (mapWrapper) {
+    mapWrapper.style.background = color;
+    mapWrapper.style.setProperty("background-color", color, "important");
+  }
+  const mapEl = document.getElementById("arcgisMap");
+  if (mapEl) {
+    (mapEl as HTMLElement).style.background = color;
+    (mapEl as HTMLElement).style.setProperty("background-color", color, "important");
+    const surface = findInShadow(mapEl, ".esri-view-surface");
+    if (surface) {
+      surface.style.background = color;
+    }
+    const root = findInShadow(mapEl, ".esri-view-root");
+    if (root) {
+      root.style.background = color;
+    }
+  }
+  const container = viewAny?.container as HTMLElement | null;
+  if (container) {
+    container.style.background = color;
+  }
+  viewAny.requestRender?.();
+}
+
+function resetBasemapBackgroundColor() {
+  const mapWrapper = document.getElementById("map-wrapper");
+  if (mapWrapper) {
+    mapWrapper.style.background = "";
+    mapWrapper.style.removeProperty("background-color");
+  }
+  const mapEl = document.getElementById("arcgisMap");
+  if (mapEl) {
+    (mapEl as HTMLElement).style.background = "";
+    (mapEl as HTMLElement).style.removeProperty("background-color");
+    const surface = findInShadow(mapEl, ".esri-view-surface");
+    if (surface) {
+      surface.style.background = "";
+    }
+    const root = findInShadow(mapEl, ".esri-view-root");
+    if (root) {
+      root.style.background = "";
+    }
+  }
+  const container = (view as any)?.container as HTMLElement | null;
+  if (container) {
+    container.style.background = "";
+  }
+}
+
+  function updateBasemapBackgroundControls() {
+    const select = document.getElementById("basemap-select") as any;
+    const picker = document.getElementById("basemap-bg-picker");
+    const rawValue = String(select?.value || "");
+    const normalized = normalizeBasemap(rawValue || "gray-vector");
+    const isNone = rawValue === "none" || normalized === "none";
+  if (picker) {
+    if (isNone) {
+      picker.classList.add("show");
+      (picker as HTMLElement).hidden = false;
+      (picker as HTMLElement).style.display = "inline-flex";
+    } else {
+      picker.classList.remove("show");
+      (picker as HTMLElement).hidden = true;
+      (picker as HTMLElement).style.display = "none";
+    }
+    if (isNone) {
+      picker.removeAttribute("aria-hidden");
+    } else {
+      picker.setAttribute("aria-hidden", "true");
+    }
+  }
+  handleBasemapBackgroundChange();
+}
+
 function updateExportResolutionControls() {
   const select = document.getElementById("export-resolution-select") as any;
   const customWrap = document.getElementById("export-resolution-custom");
@@ -949,6 +1090,16 @@ function applyExportResolutionOverride(width: number, height: number) {
     if (view && typeof view.resize === "function") {
       view.resize();
     }
+  };
+}
+
+function applyExportExtentConstraint(extent: any) {
+  if (!view || !extent || !(view as any).constraints) return null;
+  const previous = (view as any).constraints;
+  const next = { ...previous, geometry: extent };
+  (view as any).constraints = next;
+  return () => {
+    (view as any).constraints = previous;
   };
 }
 
@@ -1096,13 +1247,28 @@ async function cancelFrameExport() {
       // no-op
     }
   }
-  if (exportResolutionRestore) {
-    exportResolutionRestore();
-    exportResolutionRestore = null;
+    if (exportResolutionRestore) {
+      exportResolutionRestore();
+      exportResolutionRestore = null;
+    }
+    if (exportConstraintRestore) {
+      exportConstraintRestore();
+      exportConstraintRestore = null;
+    }
+    if (preExportViewpoint && view?.goTo) {
+      try {
+        await view.goTo(preExportViewpoint, { animate: false });
+      } catch {
+        // ignore
+      }
+    } else if (preExportExtentSnapshot) {
+      exportExtentSnapshot = preExportExtentSnapshot;
+      await restoreExportExtent({ animate: false });
+    }
+    preExportExtentSnapshot = null;
+    preExportViewpoint = null;
+    setExportPreviewFullscreen(false);
   }
-  await restoreExportExtent({ animate: false });
-  setExportPreviewFullscreen(false);
-}
 
 async function captureFrames(targetWidth?: number, targetHeight?: number) {
   const viewAny = view as any;
@@ -1120,8 +1286,8 @@ async function captureFrames(targetWidth?: number, targetHeight?: number) {
   const steps = Math.max(1, Math.ceil(duration * fps));
   const totalFrames = steps + 1;
   const delay = Math.round(1000 / fps);
-  const width = Number(targetWidth || viewAny.width || viewAny.container?.clientWidth || 0);
-  const height = Number(targetHeight || viewAny.height || viewAny.container?.clientHeight || 0);
+    const width = Number(targetWidth || viewAny.width || viewAny.container?.clientWidth || 0);
+    const height = Number(targetHeight || viewAny.height || viewAny.container?.clientHeight || 0);
 
   if (!width || !height) {
     setGifExportStatus("Unable to determine map size for export.");
@@ -1162,7 +1328,7 @@ async function captureFrames(targetWidth?: number, targetHeight?: number) {
         throw new Error("Export cancelled");
       }
 
-      const dataUrl = await takeScreenshotDataUrl(viewAny, width, height);
+        const dataUrl = await takeScreenshotDataUrl(viewAny, width, height);
       const img = await loadImage(dataUrl);
 
       ctx.clearRect(0, 0, width, height);
@@ -1466,18 +1632,33 @@ async function startFrameExport() {
   if (closeBtn) {
     closeBtn.setAttribute("disabled", "");
   }
-  document.body.classList.add("is-exporting");
+    document.body.classList.add("is-exporting");
 
-  try {
-    if (view?.extent) {
-      exportExtentSnapshot = typeof view.extent.clone === "function" ? view.extent.clone() : view.extent;
-    }
-    if (!resolution.isDefault && resolution.width && resolution.height) {
-      exportResolutionRestore = applyExportResolutionOverride(resolution.width, resolution.height);
-      await waitForNextFrame();
-      await restoreExportExtent({ animate: true, waitMs: 1000 });
-    }
-    const capture = await captureFrames(resolution.width, resolution.height);
+    try {
+      if (view?.extent) {
+        preExportExtentSnapshot = typeof view.extent.clone === "function" ? view.extent.clone() : view.extent;
+        exportExtentSnapshot = preExportExtentSnapshot;
+      }
+      if (view?.viewpoint) {
+        const vpAny = view.viewpoint as any;
+        preExportViewpoint = typeof vpAny?.clone === "function" ? vpAny.clone() : vpAny;
+      }
+      if (preExportExtentSnapshot) {
+        exportConstraintRestore = applyExportExtentConstraint(preExportExtentSnapshot) || null;
+      }
+      if (!resolution.isDefault && resolution.width && resolution.height) {
+        await waitForNextFrame();
+        if (preExportViewpoint && view?.goTo) {
+          try {
+            await view.goTo(preExportViewpoint, { animate: false });
+          } catch {
+            // ignore
+          }
+        } else {
+          await restoreExportExtent({ animate: false, waitMs: 250 });
+        }
+      }
+      const capture = await captureFrames(resolution.width, resolution.height);
     if (!capture) {
       throw new Error("Unable to capture frames.");
     }
@@ -1537,7 +1718,7 @@ async function startFrameExport() {
     }
       if (format === "mp4") {
         setGifExportStatus(
-          `Ready (${totalFrames} frames @ ${fps} fps). Sometimes when exporting as .mp4 you will not have the correct codecs for the browser to play it. Downloading the video may still work. Downloading as WebM is preferred.`,
+          `Ready (${totalFrames} frames @ ${fps} fps). Sometimes when exporting as .mp4 you will not have the correct codecs for the browser to play it. Downloading the video may still work. You can even upload it into other platforms often. Downloading as WebM is preferred if possible.`,
           true
         );
       } else {
@@ -1550,18 +1731,33 @@ async function startFrameExport() {
       console.error("Export failed.", error);
       setGifExportStatus("Export failed. Please try again.");
     }
-  } finally {
-    isFrameExporting = false;
-    exportState.isExporting = false;
-    setExportButtonDisabled(false);
-    if (exportResolutionRestore) {
-      exportResolutionRestore();
-      exportResolutionRestore = null;
-    }
-    activeGifEncoder = null;
-    exportCancelRequested = false;
-    await restoreExportExtent({ animate: false });
-    exportExtentSnapshot = null;
+    } finally {
+      isFrameExporting = false;
+      exportState.isExporting = false;
+      setExportButtonDisabled(false);
+      if (exportResolutionRestore) {
+        exportResolutionRestore();
+        exportResolutionRestore = null;
+      }
+      if (exportConstraintRestore) {
+        exportConstraintRestore();
+        exportConstraintRestore = null;
+      }
+      activeGifEncoder = null;
+      exportCancelRequested = false;
+      if (preExportViewpoint && view?.goTo) {
+        try {
+          await view.goTo(preExportViewpoint, { animate: false });
+        } catch {
+          // ignore
+        }
+      } else if (preExportExtentSnapshot) {
+        exportExtentSnapshot = preExportExtentSnapshot;
+        await restoreExportExtent({ animate: false });
+      }
+      preExportExtentSnapshot = null;
+      preExportViewpoint = null;
+      exportExtentSnapshot = null;
     const cancelBtn = document.getElementById("export-cancel-btn");
     if (cancelBtn) {
       cancelBtn.setAttribute("hidden", "");
@@ -2039,7 +2235,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   return null;
 }
 
-function initializeApp() {
+  function initializeApp() {
   if (hasInitialized) return;
   hasInitialized = true;
   setupResponsiveLayout(layoutState, {
@@ -2068,11 +2264,12 @@ function initializeApp() {
   }
   updateTimeline();
   updateAnimationOptions();
-  updateExportWarning();
-  resetHistory(historyState, historyConfig);
-}
+    updateExportWarning();
+    resetHistory(historyState, historyConfig);
+    updateBasemapBackgroundControls();
+  }
 
-function setupEventListeners() {
+  function setupEventListeners() {
   updateExportControlsForFormat();
   updateExportResolutionControls();
   updateExportResolutionLabel(view as any);
@@ -2126,7 +2323,29 @@ function setupEventListeners() {
   getEl("add-feature-layer-btn").addEventListener("click", handleAddFeatureLayer);
   getEl("feature-layer-url").addEventListener("calciteInputInput", () => setFeatureLayerError(null));
 
-  getEl("basemap-select").addEventListener("calciteSelectChange", handleBasemapChange as EventListener);
+    getEl("basemap-select").addEventListener("calciteSelectChange", handleBasemapChange as EventListener);
+    const basemapBgInput = document.getElementById("basemap-bg-color");
+    if (basemapBgInput) {
+      basemapBgInput.addEventListener("input", (event) => {
+        const target = event.target as HTMLInputElement | null;
+        handleBasemapBackgroundChange(target?.value);
+        updateBasemapBackgroundControls();
+        scheduleProjectSave();
+      });
+      basemapBgInput.addEventListener("change", (event) => {
+        const target = event.target as HTMLInputElement | null;
+        handleBasemapBackgroundChange(target?.value);
+        updateBasemapBackgroundControls();
+        scheduleProjectSave();
+      });
+    }
+    const basemapBgTransparentInput = document.getElementById("basemap-bg-transparent");
+    if (basemapBgTransparentInput) {
+      basemapBgTransparentInput.addEventListener("calciteSwitchChange", () => {
+        updateBasemapBackgroundControls();
+        scheduleProjectSave();
+      });
+    }
 
   getEl("ai-ask-btn").addEventListener("click", openAiModal);
   getEl("ai-cancel-btn").addEventListener("click", closeAiModal);
@@ -2503,6 +2722,7 @@ function handleBasemapChange() {
   } else {
     view.map.basemap = value;
   }
+  updateBasemapBackgroundControls();
   scheduleProjectSave();
 }
 

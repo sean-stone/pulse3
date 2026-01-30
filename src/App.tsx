@@ -28,6 +28,23 @@ export default function App() {
           <span className="map-loading-pin-dot" aria-hidden="true"></span>
         </div>
       </div>
+      <div
+        id="orientation-overlay"
+        className="orientation-overlay"
+        role="dialog"
+        aria-live="polite"
+        aria-hidden="true"
+      >
+        <div className="orientation-card">
+          <div className="orientation-icon" aria-hidden="true">
+            <calcite-icon icon="rotate" scale="l"></calcite-icon>
+          </div>
+          <div className="orientation-title">Rotate your device</div>
+          <div className="orientation-text">
+            Pulse works best in landscape. Please rotate your phone or make the window wider.
+          </div>
+        </div>
+      </div>
         <div id="app-container">
           <div id="app-topbars" aria-label="Application menus">
           <div id="menu-bar" role="menubar">
@@ -79,6 +96,16 @@ export default function App() {
                 <span className="project-status-icon" aria-hidden="true"></span>
                 <span className="project-status-text" data-status-text>
                   Saved
+                </span>
+                <span
+                  id="project-status-warning"
+                  className="project-status-warning"
+                  role="img"
+                  aria-label="Storage full. Export to GeoJSON to save."
+                  title="Storage full. Export to GeoJSON to save."
+                  hidden
+                >
+                  <calcite-icon icon="exclamation-mark-triangle" scale="s"></calcite-icon>
                 </span>
               </span>
               <span className="menu-divider" aria-hidden="true"></span>
@@ -200,9 +227,9 @@ export default function App() {
                 <input id="import-file-input" type="file" style={{ display: "none" }} />
               </div>
               <span className="toolbar-divider" aria-hidden="true"></span>
-              <div className="toolbar-group">
-                <span className="toolbar-label">Basemap</span>
-                <calcite-select id="basemap-select" scale="s">
+                <div className="toolbar-group">
+                  <span className="toolbar-label">Basemap</span>
+                  <calcite-select id="basemap-select" scale="s">
                   <calcite-option value="gray-vector">Gray</calcite-option>
                   <calcite-option value="streets-vector">Streets</calcite-option>
                   <calcite-option value="streets-navigation-vector">Streets Navigation</calcite-option>
@@ -215,10 +242,28 @@ export default function App() {
                   <calcite-option value="oceans">Oceans</calcite-option>
                   <calcite-option value="dark-gray-vector">Dark Gray</calcite-option>
                   <calcite-option value="osm">OpenStreetMap</calcite-option>
-                  <calcite-option value="none">None</calcite-option>
-                </calcite-select>
+                    <calcite-option value="none">None</calcite-option>
+                  </calcite-select>
+                </div>
+                <div
+                  id="basemap-bg-picker"
+                  className="toolbar-group basemap-bg-picker"
+                  hidden
+                  aria-hidden="true"
+                >
+                  <span className="toolbar-label">Background</span>
+                  <input
+                    id="basemap-bg-color"
+                    type="color"
+                    defaultValue="#ffffff"
+                    aria-label="Basemap background color"
+                  />
+                  <label className="basemap-bg-transparent">
+                    <calcite-switch id="basemap-bg-transparent" scale="s"></calcite-switch>
+                    <span>Transparent</span>
+                  </label>
+                </div>
               </div>
-            </div>
             <div className="toolbar-right">
               <calcite-button
                 id="rotation-button"

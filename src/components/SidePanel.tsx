@@ -15,7 +15,7 @@ function SidePanel() {
           <calcite-stepper-item
             id="onboarding-step-draw"
             icon
-            heading="Get started"
+            heading="Get Started"
             selected
           >
             <p className="stepper-info">
@@ -30,7 +30,7 @@ function SidePanel() {
           <calcite-stepper-item
             id="onboarding-step-style"
             icon
-            heading="Style and animate your drawings"
+            heading="Animations and Styles"
           >
             <div id="layers-accordion" data-testid="layers-accordion"></div>
 

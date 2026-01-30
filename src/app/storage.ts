@@ -12,6 +12,7 @@ import {
 type StorageConfig = {
   setProjectStatus: (state: "saved" | "dirty") => void;
   setProjectError: (message: string | null) => void;
+  setProjectStorageWarning?: (visible: boolean) => void;
   updateRecentProjectsUI: () => void;
   applyProjectSnapshot: (snapshot: ProjectSnapshot) => Promise<void> | void;
   buildProjectSnapshot: () => ProjectSnapshot | null;
@@ -144,12 +145,32 @@ const loadRecentProjectsFromStorage = (state: StorageState): RecentProject[] => 
   return [];
 };
 
-const saveRecentProjectsToStorage = (state: StorageState, recents: RecentProject[]) => {
+function isQuotaExceeded(error: unknown) {
+  const err = error as { name?: string; code?: number } | null;
+  return (
+    err?.name === "QuotaExceededError" ||
+    err?.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+    err?.code === 22 ||
+    err?.code === 1014
+  );
+}
+
+const setStorageWarning = (config: StorageConfig, visible: boolean) => {
+  if (config.setProjectStorageWarning) {
+    config.setProjectStorageWarning(visible);
+  }
+};
+
+const saveRecentProjectsToStorage = (state: StorageState, config: StorageConfig, recents: RecentProject[]) => {
   if (!canUseLocalStorage(state)) return;
   try {
     window.localStorage.setItem(PROJECT_STORAGE_KEY_RECENTS, JSON.stringify(recents));
+    setStorageWarning(config, false);
   } catch (error) {
     console.warn("Unable to save recent projects.", error);
+    if (isQuotaExceeded(error)) {
+      setStorageWarning(config, true);
+    }
   }
 };
 
@@ -165,7 +186,7 @@ const rememberRecentProject = (
   const id = `${savedAt}-${name}`.replace(/[^\x20-\x7E]/g, "");
   const existing = loadRecentProjectsFromStorage(state).filter((entry) => entry.id !== id);
   const next: RecentProject[] = [{ id, name, savedAt, snapshot }, ...existing].slice(0, 8);
-  saveRecentProjectsToStorage(state, next);
+  saveRecentProjectsToStorage(state, config, next);
   config.updateRecentProjectsUI();
 };
 
@@ -200,7 +221,7 @@ const clearRecentProjects = (state: StorageState, config: StorageConfig) => {
     config.updateRecentProjectsUI();
     return;
   }
-  saveRecentProjectsToStorage(state, []);
+  saveRecentProjectsToStorage(state, config, []);
   try {
     window.localStorage.removeItem(PROJECT_STORAGE_KEY_RECENTS);
   } catch (error) {

@@ -151,10 +151,16 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   });
 
   const basemapSelect = config.getEl("basemap-select") as any;
+  const basemapBackgroundInput = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
+  const basemapBackgroundTransparentInput = document.getElementById(
+    "basemap-bg-transparent"
+  ) as HTMLInputElement | null;
   const customWidthInput = document.getElementById("custom-width") as any;
   const customHeightInput = document.getElementById("custom-height") as any;
   const customWidth = Number(customWidthInput?.value);
   const customHeight = Number(customHeightInput?.value);
+  const backgroundColor = basemapBackgroundInput?.value || "#ffffff";
+  const backgroundTransparent = Boolean(basemapBackgroundTransparentInput?.checked);
 
   return {
     type: "FeatureCollection",
@@ -172,6 +178,8 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           isRotated: config.isRotated,
           basemap: String(basemapSelect?.value || "gray-vector"),
           basemapVisible: basemapSelect?.value !== "none",
+          backgroundColor,
+          backgroundTransparent,
           extent: config.view.extent
             ? {
                 xmin: config.view.extent.xmin,
@@ -245,6 +253,16 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     const basemapSelect = config.getEl("basemap-select") as any;
     const storedBasemap = config.normalizeBasemap(meta.app?.basemap || "gray-vector");
     basemapSelect.value = meta.app?.basemapVisible === false ? "none" : storedBasemap;
+    const basemapBackgroundInput = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
+    if (basemapBackgroundInput && meta.app?.backgroundColor) {
+      basemapBackgroundInput.value = String(meta.app.backgroundColor);
+    }
+    const basemapBackgroundTransparentInput = document.getElementById(
+      "basemap-bg-transparent"
+    ) as HTMLInputElement | null;
+    if (basemapBackgroundTransparentInput && meta.app?.backgroundTransparent !== undefined) {
+      basemapBackgroundTransparentInput.checked = Boolean(meta.app.backgroundTransparent);
+    }
     config.handleBasemapChange();
     if (meta.app?.extent) {
       const extent = meta.app.extent;
