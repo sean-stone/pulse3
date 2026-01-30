@@ -1352,6 +1352,19 @@ async function captureFrames(targetWidth?: number, targetHeight?: number) {
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+async function ensureGifEncoder() {
+  let GIF = (window as any).GIF;
+  if (GIF) return GIF;
+  try {
+    const mod = await import("gif.js/dist/gif.js");
+    GIF = (mod as any)?.default || (mod as any)?.GIF || (window as any).GIF;
+  } catch (error) {
+    console.warn("Unable to load GIF encoder module.", error);
+  }
+  GIF = GIF || (window as any).GIF;
+  return GIF;
+}
+
 async function encodeGifFromFrames(
   frames: string[],
   fps: number,
@@ -1363,7 +1376,7 @@ async function encodeGifFromFrames(
     throw new Error("Export cancelled");
   }
   const gifQuality = qualityLevel === 4 ? 1 : qualityLevel === 3 ? 5 : qualityLevel === 2 ? 10 : 20;
-  const GIF = (window as any).GIF;
+  const GIF = await ensureGifEncoder();
   if (!GIF) {
     throw new Error("GIF encoder unavailable.");
   }
