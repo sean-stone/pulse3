@@ -199,7 +199,7 @@ let exportDownloadExtension: string | null = null;
 let exportDefaultPreview: { type: "image" | "video"; src: string } | null = null;
 let exportCancelRequested = false;
 let exportResolutionRestore: (() => void) | null = null;
-let activeGifEncoder: GIF | null = null;
+let activeGifEncoder: any | null = null;
 let exportExtentSnapshot: any | null = null;
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoaded = false;
@@ -631,10 +631,19 @@ function setProjectError(message: string | null) {
   errorEl.classList.add("show");
 }
 
-function setGifExportStatus(message: string | null) {
+function setGifExportStatus(message: string | null, allowHtml = false) {
   const statusEl = document.getElementById("gif-export-status");
   if (!statusEl) return;
-  statusEl.textContent = message || "";
+  if (!message) {
+    statusEl.textContent = "";
+    statusEl.innerHTML = "";
+    return;
+  }
+  if (allowHtml) {
+    statusEl.innerHTML = message;
+  } else {
+    statusEl.textContent = message;
+  }
 }
 
 function setExportButtonDisabled(disabled: boolean) {
@@ -683,7 +692,15 @@ function setGifPreview(src: string, mode: "gif" | "frame", type: "image" | "vide
   }
   if (img) img.src = type === "image" ? src : "";
   if (video) {
+    video.onerror = null;
     if (type === "video") {
+      video.onerror = () => {
+        if (exportDownloadExtension !== "mp4") return;
+        setGifExportStatus(
+          'looks like codecs are not available. Try refreshing the page and exporting again. <a href="https://support.microsoft.com/en-us/windows/codecs-in-windows-10-what-are-codecs-84255ecf-1e1d-419e-8b5f-1321b4ee21b9" target="_blank" rel="noreferrer">Learn about codecs</a>',
+          true
+        );
+      };
       video.src = src;
       video.load();
     } else {
@@ -1187,7 +1204,7 @@ async function encodeGifFromFrames(
   });
   activeGifEncoder = gif;
 
-  gif.on("progress", (progress) => {
+  gif.on("progress", (progress: number) => {
     const percent = Math.round(progress * 100);
     setGifExportStatus(`Encoding GIF… ${percent}%`);
   });
@@ -1212,7 +1229,7 @@ async function encodeGifFromFrames(
   }
 
   return new Promise<Blob>((resolve, reject) => {
-    gif.on("finished", (blob) => resolve(blob));
+    gif.on("finished", (blob: Blob) => resolve(blob));
     gif.on("abort", () => reject(new Error("GIF export aborted")));
     gif.render();
   });
@@ -1255,16 +1272,30 @@ async function encodeWebmFromFrames(
     recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
   });
 
-  recorder.start();
+  const images: HTMLImageElement[] = [];
   for (const frame of frames) {
+    if (exportCancelRequested) {
+      throw new Error("Export cancelled");
+    }
+    images.push(await loadImage(frame));
+  }
+
+  recorder.start();
+  const frameInterval = 1000 / fps;
+  const startTime = performance.now();
+  for (let i = 0; i < images.length; i += 1) {
     if (exportCancelRequested) {
       recorder.stop();
       throw new Error("Export cancelled");
     }
-    const img = await loadImage(frame);
+    const img = images[i];
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(img, 0, 0, width, height);
-    await sleep(1000 / fps);
+    const targetTime = startTime + i * frameInterval;
+    const delay = targetTime - performance.now();
+    if (delay > 0) {
+      await sleep(delay);
+    }
   }
   recorder.stop();
 
@@ -1453,6 +1484,7 @@ async function startFrameExport() {
     let previewType: "image" | "video" = "image";
     let previewSrc = frames[0] || "";
     let extension = "gif";
+    let useFramePreview = false;
 
     if (format === "gif") {
       blob = await encodeGifFromFrames(frames, fps, width, height, quality);
@@ -1474,6 +1506,7 @@ async function startFrameExport() {
       if (mp4Result.codec === "mpeg4") {
         previewType = "image";
         previewSrc = frames[0] || "";
+        useFramePreview = true;
         setGifExportStatus("MP4 generated with MPEG-4 codec. Preview may not be available in this browser.");
       }
     }
@@ -1481,7 +1514,7 @@ async function startFrameExport() {
     clearGifDownloadUrl();
     exportDownloadExtension = extension;
     exportDownloadUrl = URL.createObjectURL(blob);
-    if (format === "png") {
+    if (format === "png" || useFramePreview) {
       previewSrc = frames[0] || "";
     } else {
       previewSrc = exportDownloadUrl;
@@ -1493,7 +1526,14 @@ async function startFrameExport() {
       downloadBtn.textContent = `Download .${extension} (${formatBytes(blob.size)})`;
       downloadBtn.removeAttribute("disabled");
     }
-    setGifExportStatus(`Ready (${totalFrames} frames @ ${fps} fps).`);
+      if (format === "mp4") {
+        setGifExportStatus(
+          `Ready (${totalFrames} frames @ ${fps} fps). Sometimes when exporting as .mp4 you will not have the correct codecs for the browser to play it. Downloading the video may still work. Downloading as WebM is preferred.`,
+          true
+        );
+      } else {
+        setGifExportStatus(`Ready (${totalFrames} frames @ ${fps} fps).`);
+      }
   } catch (error) {
     if (isExportCancelError(error)) {
       setGifExportStatus("Export cancelled.");
