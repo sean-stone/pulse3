@@ -151,8 +151,10 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   });
 
   const basemapSelect = config.getEl("basemap-select") as any;
-  const customWidth = Number((config.getEl("custom-width") as any).value);
-  const customHeight = Number((config.getEl("custom-height") as any).value);
+  const customWidthInput = document.getElementById("custom-width") as any;
+  const customHeightInput = document.getElementById("custom-height") as any;
+  const customWidth = Number(customWidthInput?.value);
+  const customHeight = Number(customHeightInput?.value);
 
   return {
     type: "FeatureCollection",
@@ -213,11 +215,13 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     const customWidth = meta.app?.customWidth;
     const customHeight = meta.app?.customHeight;
     if (layout === "custom") {
-      if (Number.isFinite(customWidth)) {
-        config.setCalciteValue(config.getEl("custom-width"), customWidth ?? 0);
+      const customWidthEl = document.getElementById("custom-width");
+      const customHeightEl = document.getElementById("custom-height");
+      if (customWidthEl && Number.isFinite(customWidth)) {
+        config.setCalciteValue(customWidthEl, customWidth ?? 0);
       }
-      if (Number.isFinite(customHeight)) {
-        config.setCalciteValue(config.getEl("custom-height"), customHeight ?? 0);
+      if (customHeightEl && Number.isFinite(customHeight)) {
+        config.setCalciteValue(customHeightEl, customHeight ?? 0);
       }
     }
     const layoutTab = document.querySelector(

@@ -1142,6 +1142,46 @@ function Modals() {
           </calcite-button>
         </div>
       </calcite-dialog>
+      <calcite-dialog
+        id="export-preview-modal"
+        heading="Export preview"
+        scale="s"
+        overlay-positioning="absolute"
+        placement="cover"
+        embedded
+      >
+        <div className="export-preview-header">
+          <span></span>
+          <calcite-button id="export-cancel-btn" appearance="outline" scale="s" hidden>
+            Cancel render
+          </calcite-button>
+          <button type="button" id="export-preview-close">
+            Back to settings
+          </button>
+        </div>
+        <div id="gif-export-status" className="gif-export-status" aria-live="polite"></div>
+        <div id="gif-thumbnails" className="gif-thumbnails" aria-live="polite"></div>
+        <div id="gif-preview" className="gif-preview">
+          <div className="gif-preview-header">
+            <span>Preview</span>
+            <button type="button" id="gif-preview-close" aria-label="Close preview">
+              ×
+            </button>
+          </div>
+          <img id="gif-preview-img" alt="Export preview" />
+          <video id="gif-preview-video" controls></video>
+        </div>
+        <div className="export-attribution">
+          <strong>Attribution:</strong>
+          <span id="export-attribution-text">Made with Pulse and Powered by Esri.</span>
+          <button type="button" id="export-attribution-copy" className="export-attribution-copy">
+            Copy
+          </button>
+        </div>
+        <calcite-button id="gif-download-btn" icon-start="download" scale="m" width="full" disabled>
+          Download
+        </calcite-button>
+      </calcite-dialog>
 
       <calcite-dialog
         id="ai-ask-modal"

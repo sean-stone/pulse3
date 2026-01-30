@@ -3,7 +3,7 @@ function MapArea() {
     <div id="map-container" data-testid="map-container">
       <div id="map-action-buttons">
         <calcite-button
-          id="new-project-btn"
+          id="new-project-map-btn"
           icon-start="file"
           scale="s"
           appearance="outline"
@@ -22,16 +22,6 @@ function MapArea() {
         </calcite-button>
       </div>
       <div id="basemap-widget" aria-label="Basemap widget"></div>
-      <calcite-button
-        id="rotation-button"
-        icon-start="rotate"
-        scale="m"
-        appearance="solid"
-        kind="brand"
-      >
-        Rotate
-      </calcite-button>
-
       <calcite-button
         id="play-button"
         icon-start="play"

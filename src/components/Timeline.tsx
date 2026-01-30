@@ -124,40 +124,9 @@ function Timeline() {
               scale="s"
               aria-label="Duration in seconds"
             ></calcite-input-number>
-            <calcite-button
-              id="timeline-save-btn"
-              data-testid="timeline-save-btn"
-              className="timeline-icon-only"
-              appearance="transparent"
-              scale="s"
-              icon-start="save"
-              title="Save session"
-              aria-label="Save session"
-            ></calcite-button>
-            <calcite-button
-              id="timeline-save-as-btn"
-              data-testid="timeline-save-as-btn"
-              className="timeline-icon-only"
-              appearance="transparent"
-              scale="s"
-              icon-start="download"
-              title="Save project as JSON"
-              aria-label="Save project as JSON"
-            ></calcite-button>
-            <calcite-button
-              id="timeline-import-btn"
-              data-testid="timeline-import-btn"
-              className="timeline-icon-only"
-              appearance="transparent"
-              scale="s"
-              icon-start="upload"
-              title="Import project JSON"
-              aria-label="Import project JSON"
-            ></calcite-button>
           </div>
         </div>
       </div>
-      <input id="project-file-input" type="file" style={{ display: "none" }} />
       <div id="timeline-body">
         <div id="timeline-layers-panel"></div>
         <div id="timeline-panel-resizer" data-testid="timeline-panel-resizer"></div>

@@ -9,6 +9,9 @@ import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Sketch from "@arcgis/core/widgets/Sketch";
 import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 
+import GIF from "gif.js";
+import gifWorkerUrl from "gif.js/dist/gif.worker.js?url";
+
 import { animationTypes } from "./animationTypes";
 import { applyAnimationsAtTime as applyAnimationsAtTimeFromState } from "./app/animationPlayback";
 import {
@@ -40,11 +43,80 @@ import {
   sanitizePlainText
 } from "./app/constants";
 import type { ProjectSnapshot } from "./app/constants";
-import {
-  startExportRecording as startExportRecordingFromState,
-  updateExportButtonLabel
-} from "./app/export";
-import type { ExportConfig, ExportState } from "./app/export";
+import JSZip from "jszip";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile } from "@ffmpeg/util";
+import ffmpegCoreUrl from "@ffmpeg/core?url";
+import ffmpegWasmUrl from "@ffmpeg/core/wasm?url";
+let ffmpegClassWorkerUrl: string | null = null;
+let ffmpegCoreBaseUrl: string | null = null;
+
+async function resolveFfmpegWorkerUrl() {
+  if (ffmpegClassWorkerUrl) return ffmpegClassWorkerUrl;
+  const baseUrl = import.meta.env.BASE_URL || "/";
+  const docBase = typeof document !== "undefined" ? document.baseURI : window.location.href;
+  const candidates = [
+    new URL("ffmpeg-worker.js", docBase).toString(),
+    new URL("ffmpeg-worker.js", new URL(baseUrl, window.location.origin)).toString(),
+    new URL("/ffmpeg-worker.js", window.location.origin).toString()
+  ];
+  const failures: Array<{ url: string; status?: number; contentType?: string }> = [];
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, { method: "GET", cache: "no-store" });
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && !contentType.includes("text/html")) {
+        if (import.meta.env.DEV) {
+          console.info("[ffmpeg] worker resolved", url);
+        }
+        ffmpegClassWorkerUrl = url;
+        return url;
+      }
+      failures.push({ url, status: response.status, contentType });
+    } catch {
+      // try next candidate
+    }
+  }
+  if (import.meta.env.DEV) {
+    console.error("[ffmpeg] worker resolution failed", failures);
+  }
+  ffmpegClassWorkerUrl = candidates[0];
+  return ffmpegClassWorkerUrl;
+}
+
+async function resolveFfmpegCoreBaseUrl() {
+  if (ffmpegCoreBaseUrl) return ffmpegCoreBaseUrl;
+  const baseUrl = import.meta.env.BASE_URL || "/";
+  const docBase = typeof document !== "undefined" ? document.baseURI : window.location.href;
+  const candidates = [
+    new URL("ffmpeg-core/", docBase).toString(),
+    new URL("ffmpeg-core/", new URL(baseUrl, window.location.origin)).toString(),
+    new URL("/ffmpeg-core/", window.location.origin).toString()
+  ];
+  const failures: Array<{ url: string; status?: number; contentType?: string }> = [];
+  for (const base of candidates) {
+    const testUrl = new URL("ffmpeg-core.js", base).toString();
+    try {
+      const response = await fetch(testUrl, { method: "GET", cache: "no-store" });
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && !contentType.includes("text/html")) {
+        if (import.meta.env.DEV) {
+          console.info("[ffmpeg] core resolved", base);
+        }
+        ffmpegCoreBaseUrl = base;
+        return base;
+      }
+      failures.push({ url: testUrl, status: response.status, contentType });
+    } catch {
+      // try next candidate
+    }
+  }
+  if (import.meta.env.DEV) {
+    console.error("[ffmpeg] core resolution failed", failures);
+  }
+  ffmpegCoreBaseUrl = candidates[0];
+  return ffmpegCoreBaseUrl;
+}
 import { handleAddFeatureLayer as handleAddFeatureLayerFromState } from "./app/featureLayerAdd";
 import type { FeatureLayerConfig, FeatureLayerState } from "./app/featureLayerAdd";
 import { queueHistorySnapshot, redoHistory, resetHistory, undoHistory } from "./app/history";
@@ -79,7 +151,6 @@ import { createTimelineController } from "./app/timeline";
 import type { TimelineState } from "./app/timeline";
 import { zoomToLayer as zoomToLayerFromState, zoomToLayers as zoomToLayersFromState } from "./app/zoom";
 import type { ZoomConfig } from "./app/zoom";
-import { startRecording as startCanvasRecording, stopRecording as stopCanvasRecording } from "./canvasRecorder";
 import { getEl } from "./dom";
 import type {
   LayerData,
@@ -92,6 +163,10 @@ import type {
 import { buildAnimationSettingsSnapshot } from "./utils/animationSettings";
 import { buildLayerEffectString, defaultLayerEffectSettings, isDefaultEffectSettings } from "./utils/effects";
 
+type ExportState = {
+  isExporting: boolean;
+};
+
 let hasBooted = false;
 let view: any = null;
 let graphicsLayers: LayerData[] = [];
@@ -102,7 +177,7 @@ let animationFrameId: number | null = null;
 let currentTime = 0;
 let currentLayout: "default" | "mobile" | "tablet" | "custom" = "default";
 let hasInitialized = false;
-let projectName = "Untitled";
+let projectName = "Pulse Project Export";
 let isAddingFeatureLayer = false;
 
 let isRestoringProject = false;
@@ -118,8 +193,19 @@ let currentAspectRatio: { width: number; height: number } | null = null;
 let isRotated = false;
 let isDrawing = false;
 const exportState: ExportState = { isExporting: false };
+let isFrameExporting = false;
+let exportDownloadUrl: string | null = null;
+let exportDownloadExtension: string | null = null;
+let exportDefaultPreview: { type: "image" | "video"; src: string } | null = null;
+let exportCancelRequested = false;
+let exportResolutionRestore: (() => void) | null = null;
+let activeGifEncoder: GIF | null = null;
+let exportExtentSnapshot: any | null = null;
+let ffmpegInstance: FFmpeg | null = null;
+let ffmpegLoaded = false;
 let pendingImportType: "geojson" | "csv" | null = null;
 let lastPointSizeInput = DEFAULT_PIN_SIZE;
+let projectStatusTimer: number | null = null;
 const storageState: StorageState = {
   localStorageAllowed: false,
   hasCheckedStorageConsent: false
@@ -236,7 +322,6 @@ const playbackController = createPlaybackController(
       if (!exportState.isExporting) return;
       exportState.isExporting = false;
       document.body.classList.remove("is-exporting");
-      stopCanvasRecording();
     }
   }
 );
@@ -252,25 +337,14 @@ const {
 } = playbackController;
 updatePlayheadRef = updatePlayhead;
 syncAnimationStartInputRef = syncAnimationStartInput;
-const exportConfig: ExportConfig = {
-  getView: () => view,
-  isPlaying: () => isPlaying,
-  stopAnimation,
-  startAnimation,
-  goToStart,
-  setExportUiError,
-  startCanvasRecording,
-  stopCanvasRecording
-};
-const startExportRecording = () => startExportRecordingFromState(exportState, exportConfig);
 const projectIoConfig = {
   getEl,
   buildProjectSnapshot: () => buildProjectSnapshotRef(),
   getProjectFileName: () => {
-    const safeName = sanitizePlainText(projectName, "pulse-project")
+    const safeName = sanitizePlainText(projectName, "Pulse Project Export")
       .replace(/[<>:"/\\|?*]/g, "")
       .trim();
-    return `${safeName || "pulse-project"}.json`;
+    return `${safeName || "Pulse Project Export"}.json`;
   },
   setProjectError,
   applyProjectSnapshot
@@ -492,8 +566,35 @@ scheduleProjectSaveRef = scheduleProjectSave;
 function setProjectStatus(state: "saved" | "dirty") {
   const badge = document.getElementById("project-status");
   if (!badge) return;
-  badge.textContent = state === "saved" ? "Saved" : "Unsaved";
-  badge.classList.toggle("project-status-dirty", state === "dirty");
+  if (projectStatusTimer) {
+    window.clearTimeout(projectStatusTimer);
+  }
+  const applyStatus = () => {
+    const label = state === "saved" ? "Saved" : "Edited";
+    const textEl = badge.querySelector<HTMLElement>("[data-status-text]");
+    if (textEl) {
+      textEl.textContent = label;
+    } else {
+      badge.textContent = label;
+    }
+    badge.setAttribute("aria-label", label);
+    badge.setAttribute("title", label);
+    badge.classList.toggle("project-status-dirty", state === "dirty");
+  };
+  if (state === "saved") {
+    projectStatusTimer = window.setTimeout(() => {
+      projectStatusTimer = null;
+      applyStatus();
+    }, 250);
+  } else {
+    applyStatus();
+  }
+}
+
+function updateAutoSaveButtonVisibility() {
+  const autoSaveButton = document.getElementById("menu-auto-save-btn");
+  if (!autoSaveButton) return;
+  autoSaveButton.style.display = storageState.localStorageAllowed ? "none" : "";
 }
 
 function setProjectError(message: string | null) {
@@ -508,16 +609,864 @@ function setProjectError(message: string | null) {
   errorEl.classList.add("show");
 }
 
-function setExportUiError(message: string | null) {
-  const errorEl = document.getElementById("export-error");
-  if (!errorEl) return;
-  if (!message) {
-    errorEl.textContent = "";
-    errorEl.classList.remove("show");
+function setGifExportStatus(message: string | null) {
+  const statusEl = document.getElementById("gif-export-status");
+  if (!statusEl) return;
+  statusEl.textContent = message || "";
+}
+
+function setExportButtonDisabled(disabled: boolean) {
+  const button = document.getElementById("export-action-btn");
+  if (!button) return;
+  button.toggleAttribute("disabled", disabled);
+}
+
+function isExportCancelError(error: unknown) {
+  if (exportCancelRequested) return true;
+  return error instanceof Error && error.message === "Export cancelled";
+}
+
+function clearGifThumbnails() {
+  const container = document.getElementById("gif-thumbnails");
+  if (!container) return;
+  container.innerHTML = "";
+}
+
+function hideGifPreview() {
+  const preview = document.getElementById("gif-preview");
+  if (preview) {
+    preview.classList.remove("show");
+    preview.classList.remove("video");
+  }
+  const img = document.getElementById("gif-preview-img") as HTMLImageElement | null;
+  if (img) {
+    img.src = "";
+    delete img.dataset.gifSrc;
+  }
+  const video = document.getElementById("gif-preview-video") as HTMLVideoElement | null;
+  if (video) {
+    video.pause();
+    video.src = "";
+  }
+}
+
+function setGifPreview(src: string, mode: "gif" | "frame", type: "image" | "video" = "image") {
+  const preview = document.getElementById("gif-preview");
+  const img = document.getElementById("gif-preview-img") as HTMLImageElement | null;
+  const video = document.getElementById("gif-preview-video") as HTMLVideoElement | null;
+  if (preview) {
+    preview.classList.add("show");
+    preview.setAttribute("data-preview-mode", mode);
+    preview.classList.toggle("video", type === "video");
+  }
+  if (img) img.src = type === "image" ? src : "";
+  if (video) {
+    if (type === "video") {
+      video.src = src;
+      video.load();
+    } else {
+      video.pause();
+      video.src = "";
+    }
+  }
+  const closeBtn = document.getElementById("gif-preview-close");
+  if (closeBtn) {
+    closeBtn.style.display = mode === "frame" ? "inline-flex" : "none";
+  }
+}
+
+function resetGifPreviewToGif() {
+  if (!exportDefaultPreview) return;
+  document.querySelectorAll("#gif-thumbnails .gif-thumb.is-selected").forEach((thumb) => {
+    thumb.classList.remove("is-selected");
+  });
+  setGifPreview(exportDefaultPreview.src, "gif", exportDefaultPreview.type);
+}
+
+function clearGifDownloadUrl() {
+  if (exportDownloadUrl) {
+    URL.revokeObjectURL(exportDownloadUrl);
+    exportDownloadUrl = null;
+  }
+  exportDownloadExtension = null;
+  exportDefaultPreview = null;
+  const downloadBtn = document.getElementById("gif-download-btn");
+  if (downloadBtn) {
+    downloadBtn.textContent = "Download";
+    downloadBtn.setAttribute("disabled", "");
+  }
+}
+
+function getGifExportFileName() {
+  const safeName = sanitizePlainText(projectName, "pulse-recording")
+    .replace(/[<>:"/\\|?*]/g, "")
+    .trim();
+  const extension = exportDownloadExtension || "gif";
+  return `${safeName || "pulse-recording"}.${extension}`;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
+}
+
+const waitForNextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+const waitForMs = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+const loadImage = (src: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load image"));
+    img.src = src;
+  });
+
+const getScreenshotDataUrl = (screenshot: any) => {
+  const direct =
+    (typeof screenshot?.dataUrl === "string" && screenshot.dataUrl) ||
+    (typeof screenshot?.screenshot?.dataUrl === "string" && screenshot.screenshot.dataUrl) ||
+    "";
+  if (direct) {
+    return direct;
+  }
+  const raw =
+    (typeof screenshot?.data === "string" && screenshot.data) ||
+    (typeof screenshot?.screenshot?.data === "string" && screenshot.screenshot.data) ||
+    "";
+  if (!raw.length) return "";
+  return raw.startsWith("data:") ? raw : `data:image/png;base64,${raw}`;
+};
+
+const takeScreenshotDataUrl = async (viewAny: any, width: number, height: number, attempt = 0) => {
+  const screenshot = await viewAny.takeScreenshot({
+    format: "png",
+    width,
+    height
+  });
+  const dataUrl = getScreenshotDataUrl(screenshot);
+  if (dataUrl) return dataUrl;
+  if (attempt >= 3) {
+    throw new Error("Empty screenshot data");
+  }
+  await new Promise((resolve) => window.setTimeout(resolve, 200));
+  await reactiveUtils.whenOnce(() => !viewAny.updating);
+  return takeScreenshotDataUrl(viewAny, width, height, attempt + 1);
+};
+
+function getGifExportFps() {
+  const input = document.getElementById("gif-fps-input") as any;
+  const raw = Number(input?.value);
+  if (!Number.isFinite(raw)) return 30;
+  return Math.max(1, Math.min(60, Math.round(raw)));
+}
+
+function getExportQualityLevel() {
+  const slider = document.getElementById("export-quality-slider") as any;
+  const raw = Number(slider?.value);
+  if (!Number.isFinite(raw)) return 3;
+  return Math.max(1, Math.min(4, Math.round(raw)));
+}
+
+function updateExportControlsForFormat() {
+  const formatSelect = document.getElementById("export-format-select") as any;
+  const format = String(formatSelect?.value || "gif");
+  const qualitySlider = document.getElementById("export-quality-slider");
+  if (qualitySlider) {
+    const disableQuality = format === "png";
+    qualitySlider.toggleAttribute("disabled", disableQuality);
+  }
+}
+
+function setExportPreviewFullscreen(isFullscreen: boolean) {
+  const modal = document.getElementById("export-preview-modal");
+  if (modal) {
+    modal.classList.toggle("export-preview-fullscreen", isFullscreen);
+  }
+}
+
+function getDefaultExportResolution(viewAny: any) {
+  const mapWrapper = document.getElementById("map-wrapper");
+  const width = Math.round(Number(viewAny?.width || mapWrapper?.clientWidth || viewAny?.container?.clientWidth || 0));
+  const height = Math.round(Number(viewAny?.height || mapWrapper?.clientHeight || viewAny?.container?.clientHeight || 0));
+  return { width, height };
+}
+
+function updateExportResolutionLabel(viewAny: any) {
+  const select = document.getElementById("export-resolution-select") as any;
+  if (!select) return;
+  const option = select.querySelector('calcite-option[value="default"]') as HTMLElement | null;
+  if (!option) return;
+  const { width, height } = getDefaultExportResolution(viewAny);
+  if (width && height) {
+    option.textContent = `Default (current map resolution ${width} x ${height})`;
+  } else {
+    option.textContent = "Default (current map resolution)";
+  }
+}
+
+function updateExportResolutionControls() {
+  const select = document.getElementById("export-resolution-select") as any;
+  const customWrap = document.getElementById("export-resolution-custom");
+  const value = String(select?.value || "default");
+  if (customWrap) {
+    customWrap.classList.toggle("show", value === "custom");
+  }
+  applyExportResolutionAspect();
+}
+
+function getExportResolution() {
+  const select = document.getElementById("export-resolution-select") as any;
+  const value = String(select?.value || "default");
+  if (value === "instagram") {
+    return { width: 1080, height: 1080, isDefault: false };
+  }
+  if (value === "720p") {
+    return { width: 1280, height: 720, isDefault: false };
+  }
+  if (value === "1080p") {
+    return { width: 1920, height: 1080, isDefault: false };
+  }
+  if (value === "4k") {
+    return { width: 3840, height: 2160, isDefault: false };
+  }
+  if (value === "custom") {
+    const widthInput = document.getElementById("export-resolution-width") as any;
+    const heightInput = document.getElementById("export-resolution-height") as any;
+    const rawWidth = Number(widthInput?.value);
+    const rawHeight = Number(heightInput?.value);
+    const width = Number.isFinite(rawWidth) && rawWidth > 0 ? Math.round(rawWidth) : 1000;
+    const height = Number.isFinite(rawHeight) && rawHeight > 0 ? Math.round(rawHeight) : 1000;
+    return { width, height, isDefault: false };
+  }
+  const viewAny = view as any;
+  const { width, height } = getDefaultExportResolution(viewAny);
+  return { width, height, isDefault: true };
+}
+
+function applyExportResolutionAspect() {
+  const resolution = getExportResolution();
+  const mapContainer = getEl("map-container");
+  const mapWrapper = getEl("map-wrapper");
+  const rotationButton = document.getElementById("rotation-button");
+
+  if (resolution.isDefault || !resolution.width || !resolution.height) {
+    currentAspectRatio = null;
+    isRotated = false;
+    resetMapWrapperSize();
+    if (rotationButton) {
+      rotationButton.classList.remove("show");
+    }
     return;
   }
-  errorEl.textContent = message;
-  errorEl.classList.add("show");
+
+  mapContainer.classList.add("has-padding");
+  mapWrapper.classList.remove("no-shadow");
+  isRotated = false;
+  currentAspectRatio = { width: resolution.width, height: resolution.height };
+  scheduleAspectRatioUpdate();
+  if (rotationButton) {
+    rotationButton.classList.add("show");
+  }
+}
+function applyExportResolutionOverride(width: number, height: number) {
+  const mapWrapper = getEl("map-wrapper");
+  const mapContainer = getEl("map-container");
+  const previous = {
+    width: mapWrapper.style.width,
+    height: mapWrapper.style.height,
+    maxWidth: mapWrapper.style.maxWidth,
+    maxHeight: mapWrapper.style.maxHeight,
+    hadPadding: mapContainer.classList.contains("has-padding")
+  };
+  mapWrapper.style.width = `${Math.max(1, Math.round(width))}px`;
+  mapWrapper.style.height = `${Math.max(1, Math.round(height))}px`;
+  mapWrapper.style.maxWidth = mapWrapper.style.width;
+  mapWrapper.style.maxHeight = mapWrapper.style.height;
+  mapContainer.classList.remove("has-padding");
+  document.body.classList.add("is-exporting-resolution");
+  if (view && typeof view.resize === "function") {
+    view.resize();
+  }
+  return () => {
+    mapWrapper.style.width = previous.width;
+    mapWrapper.style.height = previous.height;
+    mapWrapper.style.maxWidth = previous.maxWidth;
+    mapWrapper.style.maxHeight = previous.maxHeight;
+    if (previous.hadPadding) {
+      mapContainer.classList.add("has-padding");
+    }
+    document.body.classList.remove("is-exporting-resolution");
+    if (view && typeof view.resize === "function") {
+      view.resize();
+    }
+  };
+}
+
+function showExportPreviewModal() {
+  const modal = document.getElementById("export-preview-modal") as any;
+  if (modal && "open" in modal) {
+    modal.open = true;
+  }
+  scheduleExportAttributionRefresh();
+}
+
+function hideExportPreviewModal() {
+  const modal = document.getElementById("export-preview-modal") as any;
+  if (modal && "open" in modal) {
+    modal.open = false;
+  }
+  setExportPreviewFullscreen(false);
+}
+
+function updateExportAttribution() {
+  const attributionEl = document.getElementById("export-attribution-text");
+  if (!attributionEl) return;
+  const sourceText = findMapAttributionText();
+  const suffix = sourceText ? ` Data attribution: ${sourceText}` : "";
+  attributionEl.textContent = `Made with Pulse and Powered by Esri.${suffix}`;
+}
+
+function scheduleExportAttributionRefresh() {
+  updateExportAttribution();
+  let attempts = 0;
+  const maxAttempts = 12;
+  const tick = () => {
+    attempts += 1;
+    updateExportAttribution();
+    if (attempts < maxAttempts && !findMapAttributionText()) {
+      window.setTimeout(tick, 250);
+    }
+  };
+  window.setTimeout(tick, 250);
+}
+
+function findMapAttributionText() {
+  const direct = document.querySelector(".esri-attribution__sources") as HTMLElement | null;
+  if (direct?.innerText) return direct.innerText.trim();
+
+  const mapEl = document.getElementById("arcgisMap") as HTMLElement | null;
+  if (mapEl) {
+    const fromShadow = findInShadow(mapEl, ".esri-attribution__sources");
+    if (fromShadow?.innerText) return fromShadow.innerText.trim();
+  }
+
+  const fromDocument = findInShadow(document.documentElement, ".esri-attribution__sources");
+  if (fromDocument?.innerText) return fromDocument.innerText.trim();
+
+  const fromLayers = collectMapAttributions();
+  return fromLayers;
+}
+
+function collectMapAttributions() {
+  if (!view?.map) return "";
+  const sources = new Set<string>();
+
+  const addAttribution = (raw: unknown) => {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value) return;
+    value
+      .split(/[,;]\s*/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => sources.add(item));
+  };
+
+  const tryAddLayer = (layer: any) => {
+    if (!layer) return;
+    addAttribution(layer.attribution);
+    if (Array.isArray(layer?.sublayers)) {
+      layer.sublayers.forEach((sub: any) => tryAddLayer(sub));
+    } else if (layer?.sublayers?.forEach) {
+      layer.sublayers.forEach((sub: any) => tryAddLayer(sub));
+    }
+  };
+
+  const mapLayers = view?.map?.allLayers;
+  if (mapLayers?.forEach) {
+    mapLayers.forEach((layer: any) => tryAddLayer(layer));
+  } else if (Array.isArray(mapLayers)) {
+    mapLayers.forEach((layer) => tryAddLayer(layer));
+  }
+
+  const basemap = view?.map?.basemap;
+  if (basemap) {
+    const baseLayers = basemap?.baseLayers;
+    if (baseLayers?.forEach) baseLayers.forEach((layer: any) => tryAddLayer(layer));
+    const referenceLayers = basemap?.referenceLayers;
+    if (referenceLayers?.forEach) referenceLayers.forEach((layer: any) => tryAddLayer(layer));
+  }
+
+  return Array.from(sources).join(", ");
+}
+
+function findInShadow(root: Element | ShadowRoot, selector: string): HTMLElement | null {
+  const direct = root.querySelector(selector) as HTMLElement | null;
+  if (direct) return direct;
+  const children = Array.from(root.querySelectorAll("*"));
+  for (const child of children) {
+    const shadow = (child as HTMLElement).shadowRoot;
+    if (shadow) {
+      const found = findInShadow(shadow, selector);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function restoreExportExtent(options?: { animate?: boolean; waitMs?: number }) {
+  if (!exportExtentSnapshot || !view) return;
+  const animate = options?.animate ?? false;
+  const waitMs = options?.waitMs ?? 0;
+  if (typeof view.goTo === "function") {
+    try {
+      await view.goTo(exportExtentSnapshot, { animate });
+    } catch (error) {
+      const name = (error as { name?: string } | undefined)?.name;
+      if (name !== "view:goto-interrupted" && !exportCancelRequested) {
+        throw error;
+      }
+    }
+  } else if ("extent" in view) {
+    view.extent = exportExtentSnapshot;
+  }
+  if (waitMs > 0) {
+    await waitForMs(waitMs);
+  }
+  await reactiveUtils.whenOnce(() => !(view as any)?.updating);
+}
+
+async function cancelFrameExport() {
+  if (!isFrameExporting && !exportState.isExporting) return;
+  exportCancelRequested = true;
+  setGifExportStatus("Cancelling export…");
+  if (activeGifEncoder) {
+    try {
+      activeGifEncoder.abort();
+    } catch {
+      // no-op
+    }
+  }
+  if (exportResolutionRestore) {
+    exportResolutionRestore();
+    exportResolutionRestore = null;
+  }
+  await restoreExportExtent({ animate: false });
+  setExportPreviewFullscreen(false);
+}
+
+async function captureFrames(targetWidth?: number, targetHeight?: number) {
+  const viewAny = view as any;
+  if (!viewAny?.takeScreenshot) {
+    setGifExportStatus("Map view is not ready yet.");
+    return;
+  }
+
+  const fps = getGifExportFps();
+  if (isPlaying) {
+    stopAnimation();
+  }
+
+  const duration = getTimelineDuration();
+  const steps = Math.max(1, Math.ceil(duration * fps));
+  const totalFrames = steps + 1;
+  const delay = Math.round(1000 / fps);
+  const width = Number(targetWidth || viewAny.width || viewAny.container?.clientWidth || 0);
+  const height = Number(targetHeight || viewAny.height || viewAny.container?.clientHeight || 0);
+
+  if (!width || !height) {
+    setGifExportStatus("Unable to determine map size for export.");
+    return;
+  }
+
+  const frames: string[] = [];
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    setGifExportStatus("Unable to prepare GIF renderer.");
+    return;
+  }
+
+  await viewAny.when?.();
+
+  const previousScrubState = timelineState.isScrubbingTimeline;
+  timelineState.isScrubbingTimeline = true;
+  resetAnimationGeometryCaches();
+
+  try {
+    for (let i = 0; i <= steps; i += 1) {
+      if (exportCancelRequested) {
+        throw new Error("Export cancelled");
+      }
+      const time = (i / steps) * duration;
+      currentTime = time;
+      updatePlayhead();
+      syncAnimationStartInput();
+      applyAnimationsAtTime(time);
+
+      await waitForNextFrame();
+      await reactiveUtils.whenOnce(() => !viewAny.updating);
+      if (exportCancelRequested) {
+        throw new Error("Export cancelled");
+      }
+
+      const dataUrl = await takeScreenshotDataUrl(viewAny, width, height);
+      const img = await loadImage(dataUrl);
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      frames.push(dataUrl);
+
+      const thumb = document.createElement("img");
+      thumb.className = "gif-thumb";
+      thumb.src = dataUrl;
+      thumb.alt = `Frame ${i + 1}`;
+      document.getElementById("gif-thumbnails")?.appendChild(thumb);
+
+      setGifExportStatus(`Captured ${i + 1} / ${totalFrames} frames…`);
+    }
+  } finally {
+    timelineState.isScrubbingTimeline = previousScrubState;
+  }
+
+  return { frames, fps, delay, width, height, totalFrames };
+}
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+async function encodeGifFromFrames(
+  frames: string[],
+  fps: number,
+  width: number,
+  height: number,
+  qualityLevel: number
+) {
+  if (exportCancelRequested) {
+    throw new Error("Export cancelled");
+  }
+  const gifQuality = qualityLevel === 4 ? 1 : qualityLevel === 3 ? 5 : qualityLevel === 2 ? 10 : 20;
+  const gif = new GIF({
+    workers: 2,
+    workerScript: gifWorkerUrl,
+    quality: gifQuality,
+    width,
+    height,
+    repeat: 0
+  });
+  activeGifEncoder = gif;
+
+  gif.on("progress", (progress) => {
+    const percent = Math.round(progress * 100);
+    setGifExportStatus(`Encoding GIF… ${percent}%`);
+  });
+
+  const delay = Math.round(1000 / fps);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    throw new Error("Unable to prepare GIF renderer.");
+  }
+
+  for (const frame of frames) {
+    if (exportCancelRequested) {
+      throw new Error("Export cancelled");
+    }
+    const img = await loadImage(frame);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    gif.addFrame(canvas, { delay, copy: true });
+  }
+
+  return new Promise<Blob>((resolve, reject) => {
+    gif.on("finished", (blob) => resolve(blob));
+    gif.on("abort", () => reject(new Error("GIF export aborted")));
+    gif.render();
+  });
+}
+
+async function encodeWebmFromFrames(
+  frames: string[],
+  fps: number,
+  width: number,
+  height: number,
+  qualityLevel: number
+) {
+  if (exportCancelRequested) {
+    throw new Error("Export cancelled");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    throw new Error("Unable to prepare WebM renderer.");
+  }
+
+  const bitrate =
+    qualityLevel === 4 ? 8_000_000 : qualityLevel === 3 ? 5_000_000 : qualityLevel === 2 ? 3_000_000 : 1_500_000;
+  const stream = canvas.captureStream(fps);
+  const options: MediaRecorderOptions = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+    ? { mimeType: "video/webm;codecs=vp9", bitsPerSecond: bitrate }
+    : { mimeType: "video/webm", bitsPerSecond: bitrate };
+  const recorder = new MediaRecorder(stream, options);
+  const chunks: BlobPart[] = [];
+
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      chunks.push(event.data);
+    }
+  };
+
+  const recordPromise = new Promise<Blob>((resolve) => {
+    recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
+  });
+
+  recorder.start();
+  for (const frame of frames) {
+    if (exportCancelRequested) {
+      recorder.stop();
+      throw new Error("Export cancelled");
+    }
+    const img = await loadImage(frame);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    await sleep(1000 / fps);
+  }
+  recorder.stop();
+
+  return recordPromise;
+}
+
+async function encodePngZip(frames: string[]) {
+  const zip = new JSZip();
+  for (let i = 0; i < frames.length; i += 1) {
+    if (exportCancelRequested) {
+      throw new Error("Export cancelled");
+    }
+    const response = await fetch(frames[i]);
+    const blob = await response.blob();
+    const name = `frame-${String(i + 1).padStart(4, "0")}.png`;
+    zip.file(name, blob);
+  }
+  return zip.generateAsync({ type: "blob" });
+}
+
+async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: number) {
+  if (exportCancelRequested) {
+    throw new Error("Export cancelled");
+  }
+  if (!ffmpegInstance) {
+    ffmpegInstance = new FFmpeg();
+  }
+  if (!ffmpegLoaded) {
+    setGifExportStatus("Loading MP4 encoder…");
+    const workerUrl = await resolveFfmpegWorkerUrl();
+    let coreURL = ffmpegCoreUrl;
+    let wasmURL = ffmpegWasmUrl;
+    if (!coreURL || !wasmURL) {
+      const coreBase = await resolveFfmpegCoreBaseUrl();
+      coreURL = new URL("ffmpeg-core.js", coreBase).toString();
+      wasmURL = new URL("ffmpeg-core.wasm", coreBase).toString();
+    }
+    await ffmpegInstance.load({ classWorkerURL: workerUrl, coreURL, wasmURL });
+    ffmpegLoaded = true;
+  }
+
+  for (let i = 0; i < frames.length; i += 1) {
+    if (exportCancelRequested) {
+      throw new Error("Export cancelled");
+    }
+    const name = `frame-${String(i + 1).padStart(4, "0")}.png`;
+    await ffmpegInstance.writeFile(name, await fetchFile(frames[i]));
+  }
+
+  setGifExportStatus("Encoding MP4…");
+  const crf = qualityLevel === 4 ? 18 : qualityLevel === 3 ? 22 : qualityLevel === 2 ? 26 : 30;
+  const qscale = qualityLevel === 4 ? 2 : qualityLevel === 3 ? 5 : qualityLevel === 2 ? 8 : 12;
+  const tryEncode = async (codec: "libx264" | "mpeg4") => {
+    const args =
+      codec === "libx264"
+        ? [
+            "-y",
+            "-framerate",
+            String(fps),
+            "-i",
+            "frame-%04d.png",
+            "-c:v",
+            "libx264",
+            "-crf",
+            String(crf),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "faststart",
+            "out.mp4"
+          ]
+        : [
+            "-y",
+            "-framerate",
+            String(fps),
+            "-i",
+            "frame-%04d.png",
+            "-c:v",
+            "mpeg4",
+            "-q:v",
+            String(qscale),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "faststart",
+            "out.mp4"
+          ];
+    const result = await ffmpegInstance.exec(args);
+    return result;
+  };
+
+  let result = await tryEncode("libx264");
+  if (result !== 0) {
+    result = await tryEncode("mpeg4");
+  }
+  if (result !== 0) {
+    throw new Error(`FFmpeg failed (code ${result}).`);
+  }
+
+  const data = await ffmpegInstance.readFile("out.mp4");
+  const bytes = data as Uint8Array;
+  if (!bytes || bytes.byteLength === 0) {
+    throw new Error("FFmpeg produced empty output.");
+  }
+  return new Blob([bytes], { type: "video/mp4" });
+}
+
+async function startFrameExport() {
+  if (isFrameExporting || exportState.isExporting) return;
+  if (!hasPlayableAnimation()) {
+    setGifExportStatus("Add at least one animation to enable export.");
+    return;
+  }
+
+  const formatSelect = document.getElementById("export-format-select") as any;
+  const format = String(formatSelect?.value || "gif") as "gif" | "webm" | "png" | "mp4";
+  const resolution = getExportResolution();
+
+  isFrameExporting = true;
+  exportState.isExporting = true;
+  exportCancelRequested = false;
+  clearExportSelection();
+  showExportPreviewModal();
+  setExportPreviewFullscreen(!resolution.isDefault);
+  const cancelBtn = document.getElementById("export-cancel-btn");
+  if (cancelBtn) {
+    cancelBtn.removeAttribute("hidden");
+  }
+  setExportButtonDisabled(true);
+  setGifExportStatus("Preparing export…");
+  clearGifThumbnails();
+  hideGifPreview();
+  clearGifDownloadUrl();
+  const closeBtn = document.getElementById("export-preview-close");
+  if (closeBtn) {
+    closeBtn.setAttribute("disabled", "");
+  }
+  document.body.classList.add("is-exporting");
+
+  try {
+    if (view?.extent) {
+      exportExtentSnapshot = typeof view.extent.clone === "function" ? view.extent.clone() : view.extent;
+    }
+    if (!resolution.isDefault && resolution.width && resolution.height) {
+      exportResolutionRestore = applyExportResolutionOverride(resolution.width, resolution.height);
+      await waitForNextFrame();
+      await restoreExportExtent({ animate: true, waitMs: 1000 });
+    }
+    const capture = await captureFrames(resolution.width, resolution.height);
+    if (!capture) {
+      throw new Error("Unable to capture frames.");
+    }
+
+    const { frames, fps, width, height, totalFrames } = capture;
+    const quality = getExportQualityLevel();
+    if (exportCancelRequested) {
+      throw new Error("Export cancelled");
+    }
+    setGifExportStatus(`Captured ${frames.length} frames…`);
+
+    let blob: Blob;
+    let previewType: "image" | "video" = "image";
+    let previewSrc = frames[0] || "";
+    let extension = "gif";
+
+    if (format === "gif") {
+      blob = await encodeGifFromFrames(frames, fps, width, height, quality);
+      extension = "gif";
+      previewType = "image";
+    } else if (format === "webm") {
+      blob = await encodeWebmFromFrames(frames, fps, width, height, quality);
+      extension = "webm";
+      previewType = "video";
+    } else if (format === "png") {
+      blob = await encodePngZip(frames);
+      extension = "zip";
+      previewType = "image";
+    } else {
+      blob = await encodeMp4FromFrames(frames, fps, quality);
+      extension = "mp4";
+      previewType = "video";
+    }
+
+    clearGifDownloadUrl();
+    exportDownloadExtension = extension;
+    exportDownloadUrl = URL.createObjectURL(blob);
+    if (format === "png") {
+      previewSrc = frames[0] || "";
+    } else {
+      previewSrc = exportDownloadUrl;
+    }
+    exportDefaultPreview = { type: previewType, src: previewSrc };
+    setGifPreview(previewSrc, "gif", previewType);
+    const downloadBtn = document.getElementById("gif-download-btn");
+    if (downloadBtn) {
+      downloadBtn.textContent = `Download .${extension} (${formatBytes(blob.size)})`;
+      downloadBtn.removeAttribute("disabled");
+    }
+    setGifExportStatus(`Ready (${totalFrames} frames @ ${fps} fps).`);
+  } catch (error) {
+    if (isExportCancelError(error)) {
+      setGifExportStatus("Export cancelled.");
+    } else {
+      console.error("Export failed.", error);
+      setGifExportStatus("Export failed. Please try again.");
+    }
+  } finally {
+    isFrameExporting = false;
+    exportState.isExporting = false;
+    setExportButtonDisabled(false);
+    if (exportResolutionRestore) {
+      exportResolutionRestore();
+      exportResolutionRestore = null;
+    }
+    activeGifEncoder = null;
+    exportCancelRequested = false;
+    await restoreExportExtent({ animate: false });
+    exportExtentSnapshot = null;
+    const cancelBtn = document.getElementById("export-cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.setAttribute("hidden", "");
+    }
+    const closeBtn = document.getElementById("export-preview-close");
+    if (closeBtn) {
+      closeBtn.removeAttribute("disabled");
+    }
+    document.body.classList.remove("is-exporting");
+  }
 }
 
 function setFeatureLayerError(message: string | null) {
@@ -530,6 +1479,20 @@ function setFeatureLayerError(message: string | null) {
   }
   errorEl.textContent = message;
   errorEl.classList.add("show");
+}
+
+function clearExportSelection() {
+  selectedLayerIndex = -1;
+  timelineController.clearSelectedTimelineAnimation();
+  setDeleteLayerButtonVisible(false);
+  updateLayersList();
+  updateTimeline();
+  updateAnimationOptions();
+  if (sketch) {
+    sketch.cancel();
+  }
+  const viewAny = view as any;
+  viewAny?.popup?.close?.();
 }
 
 function isValidFeatureLayerUrl(raw: string) {
@@ -763,7 +1726,7 @@ function updatePrimaryActionsState() {
     const count = graphics?.length ?? graphics?.items?.length ?? 0;
     return count > 0;
   });
-  const newProjectButton = document.getElementById("new-project-btn");
+  const newProjectButton = document.getElementById("new-project-map-btn");
   const mapActionButtons = document.getElementById("map-action-buttons");
   if (mapActionButtons) {
     mapActionButtons.style.display = hasGraphics ? "flex" : "none";
@@ -772,7 +1735,7 @@ function updatePrimaryActionsState() {
     newProjectButton.style.display = hasGraphics ? "inline-flex" : "none";
   }
 
-  const exportButton = document.getElementById("export-btn");
+  const exportButton = document.getElementById("export-action-btn");
   if (exportButton) {
     if (hasPlayableAnimation()) {
       exportButton.removeAttribute("disabled");
@@ -781,11 +1744,6 @@ function updatePrimaryActionsState() {
       exportButton.setAttribute("disabled", "");
       exportButton.setAttribute("title", "Add at least one animation to enable export.");
     }
-  }
-
-  const exportTooltip = document.getElementById("export-tooltip");
-  if (exportTooltip) {
-    exportTooltip.hidden = hasPlayableAnimation();
   }
 }
 
@@ -844,7 +1802,6 @@ export function bootApp() {
   if (hasBooted) return;
   hasBooted = true;
   loadingOverlay.showLoadingOverlay();
-  updateExportButtonLabel();
 
   const mapEl = document.querySelector("#arcgisMap") as any;
   if (!mapEl) return;
@@ -943,6 +1900,7 @@ function initializeApp() {
   setProjectStatus("saved");
   if (ENABLE_PROJECT_STORAGE) {
     initializeStorageConsentState(storageState);
+    updateAutoSaveButtonVisibility();
     if (canUseLocalStorage(storageState)) {
       const storedName = loadStoredProjectName(storageState);
       if (storedName) {
@@ -964,13 +1922,26 @@ function initializeApp() {
 }
 
 function setupEventListeners() {
+  updateExportControlsForFormat();
+  updateExportResolutionControls();
+  updateExportResolutionLabel(view as any);
   document.querySelectorAll("calcite-tab-title").forEach((tab) => {
     tab.addEventListener("calciteTabTitleSelect", handleLayoutChange as EventListener);
     tab.addEventListener("click", handleLayoutChange as EventListener);
   });
+  document.querySelectorAll(".layout-button").forEach((button) => {
+    button.addEventListener("click", handleLayoutChange as EventListener);
+    button.addEventListener("calciteButtonClick", handleLayoutChange as EventListener);
+  });
 
-  getEl("custom-width").addEventListener("calciteInputNumberChange", handleCustomDimensions);
-  getEl("custom-height").addEventListener("calciteInputNumberChange", handleCustomDimensions);
+  const customWidth = document.getElementById("custom-width");
+  const customHeight = document.getElementById("custom-height");
+  if (customWidth) {
+    customWidth.addEventListener("calciteInputNumberChange", handleCustomDimensions);
+  }
+  if (customHeight) {
+    customHeight.addEventListener("calciteInputNumberChange", handleCustomDimensions);
+  }
 
   getEl("add-point-btn").addEventListener("click", () => startDrawing("point"));
   getEl("add-line-btn").addEventListener("click", () => startDrawing("polyline"));
@@ -980,6 +1951,18 @@ function setupEventListeners() {
   getEl("import-geojson-btn").addEventListener("click", () => handleImportClick("geojson"));
   getEl("import-csv-btn").addEventListener("click", () => handleImportClick("csv"));
   getEl("import-file-input").addEventListener("change", handleImportFileChange);
+  getEl("export-resolution-select").addEventListener("calciteSelectChange", () => {
+    updateExportResolutionControls();
+    updateExportResolutionLabel(view as any);
+  });
+  const exportResolutionWidth = document.getElementById("export-resolution-width");
+  const exportResolutionHeight = document.getElementById("export-resolution-height");
+  if (exportResolutionWidth) {
+    exportResolutionWidth.addEventListener("calciteInputNumberChange", applyExportResolutionAspect);
+  }
+  if (exportResolutionHeight) {
+    exportResolutionHeight.addEventListener("calciteInputNumberChange", applyExportResolutionAspect);
+  }
   const projectNameInput = document.getElementById("project-name-input");
   if (projectNameInput) {
     projectNameInput.addEventListener("calciteInputChange", (event: Event) => {
@@ -1167,25 +2150,102 @@ function setupEventListeners() {
 
   getEl("play-button").addEventListener("click", handlePlayFromStart);
   getEl("rotation-button").addEventListener("click", rotateMap);
-  getEl("new-project-btn").addEventListener("click", resetProject);
+  getEl("new-project-map-btn").addEventListener("click", resetProject);
+  getEl("menu-new-project-btn").addEventListener("click", resetProject);
   getEl("delete-layer-btn").addEventListener("click", () => {
     if (selectedLayerIndex >= 0) {
       removeLayer(selectedLayerIndex);
     }
   });
-  getEl("export-btn").addEventListener("click", startExportRecording);
+  getEl("export-action-btn").addEventListener("click", () => {
+    void startFrameExport();
+  });
+  getEl("export-format-select").addEventListener("calciteSelectChange", updateExportControlsForFormat);
+  getEl("export-cancel-btn").addEventListener("click", () => {
+    void cancelFrameExport();
+  });
+  getEl("export-preview-close").addEventListener("click", () => {
+    if (isFrameExporting || exportState.isExporting) return;
+    hideExportPreviewModal();
+  });
+  getEl("gif-download-btn").addEventListener("click", () => {
+    if (!exportDownloadUrl) return;
+    const link = document.createElement("a");
+    link.href = exportDownloadUrl;
+    link.download = getGifExportFileName();
+    link.click();
+  });
+  getEl("gif-preview-close").addEventListener("click", () => {
+    resetGifPreviewToGif();
+  });
+  getEl("export-attribution-copy").addEventListener("click", async () => {
+    const attributionText =
+      (document.getElementById("export-attribution-text") as HTMLElement | null)?.innerText?.trim() ||
+      "";
+    if (!attributionText) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(attributionText);
+      } else {
+        const temp = document.createElement("textarea");
+        temp.value = attributionText;
+        temp.setAttribute("readonly", "");
+        temp.style.position = "absolute";
+        temp.style.left = "-9999px";
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand("copy");
+        temp.remove();
+      }
+      const btn = document.getElementById("export-attribution-copy");
+      if (btn) {
+        btn.textContent = "Copied!";
+        window.setTimeout(() => {
+          btn.textContent = "Copy";
+        }, 1500);
+      }
+    } catch {
+      const btn = document.getElementById("export-attribution-copy");
+      if (btn) {
+        btn.textContent = "Copy failed";
+        window.setTimeout(() => {
+          btn.textContent = "Copy";
+        }, 1500);
+      }
+    }
+  });
+  const gifThumbs = document.getElementById("gif-thumbnails");
+  if (gifThumbs) {
+    gifThumbs.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement | null;
+      const thumb = target?.closest(".gif-thumb") as HTMLImageElement | null;
+      if (!thumb) return;
+      const isSelected = thumb.classList.contains("is-selected");
+      document.querySelectorAll("#gif-thumbnails .gif-thumb.is-selected").forEach((el) => {
+        el.classList.remove("is-selected");
+      });
+      if (isSelected) {
+        resetGifPreviewToGif();
+        return;
+      }
+      thumb.classList.add("is-selected");
+      setGifPreview(thumb.src, "frame");
+    });
+  }
 
   getEl("timeline-play-btn").addEventListener("click", togglePlayAnimation);
-  getEl("timeline-save-btn").addEventListener("click", async () => {
+  getEl("menu-auto-save-btn").addEventListener("click", async () => {
     await ensureStorageConsent(storageState, openConfirmDialog);
     if (storageState.localStorageAllowed) {
       saveProjectToStorage(storageState, storageConfig, projectName, Boolean(view));
+      const autoSaveButton = document.getElementById("menu-auto-save-btn");
+      if (autoSaveButton) {
+        autoSaveButton.style.display = "none";
+      }
     }
   });
-  getEl("timeline-save-as-btn").addEventListener("click", () => handleExportProject(projectIoConfig));
-  getEl("timeline-import-btn").addEventListener("click", () =>
-    handleImportProjectClick(projectIoConfig)
-  );
+  getEl("menu-save-as-btn").addEventListener("click", () => handleExportProject(projectIoConfig));
+  getEl("menu-open-project-btn").addEventListener("click", () => handleImportProjectClick(projectIoConfig));
   getEl("project-file-input").addEventListener("change", (event: Event) =>
     handleProjectFileChange(projectIoConfig, event)
   );
@@ -1218,6 +2278,7 @@ function setupEventListeners() {
     if (timelineState.timelineZoomAuto) {
       updateTimeline();
     }
+    updateExportResolutionLabel(view as any);
   });
 
   if (view) {
@@ -1239,56 +2300,10 @@ function setupEventListeners() {
 }
 
 function handleLayoutChange(event: Event) {
-  const target = event.target as HTMLElement | null;
-  const layout = target?.getAttribute("data-layout");
+  const target = (event.currentTarget as HTMLElement | null) ?? (event.target as HTMLElement | null);
+  const layout = target?.getAttribute("data-layout") ?? target?.closest(".layout-button")?.getAttribute("data-layout");
   if (!layout) return;
-
-  const mapContainer = getEl("map-container");
-  const mapWrapper = getEl("map-wrapper");
-  const rotationButton = getEl("rotation-button");
-
-  switch (layout) {
-    case "default":
-      mapContainer.classList.add("has-padding");
-      mapWrapper.classList.remove("no-shadow");
-      rotationButton.classList.remove("show");
-      isRotated = false;
-      currentAspectRatio = null;
-      resetMapWrapperSize();
-      break;
-    case "mobile":
-      mapContainer.classList.add("has-padding");
-      mapWrapper.classList.remove("no-shadow");
-      rotationButton.classList.add("show");
-      isRotated = false;
-      currentAspectRatio = { width: 9, height: 16 };
-      scheduleAspectRatioUpdate();
-      break;
-    case "tablet":
-      mapContainer.classList.add("has-padding");
-      mapWrapper.classList.remove("no-shadow");
-      rotationButton.classList.add("show");
-      isRotated = false;
-      currentAspectRatio = { width: 3, height: 4 };
-      scheduleAspectRatioUpdate();
-      break;
-    case "custom":
-      mapContainer.classList.add("has-padding");
-      mapWrapper.classList.remove("no-shadow");
-      rotationButton.classList.add("show");
-      isRotated = false;
-      handleCustomDimensions();
-      break;
-  }
-
   currentLayout = layout as any;
-  scheduleProjectSave();
-
-  setTimeout(() => {
-    if (view && typeof view.resize === "function") {
-      view.resize();
-    }
-  }, 350);
 }
 
 function handleBasemapChange() {
@@ -1336,10 +2351,7 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
 
 function toggleImportOptions() {
   const advanced = getEl("layer-import-advanced");
-  const toggle = getEl("import-toggle-btn") as HTMLButtonElement;
-  const isOpen = advanced.classList.toggle("show");
-  toggle.textContent = isOpen ? "Show less" : "Show more";
-  toggle.setAttribute("aria-expanded", String(isOpen));
+  advanced.classList.add("show");
 }
 
 function handleImportClick(type: "geojson" | "csv") {
