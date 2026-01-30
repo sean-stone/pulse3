@@ -195,6 +195,8 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
   if (!config.view) return;
   const meta = snapshot?.properties?._pulse;
   if (!meta) return;
+  const layersToAwait: any[] = [];
+  let targetExtent: Extent | null = null;
 
   config.setIsRestoringProject(true);
   config.setProjectError(null);
@@ -246,14 +248,13 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     config.handleBasemapChange();
     if (meta.app?.extent) {
       const extent = meta.app.extent;
-      const targetExtent = new Extent({
+      targetExtent = new Extent({
         xmin: extent.xmin,
         ymin: extent.ymin,
         xmax: extent.xmax,
         ymax: extent.ymax,
         spatialReference: extent.wkid ? { wkid: extent.wkid } : config.view.spatialReference
       });
-      config.view.goTo(targetExtent, { animate: false }).catch(() => undefined);
     }
 
     const spatialReference = meta.spatialReference?.wkid
@@ -283,6 +284,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         }
 
         config.view.map.add(featureLayer);
+        layersToAwait.push(featureLayer);
         const layerData: LayerData = {
           layer: featureLayer,
           name: config.sanitizePlainText(layerSnapshot.name, "Feature Layer"),
@@ -350,6 +352,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         title: config.sanitizePlainText(layerSnapshot.name, "Layer")
       });
       config.view.map.add(newLayer);
+      layersToAwait.push(newLayer);
 
       const layerData: LayerData = {
         layer: newLayer,
@@ -412,6 +415,15 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     config.updateLayersList();
     config.updateTimeline();
     config.updateAnimationOptions();
+    if (targetExtent) {
+      await config.view.when?.();
+      if (typeof config.view.whenLayerView === "function" && layersToAwait.length) {
+        await Promise.all(
+          layersToAwait.map((layer) => config.view.whenLayerView(layer).catch(() => undefined))
+        );
+      }
+      await config.view.goTo(targetExtent, { animate: false }).catch(() => undefined);
+    }
     config.goToStart();
     if (!config.isApplyingHistory() && config.hasPlayableAnimation()) {
       config.startAnimation();

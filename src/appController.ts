@@ -35,6 +35,7 @@ import {
   ENABLE_PROJECT_STORAGE,
   EXPORT_WARNING_ANIMATIONS,
   EXPORT_WARNING_DURATION,
+  APP_VERSION,
   defaultLineStyle,
   defaultPointStyle,
   defaultPolygonStyle,
@@ -51,14 +52,20 @@ import ffmpegWasmUrl from "@ffmpeg/core/wasm?url";
 let ffmpegClassWorkerUrl: string | null = null;
 let ffmpegCoreBaseUrl: string | null = null;
 
+const appendCacheBust = (url: string) => {
+  if (!APP_VERSION) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(APP_VERSION)}`;
+};
+
 async function resolveFfmpegWorkerUrl() {
   if (ffmpegClassWorkerUrl) return ffmpegClassWorkerUrl;
   const baseUrl = import.meta.env.BASE_URL || "/";
   const docBase = typeof document !== "undefined" ? document.baseURI : window.location.href;
   const candidates = [
-    new URL("ffmpeg-worker.js", docBase).toString(),
-    new URL("ffmpeg-worker.js", new URL(baseUrl, window.location.origin)).toString(),
-    new URL("/ffmpeg-worker.js", window.location.origin).toString()
+    appendCacheBust(new URL("ffmpeg-worker.js", docBase).toString()),
+    appendCacheBust(new URL("ffmpeg-worker.js", new URL(baseUrl, window.location.origin)).toString()),
+    appendCacheBust(new URL("/ffmpeg-worker.js", window.location.origin).toString())
   ];
   const failures: Array<{ url: string; status?: number; contentType?: string }> = [];
   for (const url of candidates) {
@@ -95,7 +102,7 @@ async function resolveFfmpegCoreBaseUrl() {
   ];
   const failures: Array<{ url: string; status?: number; contentType?: string }> = [];
   for (const base of candidates) {
-    const testUrl = new URL("ffmpeg-core.js", base).toString();
+    const testUrl = appendCacheBust(new URL("ffmpeg-core.js", base).toString());
     try {
       const response = await fetch(testUrl, { method: "GET", cache: "no-store" });
       const contentType = response.headers.get("content-type") || "";
@@ -1329,7 +1336,7 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
   }
   if (!ffmpegLoaded) {
     setGifExportStatus("Loading MP4 encoder…");
-    const workerUrl = await resolveFfmpegWorkerUrl();
+    const workerUrl = appendCacheBust(await resolveFfmpegWorkerUrl());
     let coreURL = ffmpegCoreUrl;
     let wasmURL = ffmpegWasmUrl;
     if (!coreURL || !wasmURL) {
@@ -1337,6 +1344,8 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
       coreURL = new URL("ffmpeg-core.js", coreBase).toString();
       wasmURL = new URL("ffmpeg-core.wasm", coreBase).toString();
     }
+    coreURL = appendCacheBust(coreURL);
+    wasmURL = appendCacheBust(wasmURL);
     await ffmpegInstance.load({ classWorkerURL: workerUrl, coreURL, wasmURL });
     ffmpegLoaded = true;
   }

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { bootApp } from "./appController";
+import { APP_VERSION } from "./app/constants";
 import MapArea from "./components/MapArea";
 import SidePanel from "./components/SidePanel";
 import Timeline from "./components/Timeline";
@@ -91,7 +92,7 @@ export default function App() {
                 Keyboard Shortcuts
               </calcite-button>
             </div>
-            <div className="menu-bar-title">Pulse 3.4.3</div>
+            <div className="menu-bar-title">Pulse {APP_VERSION}</div>
             <div className="menu-bar-right">
               <calcite-button
                 id="about-pulse-btn"
@@ -107,7 +108,7 @@ export default function App() {
                 href="https://github.com/sean-stone/pulse3"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Pulse 3.4.3 on GitHub"
+                aria-label={`Pulse ${APP_VERSION} on GitHub`}
                 title="View on GitHub"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">

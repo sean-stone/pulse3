@@ -1,5 +1,5 @@
-# Pulse 3.3.3
-Pulse 3.3.3 is a Vite + React application for building and previewing animated
+# Pulse 3.5.0
+Pulse 3.5.0 is a Vite + React application for building and previewing animated
 map layers. It uses the ArcGIS Maps SDK for JavaScript and Calcite UI components to handle
 mapping, layer styling, and timeline-based animation controls.
 
