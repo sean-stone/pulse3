@@ -4,280 +4,176 @@ function SidePanel() {
   return (
     <div id="side-panel" data-testid="side-panel">
       <Modals />
+      <div id="style-modal-anchor"></div>
       <div id="panel-anchor"></div>
 
       <div id="primary-controls">
-        <div className="panel-header" id="panel-header">
-          <div className="panel-title">Pulse 3.3.3</div>
-          <div className="panel-header-actions">
-            <calcite-button
-              id="ai-ask-btn"
-              scale="s"
-              appearance="solid"
-              className="panel-ai-btn"
-            >
-              AI Animation Agent
-            </calcite-button>
-            <a
-              className="panel-github-link"
-              href="https://github.com/sean-stone/pulse3"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Pulse 3.3.3 on GitHub"
-              title="View on GitHub"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 1.5c-5.8 0-10.5 4.7-10.5 10.5 0 4.6 3 8.5 7.1 9.9.5.1.7-.2.7-.5v-2.1c-2.9.6-3.5-1.2-3.5-1.2-.5-1.1-1.2-1.4-1.2-1.4-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 .1 1.6.7 1.9 1.2.1-.8.4-1.4.7-1.7-2.3-.2-4.6-1.1-4.6-5.1 0-1.1.4-2 1.1-2.8-.1-.2-.5-1.3.1-2.7 0 0 .9-.3 2.8 1.1.8-.2 1.7-.3 2.6-.3s1.8.1 2.6.3c1.9-1.4 2.8-1.1 2.8-1.1.6 1.4.2 2.5.1 2.7.7.7 1.1 1.7 1.1 2.8 0 4-2.3 4.9-4.6 5.1.4.3.8 1 .8 2v3c0 .3.2.6.7.5 4.2-1.4 7.1-5.3 7.1-9.9 0-5.8-4.7-10.5-10.5-10.5z"
-                />
-              </svg>
-            </a>
-          </div>
-        </div>
-
-        <div className="primary-action-bar">
-          <div className="create-layer-buttons" id="create-layer-buttons">
-            <calcite-button
-              id="add-point-btn"
-              data-testid="add-point-btn"
-              icon-start="pin"
-              scale="s"
-              appearance="outline"
-              className="layer-icon-btn"
-              title="Add point"
-              aria-label="Add point"
-            >
-              Point
-            </calcite-button>
-            <calcite-button
-              id="add-line-btn"
-              icon-start="line"
-              scale="s"
-              appearance="outline"
-              className="layer-icon-btn"
-              title="Add line"
-              aria-label="Add line"
-            >
-              Line
-            </calcite-button>
-            <calcite-button
-              id="add-polygon-btn"
-              icon-start="polygon"
-              scale="s"
-              appearance="outline"
-              className="layer-icon-btn"
-              title="Add polygon"
-              aria-label="Add polygon"
-            >
-              Polygon
-            </calcite-button>
-            <calcite-button
-              id="add-text-btn"
-              icon-start="text-large"
-              scale="s"
-              appearance="outline"
-              className="layer-icon-btn"
-              title="Add text"
-              aria-label="Add text"
-            >
-              Text
-            </calcite-button>
-          </div>
-        </div>
       </div>
 
-      <div className="panel-section" data-testid="layers-accordion-item">
-        <div id="draw-instructions" data-testid="draw-instructions">
-          <p>Click on the map to draw. Double-click to finish.</p>
-        </div>
-
-        <button id="import-toggle-btn" className="link-button" type="button" aria-expanded="false">
-          Show more
-        </button>
-
-        <div id="layer-import-advanced" className="import-advanced">
-          <div className="import-layer-buttons">
-            <calcite-button
-              id="import-geojson-btn"
-              icon-start="file-text"
-              scale="s"
-              appearance="outline"
-              width="full"
-            >
-              GeoJSON
-            </calcite-button>
-            <calcite-button
-              id="import-csv-btn"
-              icon-start="table"
-              scale="s"
-              appearance="outline"
-              width="full"
-            >
-              CSV
-            </calcite-button>
-          </div>
-
-          <calcite-label style={{ marginTop: 12 }}>
-            FeatureLayer URL
-            <calcite-input
-              id="feature-layer-url"
-              placeholder="https://.../FeatureServer/0"
-              scale="s"
-            ></calcite-input>
-          </calcite-label>
-          <calcite-button
-            id="add-feature-layer-btn"
-            icon-start="plus"
-            scale="s"
-            appearance="outline"
-            width="full"
-            style={{ marginTop: 8 }}
+      <div className="panel-section" data-testid="onboarding-steps">
+        <calcite-stepper layout="vertical" icon>
+          <calcite-stepper-item
+            id="onboarding-step-draw"
+            icon
+            heading="Get Started"
+            selected
           >
-            Add FeatureLayer
-          </calcite-button>
-          <div id="feature-layer-error" className="form-error" role="status" aria-live="polite"></div>
-        </div>
-
-        <input id="import-file-input" type="file" style={{ display: "none" }} />
-        <div id="layers-accordion" data-testid="layers-accordion"></div>
-
-        <div id="animation-settings-stash" style={{ display: "none" }}>
-          <div id="animation-settings-panel" className="animation-settings-panel">
-            <calcite-label className="animation-type-row">
-              Animation Type
-              <div className="animation-type-inline">
-                <div id="animation-type-options" className="animation-type-options"></div>
-              </div>
-            </calcite-label>
-
-            <div id="feature-animation-settings" style={{ display: "none" }}>
-              <calcite-label style={{ marginTop: 12 }}>
-                Field to animate
-                <calcite-select id="feature-field-select" scale="m"></calcite-select>
-              </calcite-label>
-              <calcite-label style={{ marginTop: 12 }}>
-                Visual variable
-                <calcite-select id="feature-visual-select" scale="m">
-                  <calcite-option value="opacity">Opacity</calcite-option>
-                  <calcite-option value="size">Size</calcite-option>
-                  <calcite-option value="color">Color</calcite-option>
-                </calcite-select>
-              </calcite-label>
-              <calcite-label style={{ marginTop: 12 }}>
-                Hide null values
-                <calcite-switch id="feature-hide-nulls"></calcite-switch>
-              </calcite-label>
-              <calcite-label style={{ marginTop: 12 }}>
-                Fade out at end
-                <calcite-switch id="feature-fade-out" checked></calcite-switch>
-              </calcite-label>
-              <calcite-button
-                id="feature-style-btn"
-                width="full"
-                appearance="outline"
-                icon-start="paint-bucket"
-                style={{ marginTop: 12 }}
-              >
-                Feature Style
+            <p className="stepper-info">
+              Welcome to Pulse! To get started, draw onto the map the features you want to animate.
+            </p>
+            <div className="stepper-action-row">
+              <calcite-button id="onboarding-where-btn" scale="s" appearance="outline">
+                Where?
               </calcite-button>
             </div>
-          </div>
-        </div>
+          </calcite-stepper-item>
+          <calcite-stepper-item
+            id="onboarding-step-style"
+            icon
+            heading="Animations and Styles"
+          >
+            <div id="layers-accordion" data-testid="layers-accordion"></div>
+
+            <div id="animation-settings-stash" style={{ display: "none" }}>
+              <div id="animation-settings-panel" className="animation-settings-panel">
+                <calcite-label className="animation-type-row">
+                  Animation Type
+                  <div className="animation-type-inline">
+                    <div id="animation-type-options" className="animation-type-options"></div>
+                  </div>
+                </calcite-label>
+
+                <div id="feature-animation-settings" style={{ display: "none" }}>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Field to animate
+                    <calcite-select id="feature-field-select" scale="m"></calcite-select>
+                  </calcite-label>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Visual variable
+                    <calcite-select id="feature-visual-select" scale="m">
+                      <calcite-option value="opacity">Opacity</calcite-option>
+                      <calcite-option value="size">Size</calcite-option>
+                      <calcite-option value="color">Color</calcite-option>
+                    </calcite-select>
+                  </calcite-label>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Hide null values
+                    <calcite-switch id="feature-hide-nulls"></calcite-switch>
+                  </calcite-label>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Fade out at end
+                    <calcite-switch id="feature-fade-out" checked></calcite-switch>
+                  </calcite-label>
+                  <calcite-button
+                    id="feature-style-btn"
+                    width="full"
+                    appearance="outline"
+                    icon-start="paint-bucket"
+                    style={{ marginTop: 12 }}
+                  >
+                    Feature Style
+                  </calcite-button>
+                </div>
+              </div>
+            </div>
+          </calcite-stepper-item>
+          <calcite-stepper-item
+            id="onboarding-step-export"
+            icon
+            heading="Export Video"
+          >
+            <div id="export-section">
+              <calcite-label className="export-format-label">
+                Export format
+                <calcite-select id="export-format-select" scale="m">
+                  <calcite-option value="gif" selected>
+                    GIF (animated image)
+                  </calcite-option>
+                  <calcite-option value="webm">WebM (high quality)</calcite-option>
+                  <calcite-option value="png">PNG sequence (zip)</calcite-option>
+                  <calcite-option value="mp4">MP4 (ffmpeg.wasm)</calcite-option>
+                </calcite-select>
+              </calcite-label>
+              <calcite-label className="gif-fps-label">
+                Export FPS
+                <calcite-input-number
+                  id="gif-fps-input"
+                  scale="s"
+                  min="1"
+                  max="60"
+                  step="1"
+                  value="30"
+                ></calcite-input-number>
+              </calcite-label>
+              <calcite-label className="export-quality-label">
+                Export quality
+                <calcite-slider
+                  id="export-quality-slider"
+                  min="1"
+                  max="4"
+                  step="1"
+                  value="3"
+                  snap
+                  ticks
+                  label-handles
+                ></calcite-slider>
+                <div className="export-quality-scale">
+                  <span>Lowest</span>
+                  <span>Moderate</span>
+                  <span>High</span>
+                  <span>Best</span>
+                </div>
+              </calcite-label>
+              <calcite-label className="export-resolution-label">
+                Export resolution
+                <calcite-select id="export-resolution-select" scale="m">
+                  <calcite-option value="default" selected>
+                    Default (current map resolution)
+                  </calcite-option>
+                  <calcite-option value="instagram">Instagram (1080 x 1080)</calcite-option>
+                  <calcite-option value="720p">720p (1280 x 720)</calcite-option>
+                  <calcite-option value="1080p">1080p (1920 x 1080)</calcite-option>
+                  <calcite-option value="4k">4K (3840 x 2160)</calcite-option>
+                  <calcite-option value="custom">Custom...</calcite-option>
+                </calcite-select>
+              </calcite-label>
+              <div id="export-resolution-custom" className="export-resolution-custom">
+                <div className="export-resolution-inputs">
+                  <calcite-label>
+                    Width (px)
+                    <calcite-input-number
+                      id="export-resolution-width"
+                      scale="s"
+                      min="1"
+                      max="8000"
+                      step="1"
+                      value="1000"
+                    ></calcite-input-number>
+                  </calcite-label>
+                  <calcite-label>
+                    Height (px)
+                    <calcite-input-number
+                      id="export-resolution-height"
+                      scale="s"
+                      min="1"
+                      max="8000"
+                      step="1"
+                      value="1000"
+                    ></calcite-input-number>
+                  </calcite-label>
+                </div>
+                <div className="export-resolution-note">
+                  Custom resolution overrides the current aspect ratio (examples: 1080 x 1080, 1920 x 1080).
+                </div>
+              </div>
+              <calcite-button id="export-action-btn" icon-start="download" scale="m" width="full">
+                Export
+              </calcite-button>
+            </div>
+          </calcite-stepper-item>
+        </calcite-stepper>
       </div>
 
-      <div className="panel-section" id="basemap-section">
-        <div className="panel-section-title">Basemap</div>
-        <calcite-label>
-          <calcite-select id="basemap-select" scale="m">
-            <calcite-option value="gray-vector">Gray</calcite-option>
-            <calcite-option value="streets-vector">Streets</calcite-option>
-            <calcite-option value="topo-vector">Topographic</calcite-option>
-            <calcite-option value="satellite">Satellite</calcite-option>
-            <calcite-option value="dark-gray-vector">Dark Gray</calcite-option>
-            <calcite-option value="osm">OpenStreetMap</calcite-option>
-            <calcite-option value="none">None</calcite-option>
-          </calcite-select>
-        </calcite-label>
-      </div>
-
-      <div className="panel-section" id="layout-section">
-        <div className="panel-section-title">Layout</div>
-        <calcite-tabs bordered id="layout-tabs" layout="inline" position="top" scale="m">
-          <calcite-tab-nav slot="title-group" role="tablist" bordered layout="inline">
-            <calcite-tab-title selected data-layout="default">
-              Default
-            </calcite-tab-title>
-            <calcite-tab-title data-layout="mobile">Mobile</calcite-tab-title>
-            <calcite-tab-title data-layout="tablet">Tablet</calcite-tab-title>
-            <calcite-tab-title data-layout="custom">Custom</calcite-tab-title>
-          </calcite-tab-nav>
-          <calcite-tab selected>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--color-muted)" }}>
-              Default layout (full screen)
-            </p>
-          </calcite-tab>
-          <calcite-tab>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--color-muted)" }}>
-              Mobile: 9:16
-            </p>
-          </calcite-tab>
-          <calcite-tab>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--color-muted)" }}>
-              Tablet: 3:4
-            </p>
-          </calcite-tab>
-          <calcite-tab>
-            <calcite-label>
-              Aspect Width
-              <calcite-input-number
-                id="custom-width"
-                value="9"
-                min="1"
-                max="100"
-                step="1"
-                scale="s"
-              ></calcite-input-number>
-            </calcite-label>
-            <calcite-label style={{ marginTop: 8 }}>
-              Aspect Height
-              <calcite-input-number
-                id="custom-height"
-                value="16"
-                min="1"
-                max="100"
-                step="1"
-                scale="s"
-              ></calcite-input-number>
-            </calcite-label>
-          </calcite-tab>
-        </calcite-tabs>
-      </div>
-
-      <div id="export-section">
-        <calcite-button id="export-btn" icon-start="download" scale="m" width="full">
-          Export as .mp4
-        </calcite-button>
-        <div id="export-error" className="export-error" role="status" aria-live="polite"></div>
-        <div id="export-warning" className="export-warning" role="status" aria-live="polite"></div>
-        <div className="export-note">
-          Best in Chrome or Edge. Long exports can be slow or large.
-        </div>
-        <div className="export-terms">
-          You are responsible for complying with Esri and data source terms when sharing exports.
-        </div>
-        <calcite-tooltip id="export-tooltip" reference-element="export-btn" placement="top">
-          Add at least one animation to enable export.
-        </calcite-tooltip>
-        <div id="copy-card" style={{ display: "none", marginTop: 12 }}>
-          <div id="quote-text" style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 8 }}>
-            Attribution required when sharing exports:
-          </div>
-          <calcite-button id="download-btn" icon-start="download" scale="m" width="full">
-            Download
-          </calcite-button>
-          <a id="download-link" style={{ display: "none" }}></a>
-        </div>
-      </div>
       <div className="export-lock-overlay" aria-hidden="true">
         <div className="export-lock-card">
           <svg

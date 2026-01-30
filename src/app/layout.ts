@@ -11,6 +11,14 @@ type LayoutConfig = {
 
 const applyResponsiveLayout = (state: LayoutState, config: LayoutConfig, isMobile: boolean) => {
   document.body.classList.toggle("is-mobile", isMobile);
+  document.body.classList.toggle("is-portrait", window.matchMedia("(orientation: portrait)").matches);
+  const orientationOverlay = document.getElementById("orientation-overlay");
+  const shouldShowOrientation =
+    isMobile && window.matchMedia("(orientation: portrait)").matches;
+  if (orientationOverlay) {
+    orientationOverlay.classList.toggle("show", shouldShowOrientation);
+    orientationOverlay.setAttribute("aria-hidden", shouldShowOrientation ? "false" : "true");
+  }
 
   const mobileHeader = document.getElementById("mobile-header");
   const primaryControls = document.getElementById("primary-controls");
@@ -85,6 +93,12 @@ const setupResponsiveLayout = (state: LayoutState, config: LayoutConfig) => {
     state.responsiveMediaQuery.addEventListener("change", apply);
   } else if (typeof (state.responsiveMediaQuery as any).addListener === "function") {
     (state.responsiveMediaQuery as any).addListener(apply);
+  }
+  const orientationQuery = window.matchMedia("(orientation: portrait)");
+  if ("addEventListener" in orientationQuery) {
+    orientationQuery.addEventListener("change", apply);
+  } else if (typeof (orientationQuery as any).addListener === "function") {
+    (orientationQuery as any).addListener(apply);
   }
 };
 

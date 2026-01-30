@@ -50,13 +50,20 @@ export const PROJECT_STORAGE_KEY_RECENTS = "pulse.project.recents";
 export const PROJECT_STORAGE_KEY_NAME = "pulse.project.name";
 export const STORAGE_CONSENT_KEY = "pulse.storage.consent";
 export const PROJECT_VERSION = 1;
+export const APP_VERSION = "3.6.0";
 export const ENABLE_PROJECT_STORAGE = true;
 
 export const allowedBasemaps = new Set([
   "gray-vector",
   "streets-vector",
+  "streets-navigation-vector",
+  "streets-night-vector",
+  "streets-relief-vector",
   "topo-vector",
   "satellite",
+  "hybrid",
+  "terrain",
+  "oceans",
   "dark-gray-vector",
   "osm",
   "none"
@@ -107,6 +114,8 @@ export type ProjectSnapshot = {
         isRotated: boolean;
         basemap: string;
         basemapVisible: boolean;
+        backgroundColor?: string;
+        backgroundTransparent?: boolean;
         extent?: { xmin: number; ymin: number; xmax: number; ymax: number; wkid?: number };
       };
       timeline: {

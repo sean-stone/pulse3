@@ -151,8 +151,16 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   });
 
   const basemapSelect = config.getEl("basemap-select") as any;
-  const customWidth = Number((config.getEl("custom-width") as any).value);
-  const customHeight = Number((config.getEl("custom-height") as any).value);
+  const basemapBackgroundInput = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
+  const basemapBackgroundTransparentInput = document.getElementById(
+    "basemap-bg-transparent"
+  ) as HTMLInputElement | null;
+  const customWidthInput = document.getElementById("custom-width") as any;
+  const customHeightInput = document.getElementById("custom-height") as any;
+  const customWidth = Number(customWidthInput?.value);
+  const customHeight = Number(customHeightInput?.value);
+  const backgroundColor = basemapBackgroundInput?.value || "#ffffff";
+  const backgroundTransparent = Boolean(basemapBackgroundTransparentInput?.checked);
 
   return {
     type: "FeatureCollection",
@@ -170,6 +178,8 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           isRotated: config.isRotated,
           basemap: String(basemapSelect?.value || "gray-vector"),
           basemapVisible: basemapSelect?.value !== "none",
+          backgroundColor,
+          backgroundTransparent,
           extent: config.view.extent
             ? {
                 xmin: config.view.extent.xmin,
@@ -193,6 +203,8 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
   if (!config.view) return;
   const meta = snapshot?.properties?._pulse;
   if (!meta) return;
+  const layersToAwait: any[] = [];
+  let targetExtent: Extent | null = null;
 
   config.setIsRestoringProject(true);
   config.setProjectError(null);
@@ -213,11 +225,13 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     const customWidth = meta.app?.customWidth;
     const customHeight = meta.app?.customHeight;
     if (layout === "custom") {
-      if (Number.isFinite(customWidth)) {
-        config.setCalciteValue(config.getEl("custom-width"), customWidth ?? 0);
+      const customWidthEl = document.getElementById("custom-width");
+      const customHeightEl = document.getElementById("custom-height");
+      if (customWidthEl && Number.isFinite(customWidth)) {
+        config.setCalciteValue(customWidthEl, customWidth ?? 0);
       }
-      if (Number.isFinite(customHeight)) {
-        config.setCalciteValue(config.getEl("custom-height"), customHeight ?? 0);
+      if (customHeightEl && Number.isFinite(customHeight)) {
+        config.setCalciteValue(customHeightEl, customHeight ?? 0);
       }
     }
     const layoutTab = document.querySelector(
@@ -239,17 +253,26 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     const basemapSelect = config.getEl("basemap-select") as any;
     const storedBasemap = config.normalizeBasemap(meta.app?.basemap || "gray-vector");
     basemapSelect.value = meta.app?.basemapVisible === false ? "none" : storedBasemap;
+    const basemapBackgroundInput = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
+    if (basemapBackgroundInput && meta.app?.backgroundColor) {
+      basemapBackgroundInput.value = String(meta.app.backgroundColor);
+    }
+    const basemapBackgroundTransparentInput = document.getElementById(
+      "basemap-bg-transparent"
+    ) as HTMLInputElement | null;
+    if (basemapBackgroundTransparentInput && meta.app?.backgroundTransparent !== undefined) {
+      basemapBackgroundTransparentInput.checked = Boolean(meta.app.backgroundTransparent);
+    }
     config.handleBasemapChange();
     if (meta.app?.extent) {
       const extent = meta.app.extent;
-      const targetExtent = new Extent({
+      targetExtent = new Extent({
         xmin: extent.xmin,
         ymin: extent.ymin,
         xmax: extent.xmax,
         ymax: extent.ymax,
         spatialReference: extent.wkid ? { wkid: extent.wkid } : config.view.spatialReference
       });
-      config.view.goTo(targetExtent, { animate: false }).catch(() => undefined);
     }
 
     const spatialReference = meta.spatialReference?.wkid
@@ -279,6 +302,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         }
 
         config.view.map.add(featureLayer);
+        layersToAwait.push(featureLayer);
         const layerData: LayerData = {
           layer: featureLayer,
           name: config.sanitizePlainText(layerSnapshot.name, "Feature Layer"),
@@ -346,6 +370,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         title: config.sanitizePlainText(layerSnapshot.name, "Layer")
       });
       config.view.map.add(newLayer);
+      layersToAwait.push(newLayer);
 
       const layerData: LayerData = {
         layer: newLayer,
@@ -408,6 +433,15 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     config.updateLayersList();
     config.updateTimeline();
     config.updateAnimationOptions();
+    if (targetExtent) {
+      await config.view.when?.();
+      if (typeof config.view.whenLayerView === "function" && layersToAwait.length) {
+        await Promise.all(
+          layersToAwait.map((layer) => config.view.whenLayerView(layer).catch(() => undefined))
+        );
+      }
+      await config.view.goTo(targetExtent, { animate: false }).catch(() => undefined);
+    }
     config.goToStart();
     if (!config.isApplyingHistory() && config.hasPlayableAnimation()) {
       config.startAnimation();
