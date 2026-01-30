@@ -24,6 +24,7 @@ declare module "gif.js" {
     render(): void;
     abort(): void;
   }
+
 }
 
 declare module "gif.js/dist/gif.worker.js?url" {

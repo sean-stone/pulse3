@@ -1143,6 +1143,86 @@ function Modals() {
         </div>
       </calcite-dialog>
       <calcite-dialog
+        id="keyboard-shortcuts-modal"
+        heading="Keyboard shortcuts"
+        scale="s"
+        overlay-positioning="fixed"
+        placement="center"
+      >
+        <div className="shortcuts-grid">
+          <div className="shortcut-key">Ctrl/Cmd + Z</div>
+          <div className="shortcut-desc">Undo</div>
+          <div className="shortcut-key">Ctrl/Cmd + Shift + Z</div>
+          <div className="shortcut-desc">Redo</div>
+          <div className="shortcut-key">Space</div>
+          <div className="shortcut-desc">Play / pause</div>
+          <div className="shortcut-key">1</div>
+          <div className="shortcut-desc">Point tool</div>
+          <div className="shortcut-key">2</div>
+          <div className="shortcut-desc">Line tool</div>
+          <div className="shortcut-key">3</div>
+          <div className="shortcut-desc">Polygon tool</div>
+          <div className="shortcut-key">4</div>
+          <div className="shortcut-desc">Annotation tool</div>
+          <div className="shortcut-key">M</div>
+          <div className="shortcut-desc">More draw options</div>
+          <div className="shortcut-key">Home</div>
+          <div className="shortcut-desc">Go to start</div>
+          <div className="shortcut-key">End</div>
+          <div className="shortcut-desc">Go to end</div>
+        </div>
+        <div slot="footer" className="dialog-footer">
+          <calcite-button id="keyboard-shortcuts-close" appearance="outline">
+            Close
+          </calcite-button>
+        </div>
+      </calcite-dialog>
+      <calcite-dialog
+        id="about-pulse-modal"
+        heading="About Pulse"
+        scale="s"
+        overlay-positioning="fixed"
+        placement="center"
+      >
+        <div className="about-modal">
+          <p>
+            Pulse is an interactive map animation studio. Draw features, style them, and animate timelines
+            to create shareable exports.
+          </p>
+          <p>
+            The AI Animation Agent converts your prompt into a timeline of animations and applies them to
+            the current map view, so you can iterate quickly with natural language.
+          </p>
+          <p className="about-modal-muted">
+            This experience has been 100% prompt generated — no code was written manually.
+          </p>
+          <p className="about-modal-muted">
+            Built with{" "}
+            <a
+              href="https://developers.arcgis.com/javascript/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              ArcGIS Maps SDK for JavaScript
+            </a>
+            {" "}and{" "}
+            <a
+              href="https://developers.arcgis.com/calcite-design-system/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Calcite Components
+            </a>
+            .
+          </p>
+        </div>
+        <div slot="footer" className="dialog-footer">
+          <calcite-button id="about-pulse-close" appearance="outline">
+            Close
+          </calcite-button>
+        </div>
+      </calcite-dialog>
+      <calcite-dialog
         id="export-preview-modal"
         heading="Export preview"
         scale="s"
@@ -1170,6 +1250,9 @@ function Modals() {
           </div>
           <img id="gif-preview-img" alt="Export preview" />
           <video id="gif-preview-video" controls></video>
+        </div>
+        <div className="export-terms">
+          You are responsible for complying with Esri and data source terms when sharing exports.
         </div>
         <div className="export-attribution">
           <strong>Attribution:</strong>

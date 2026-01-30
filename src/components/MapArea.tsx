@@ -1,16 +1,10 @@
 function MapArea() {
   return (
     <div id="map-container" data-testid="map-container">
+      <div id="draw-info-box" className="draw-info-box map-draw-info" role="note">
+        Click on the map to draw. Double-click to finish.
+      </div>
       <div id="map-action-buttons">
-        <calcite-button
-          id="new-project-map-btn"
-          icon-start="file"
-          scale="s"
-          appearance="outline"
-          kind="brand"
-        >
-          New project
-        </calcite-button>
         <calcite-button
           id="delete-layer-btn"
           icon-start="trash"

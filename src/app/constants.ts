@@ -55,8 +55,14 @@ export const ENABLE_PROJECT_STORAGE = true;
 export const allowedBasemaps = new Set([
   "gray-vector",
   "streets-vector",
+  "streets-navigation-vector",
+  "streets-night-vector",
+  "streets-relief-vector",
   "topo-vector",
   "satellite",
+  "hybrid",
+  "terrain",
+  "oceans",
   "dark-gray-vector",
   "osm",
   "none"

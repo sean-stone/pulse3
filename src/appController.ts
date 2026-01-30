@@ -9,7 +9,7 @@ import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Sketch from "@arcgis/core/widgets/Sketch";
 import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 
-import GIF from "gif.js";
+import "gif.js/dist/gif.js";
 import gifWorkerUrl from "gif.js/dist/gif.worker.js?url";
 
 import { animationTypes } from "./animationTypes";
@@ -43,7 +43,7 @@ import {
   sanitizePlainText
 } from "./app/constants";
 import type { ProjectSnapshot } from "./app/constants";
-import JSZip from "jszip";
+import "jszip/dist/jszip.min.js";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import ffmpegCoreUrl from "@ffmpeg/core?url";
@@ -206,6 +206,16 @@ let ffmpegLoaded = false;
 let pendingImportType: "geojson" | "csv" | null = null;
 let lastPointSizeInput = DEFAULT_PIN_SIZE;
 let projectStatusTimer: number | null = null;
+
+async function handleAutoSaveAction() {
+  await ensureStorageConsent(storageState, openConfirmDialog);
+  if (!storageState.localStorageAllowed) return;
+  saveProjectToStorage(storageState, storageConfig, projectName, Boolean(view));
+  const autoSaveButton = document.getElementById("menu-auto-save-btn");
+  if (autoSaveButton) {
+    autoSaveButton.style.display = "none";
+  }
+}
 const storageState: StorageState = {
   localStorageAllowed: false,
   hasCheckedStorageConsent: false
@@ -432,6 +442,18 @@ function setSketchUpdateOnGraphicClick(value: boolean) {
   if (sketchAny?.updateOnGraphicClick !== undefined) {
     sketchAny.updateOnGraphicClick = value;
   }
+}
+
+function setDrawInfoBoxVisible(visible: boolean) {
+  const infoBox = document.getElementById("draw-info-box");
+  if (!infoBox) return;
+  infoBox.classList.toggle("is-active", visible);
+}
+
+function setDrawInfoBoxText(text: string) {
+  const infoBox = document.getElementById("draw-info-box");
+  if (!infoBox) return;
+  infoBox.textContent = text;
 }
 
 function updateSnappingOptions() {
@@ -1151,6 +1173,10 @@ async function encodeGifFromFrames(
     throw new Error("Export cancelled");
   }
   const gifQuality = qualityLevel === 4 ? 1 : qualityLevel === 3 ? 5 : qualityLevel === 2 ? 10 : 20;
+  const GIF = (window as any).GIF;
+  if (!GIF) {
+    throw new Error("GIF encoder unavailable.");
+  }
   const gif = new GIF({
     workers: 2,
     workerScript: gifWorkerUrl,
@@ -1246,6 +1272,10 @@ async function encodeWebmFromFrames(
 }
 
 async function encodePngZip(frames: string[]) {
+  const JSZip = (window as any).JSZip;
+  if (!JSZip) {
+    throw new Error("ZIP encoder unavailable.");
+  }
   const zip = new JSZip();
   for (let i = 0; i < frames.length; i += 1) {
     if (exportCancelRequested) {
@@ -1291,6 +1321,10 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
   setGifExportStatus("Encoding MP4…");
   const crf = qualityLevel === 4 ? 18 : qualityLevel === 3 ? 22 : qualityLevel === 2 ? 26 : 30;
   const qscale = qualityLevel === 4 ? 2 : qualityLevel === 3 ? 5 : qualityLevel === 2 ? 8 : 12;
+  const ffmpeg = ffmpegInstance;
+  if (!ffmpeg) {
+    throw new Error("FFmpeg not initialized.");
+  }
   const tryEncode = async (codec: "libx264" | "mpeg4") => {
     const args =
       codec === "libx264"
@@ -1322,28 +1356,44 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
             String(qscale),
             "-pix_fmt",
             "yuv420p",
+            "-tag:v",
+            "mp4v",
             "-movflags",
             "faststart",
             "out.mp4"
           ];
-    const result = await ffmpegInstance.exec(args);
+    const result = await ffmpeg.exec(args);
     return result;
   };
 
   let result = await tryEncode("libx264");
+  let codecUsed: "libx264" | "mpeg4" = "libx264";
   if (result !== 0) {
     result = await tryEncode("mpeg4");
+    codecUsed = "mpeg4";
   }
   if (result !== 0) {
     throw new Error(`FFmpeg failed (code ${result}).`);
   }
 
-  const data = await ffmpegInstance.readFile("out.mp4");
-  const bytes = data as Uint8Array;
-  if (!bytes || bytes.byteLength === 0) {
+  const data = await ffmpeg.readFile("out.mp4");
+  const dataAny = data as unknown;
+  let bytes: Uint8Array;
+  if (dataAny instanceof Uint8Array) {
+    bytes = dataAny;
+  } else if (dataAny instanceof ArrayBuffer) {
+    bytes = new Uint8Array(dataAny);
+  } else if (typeof dataAny === "string") {
+    bytes = new TextEncoder().encode(dataAny);
+  } else {
+    bytes = new Uint8Array(dataAny as ArrayBufferLike);
+  }
+  if (bytes.byteLength === 0) {
     throw new Error("FFmpeg produced empty output.");
   }
-  return new Blob([bytes], { type: "video/mp4" });
+  const safeBytes = Uint8Array.from(bytes);
+  const blob = new Blob([safeBytes.buffer], { type: "video/mp4" });
+  return { blob, codec: codecUsed };
 }
 
 async function startFrameExport() {
@@ -1417,9 +1467,15 @@ async function startFrameExport() {
       extension = "zip";
       previewType = "image";
     } else {
-      blob = await encodeMp4FromFrames(frames, fps, quality);
+      const mp4Result = await encodeMp4FromFrames(frames, fps, quality);
+      blob = mp4Result.blob;
       extension = "mp4";
       previewType = "video";
+      if (mp4Result.codec === "mpeg4") {
+        previewType = "image";
+        previewSrc = frames[0] || "";
+        setGifExportStatus("MP4 generated with MPEG-4 codec. Preview may not be available in this browser.");
+      }
     }
 
     clearGifDownloadUrl();
@@ -1603,17 +1659,21 @@ async function resetProject() {
     if (!shouldReset) return;
   }
   stopAnimation();
+  isRestoringProject = true;
+  if (projectSaveTimer) {
+    window.clearTimeout(projectSaveTimer);
+    projectSaveTimer = null;
+  }
   if (sketch) {
     sketch.cancel();
     (sketch as any).layer = null;
   }
-  const drawInstructions = getEl("draw-instructions");
-  drawInstructions.classList.remove("show");
   view.graphics?.removeAll?.();
   view.map.removeMany(graphicsLayers.map((layerData) => layerData.layer));
   graphicsLayers = [];
   selectedLayerIndex = -1;
   isDrawing = false;
+  setDrawInfoBoxVisible(false);
   updateSnappingOptions();
   timelineController.clearSelectedTimelineAnimation();
   timelineController.setTimelineDurationOverride(null);
@@ -1624,8 +1684,10 @@ async function resetProject() {
   setDeleteLayerButtonVisible(false);
   setProjectStatus("saved");
   resetHistory(historyState, historyConfig);
-  if (!ENABLE_PROJECT_STORAGE) return;
-  clearProjectStorage(storageState);
+  if (ENABLE_PROJECT_STORAGE) {
+    clearProjectStorage(storageState);
+  }
+  isRestoringProject = false;
 }
 const pointPathStyles: Record<string, string> = {
   "home": "M12 3l9 8h-3v10h-5v-6h-2v6H6V11H3z",
@@ -1726,13 +1788,53 @@ function updatePrimaryActionsState() {
     const count = graphics?.length ?? graphics?.items?.length ?? 0;
     return count > 0;
   });
-  const newProjectButton = document.getElementById("new-project-map-btn");
   const mapActionButtons = document.getElementById("map-action-buttons");
+  const onboardingStep = document.getElementById("onboarding-step-draw");
+  const onboardingStyleStep = document.getElementById("onboarding-step-style");
   if (mapActionButtons) {
     mapActionButtons.style.display = hasGraphics ? "flex" : "none";
   }
-  if (newProjectButton) {
-    newProjectButton.style.display = hasGraphics ? "inline-flex" : "none";
+  if (onboardingStep || onboardingStyleStep) {
+    const setStepperState = (
+      el: HTMLElement | null,
+      options: { selected: boolean; complete?: boolean; disabled?: boolean }
+    ) => {
+      if (!el) return;
+      if (options.complete !== undefined) {
+        if (options.complete) {
+          el.setAttribute("complete", "");
+        } else {
+          el.removeAttribute("complete");
+        }
+        (el as any).complete = options.complete;
+      }
+      if (options.disabled !== undefined) {
+        if (options.disabled) {
+          el.setAttribute("disabled", "");
+        } else {
+          el.removeAttribute("disabled");
+        }
+        (el as any).disabled = options.disabled;
+      }
+      if (options.selected) {
+        el.setAttribute("selected", "");
+      } else {
+        el.removeAttribute("selected");
+      }
+      (el as any).selected = options.selected;
+    };
+
+    const onboardingExportStep = document.getElementById("onboarding-step-export");
+    const exportEnabled = hasPlayableAnimation();
+    if (hasGraphics) {
+      setStepperState(onboardingStep, { selected: false, complete: true, disabled: true });
+      setStepperState(onboardingStyleStep, { selected: true, disabled: false, complete: exportEnabled });
+      setStepperState(onboardingExportStep, { selected: false, disabled: !exportEnabled });
+    } else {
+      setStepperState(onboardingStep, { selected: true, complete: false, disabled: false });
+      setStepperState(onboardingStyleStep, { selected: false, disabled: true, complete: false });
+      setStepperState(onboardingExportStep, { selected: false, disabled: true });
+    }
   }
 
   const exportButton = document.getElementById("export-action-btn");
@@ -2150,7 +2252,6 @@ function setupEventListeners() {
 
   getEl("play-button").addEventListener("click", handlePlayFromStart);
   getEl("rotation-button").addEventListener("click", rotateMap);
-  getEl("new-project-map-btn").addEventListener("click", resetProject);
   getEl("menu-new-project-btn").addEventListener("click", resetProject);
   getEl("delete-layer-btn").addEventListener("click", () => {
     if (selectedLayerIndex >= 0) {
@@ -2173,7 +2274,10 @@ function setupEventListeners() {
     const link = document.createElement("a");
     link.href = exportDownloadUrl;
     link.download = getGifExportFileName();
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
     link.click();
+    link.remove();
   });
   getEl("gif-preview-close").addEventListener("click", () => {
     resetGifPreviewToGif();
@@ -2231,18 +2335,21 @@ function setupEventListeners() {
       thumb.classList.add("is-selected");
       setGifPreview(thumb.src, "frame");
     });
+    gifThumbs.addEventListener(
+      "wheel",
+      (event: WheelEvent) => {
+        if (Math.abs(event.deltaY) < 1) return;
+        if (event.shiftKey) return;
+        gifThumbs.scrollLeft += event.deltaY;
+        event.preventDefault();
+      },
+      { passive: false }
+    );
   }
 
   getEl("timeline-play-btn").addEventListener("click", togglePlayAnimation);
-  getEl("menu-auto-save-btn").addEventListener("click", async () => {
-    await ensureStorageConsent(storageState, openConfirmDialog);
-    if (storageState.localStorageAllowed) {
-      saveProjectToStorage(storageState, storageConfig, projectName, Boolean(view));
-      const autoSaveButton = document.getElementById("menu-auto-save-btn");
-      if (autoSaveButton) {
-        autoSaveButton.style.display = "none";
-      }
-    }
+  getEl("menu-auto-save-btn").addEventListener("click", () => {
+    void handleAutoSaveAction();
   });
   getEl("menu-save-as-btn").addEventListener("click", () => handleExportProject(projectIoConfig));
   getEl("menu-open-project-btn").addEventListener("click", () => handleImportProjectClick(projectIoConfig));
@@ -2262,6 +2369,38 @@ function setupEventListeners() {
   getEl("timeline-grid-toggle").addEventListener("click", toggleTimelineGrid);
   getEl("timeline-zoom-in").addEventListener("click", zoomInTimeline);
   getEl("timeline-zoom-out").addEventListener("click", zoomOutTimeline);
+  getEl("onboarding-where-btn").addEventListener("click", () => {
+    const drawGroup = document.getElementById("draw-toolbar-group");
+    if (!drawGroup) return;
+    drawGroup.classList.add("draw-toolbar-highlight");
+    window.setTimeout(() => {
+      drawGroup.classList.remove("draw-toolbar-highlight");
+    }, 1600);
+  });
+  getEl("keyboard-shortcuts-btn").addEventListener("click", () => {
+    const modal = document.getElementById("keyboard-shortcuts-modal") as any;
+    if (modal) {
+      modal.open = true;
+    }
+  });
+  getEl("keyboard-shortcuts-close").addEventListener("click", () => {
+    const modal = document.getElementById("keyboard-shortcuts-modal") as any;
+    if (modal) {
+      modal.open = false;
+    }
+  });
+  getEl("about-pulse-btn").addEventListener("click", () => {
+    const modal = document.getElementById("about-pulse-modal") as any;
+    if (modal) {
+      modal.open = true;
+    }
+  });
+  getEl("about-pulse-close").addEventListener("click", () => {
+    const modal = document.getElementById("about-pulse-modal") as any;
+    if (modal) {
+      modal.open = false;
+    }
+  });
   document.addEventListener("keydown", handleGlobalKeyDown);
   initTimelineResizer();
   initTimelineScrollSync();
@@ -2333,9 +2472,51 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
       return;
     }
   }
-  const isModifier = event.ctrlKey || event.metaKey;
-  if (!isModifier) return;
   const key = event.key.toLowerCase();
+  if (!event.ctrlKey && !event.metaKey) {
+    if (key === " ") {
+      event.preventDefault();
+      togglePlayAnimation();
+      return;
+    }
+    if (key === "home") {
+      event.preventDefault();
+      goToStart();
+      return;
+    }
+    if (key === "end") {
+      event.preventDefault();
+      goToEnd();
+      return;
+    }
+    if (key === "1") {
+      event.preventDefault();
+      void startDrawing("point");
+      return;
+    }
+    if (key === "2") {
+      event.preventDefault();
+      void startDrawing("polyline");
+      return;
+    }
+    if (key === "3") {
+      event.preventDefault();
+      void startDrawing("polygon");
+      return;
+    }
+    if (key === "4") {
+      event.preventDefault();
+      void startDrawing("text");
+      return;
+    }
+    if (key === "m") {
+      event.preventDefault();
+      toggleImportOptions();
+      return;
+    }
+    return;
+  }
+
   if (key === "z") {
     event.preventDefault();
     if (event.shiftKey) {
@@ -2343,9 +2524,32 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
     } else {
       void undoHistory(historyState, historyConfig);
     }
-  } else if (key === "y") {
+    return;
+  }
+  if (key === "y") {
     event.preventDefault();
     void redoHistory(historyState, historyConfig);
+    return;
+  }
+  if (key === "n" && event.shiftKey) {
+    event.preventDefault();
+    void resetProject();
+    return;
+  }
+  if (key === "s" && event.shiftKey) {
+    event.preventDefault();
+    void handleAutoSaveAction();
+    return;
+  }
+  if (key === "o" && event.shiftKey) {
+    event.preventDefault();
+    handleImportProjectClick(projectIoConfig);
+    return;
+  }
+  if (key === "e" && event.shiftKey) {
+    event.preventDefault();
+    handleExportProject(projectIoConfig);
+    return;
   }
 }
 
@@ -2705,9 +2909,8 @@ function beginTextPlacement(layerIndex: number) {
     textPlacementHandle = null;
   }
 
-  const drawInstructions = getEl("draw-instructions");
-  drawInstructions.classList.add("show");
-  drawInstructions.querySelector("p")!.textContent = "Click on the map to place text.";
+  setDrawInfoBoxText("Click on the map to place text.");
+  setDrawInfoBoxVisible(true);
 
   textPlacementHandle = view.on("click", (event: any) => {
     const graphic = new Graphic({
@@ -2721,8 +2924,8 @@ function beginTextPlacement(layerIndex: number) {
     });
 
     layerData.layer.add(graphic);
-    drawInstructions.classList.remove("show");
     isDrawing = false;
+    setDrawInfoBoxVisible(false);
     pendingTextPlacement = null;
     selectLayer(layerIndex);
     scheduleProjectSave();
@@ -2736,6 +2939,14 @@ function beginTextPlacement(layerIndex: number) {
 async function startDrawing(type: LayerType) {
   if (!view) return;
   isDrawing = true;
+  const drawInfoText =
+    type === "point"
+      ? "Click on the map to place a point."
+      : type === "text"
+        ? "Click on the map to place text."
+        : "Click to draw. Double-click to finish.";
+  setDrawInfoBoxText(drawInfoText);
+  setDrawInfoBoxVisible(true);
 
   const layerName = `${type.charAt(0).toUpperCase() + type.slice(1)} ${graphicsLayers.length + 1}`;
   const newLayer = new GraphicsLayer({
@@ -2804,11 +3015,6 @@ async function startDrawing(type: LayerType) {
       mode
     });
 
-    const drawInstructions = getEl("draw-instructions");
-    drawInstructions.classList.add("show");
-    drawInstructions.querySelector("p")!.textContent =
-      type === "point" ? "Click on the map to place a point." : "Click to draw. Double-click to finish.";
-
     sketch.on("create", (event: any) => {
       if (event.state === "complete") {
         const graphic = event.graphic;
@@ -2838,8 +3044,8 @@ async function startDrawing(type: LayerType) {
             }
 
         ensureGeometryCache(layerData, graphic);
-        drawInstructions.classList.remove("show");
         isDrawing = false;
+        setDrawInfoBoxVisible(false);
         selectLayer(layerIndex);
         scheduleProjectSave();
       }
@@ -2884,7 +3090,7 @@ function updateLayersList() {
     addAnimationChip.setAttribute("scale", "s");
     addAnimationChip.setAttribute("kind", "neutral");
     addAnimationChip.className = "layer-add-animation-chip";
-    addAnimationChip.textContent = "Add animation";
+    addAnimationChip.textContent = "Animate";
     addAnimationChip.addEventListener("click", (event) => {
       event.stopPropagation();
       if (index === selectedLayerIndex) {
@@ -2898,7 +3104,7 @@ function updateLayersList() {
 
     let styleAction: HTMLElement | null = null;
     if (layerData.type !== "feature") {
-      styleAction = createLayerAction("paint-bucket", "Style", () => {
+      styleAction = createLayerTextAction("Style", () => {
         selectLayer(index, false);
         openStyleModal();
       });
@@ -2913,7 +3119,7 @@ function updateLayersList() {
     actionsEnd.appendChild(deleteAction);
 
     if (layerData.type === "text" && styleAction) {
-      styleAction.setAttribute("text", "Text");
+      styleAction.textContent = "Text";
     }
 
     const content = document.createElement("div");
@@ -2963,6 +3169,19 @@ function createLayerAction(icon: string, text: string, action: () => void) {
   actionButton.setAttribute("icon", icon);
   actionButton.setAttribute("text", text);
   actionButton.setAttribute("scale", "s");
+  actionButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    action();
+  });
+  return actionButton;
+}
+
+function createLayerTextAction(text: string, action: () => void) {
+  const actionButton = document.createElement("calcite-button");
+  actionButton.setAttribute("scale", "s");
+  actionButton.setAttribute("appearance", "transparent");
+  actionButton.classList.add("layer-action-text");
+  actionButton.textContent = text;
   actionButton.addEventListener("click", (event) => {
     event.stopPropagation();
     action();

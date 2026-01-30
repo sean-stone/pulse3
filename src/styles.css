@@ -183,7 +183,35 @@ body {
   flex-wrap: wrap;
 }
 
+.draw-info-box {
+  display: none;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(10, 76, 102, 0.08);
+  border: 1px solid rgba(10, 76, 102, 0.18);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.draw-info-box.is-active {
+  display: block;
+}
+
+.map-draw-info {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: fit-content;
+  max-width: min(420px, calc(100% - 24px));
+}
+
 .toolbar-label {
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -206,8 +234,52 @@ body {
   border-radius: 6px;
 }
 
+.draw-action-bar {
+  --calcite-action-bar-position: static;
+  gap: 4px;
+}
+
+.draw-action-bar calcite-action::part(container) {
+  border-radius: 6px;
+  border: 1px solid rgba(10, 76, 102, 0.2);
+  background: #ffffff;
+}
+
+.draw-action-bar calcite-action::part(text) {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.draw-toolbar-highlight {
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(42, 132, 255, 0.45);
+  background: rgba(42, 132, 255, 0.08);
+  animation: draw-toolbar-pulse 1.4s ease-in-out 1;
+}
+
+@keyframes draw-toolbar-pulse {
+  0% {
+    box-shadow: 0 0 0 2px rgba(42, 132, 255, 0.45);
+  }
+  60% {
+    box-shadow: 0 0 0 6px rgba(42, 132, 255, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(42, 132, 255, 0.0);
+  }
+}
+
 .toolbar-group calcite-select {
   min-width: 150px;
+  align-self: center;
+}
+
+#basemap-select {
+  margin-top: 0;
+}
+
+.toolbar-group calcite-select::part(wrapper) {
+  align-items: center;
 }
 
 .topbar-github-link {
@@ -1027,8 +1099,8 @@ body.is-mobile #ai-ask-modal {
 }
 
 .gif-thumb.is-selected {
-  border-color: rgba(10, 76, 102, 0.6);
-  box-shadow: 0 0 0 2px rgba(10, 76, 102, 0.2);
+  border-color: #000000;
+  box-shadow: none;
 }
 
 .gif-preview {
@@ -1097,6 +1169,47 @@ body.is-mobile #ai-ask-modal {
 
 .gif-preview.show.video #gif-preview-img {
   display: none;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.shortcut-key {
+  justify-self: start;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(10, 76, 102, 0.2);
+  background: rgba(10, 76, 102, 0.06);
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.shortcut-desc {
+  align-self: center;
+}
+
+.about-modal {
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.about-modal p {
+  margin: 0 0 8px;
+}
+
+.about-modal p:last-child {
+  margin-bottom: 0;
+}
+
+.about-modal-muted {
+  color: var(--color-text-muted);
 }
 
 .export-attribution {
@@ -1280,6 +1393,7 @@ body.is-mobile #ai-ask-modal {
 
 .import-advanced.show {
   display: block;
+  padding: 6px;
 }
 
 .style-effects-advanced {
@@ -1886,6 +2000,26 @@ calcite-accordion-item::part(toggle-icon) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.layer-action-text::part(button) {
+  min-height: 24px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.stepper-info {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.stepper-action-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
 }
 
 .layer-action-delete {
@@ -2645,26 +2779,6 @@ calcite-accordion {
 calcite-input-number,
 calcite-select {
   margin-top: 8px;
-}
-
-#draw-instructions {
-  background: rgba(122, 199, 176, 0.15);
-  border: 1px solid rgba(10, 76, 102, 0.25);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 16px;
-  display: none;
-}
-
-#draw-instructions.show {
-  display: block;
-}
-
-#draw-instructions p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--color-primary);
-  font-weight: 500;
 }
 
 .animation-list {

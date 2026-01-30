@@ -27,8 +27,8 @@ export default function App() {
           <span className="map-loading-pin-dot" aria-hidden="true"></span>
         </div>
       </div>
-      <div id="app-container">
-        <div id="app-topbars" aria-label="Application menus">
+        <div id="app-container">
+          <div id="app-topbars" aria-label="Application menus">
           <div id="menu-bar" role="menubar">
             <div className="menu-bar-left">
               <calcite-button
@@ -81,21 +81,33 @@ export default function App() {
                 </span>
               </span>
               <span className="menu-divider" aria-hidden="true"></span>
-              <calcite-button className="menu-button" scale="s" appearance="transparent" icon-start="keyboard">
+              <calcite-button
+                id="keyboard-shortcuts-btn"
+                className="menu-button"
+                scale="s"
+                appearance="transparent"
+                icon-start="keyboard"
+              >
                 Keyboard Shortcuts
               </calcite-button>
-              <calcite-button className="menu-button" scale="s" appearance="transparent" icon-start="information">
+            </div>
+            <div className="menu-bar-title">Pulse 3.4.3</div>
+            <div className="menu-bar-right">
+              <calcite-button
+                id="about-pulse-btn"
+                className="menu-button"
+                scale="s"
+                appearance="transparent"
+                icon-start="information"
+              >
                 About Pulse
               </calcite-button>
-            </div>
-            <div className="menu-bar-title">Pulse 3.3.3</div>
-            <div className="menu-bar-right">
               <a
                 className="panel-github-link topbar-github-link"
                 href="https://github.com/sean-stone/pulse3"
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Pulse 3.3.3 on GitHub"
+                aria-label="Pulse 3.4.3 on GitHub"
                 title="View on GitHub"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -106,29 +118,41 @@ export default function App() {
           </div>
           <div id="toolbar-bar" role="toolbar" aria-label="Quick tools">
             <div className="toolbar-left">
-              <div className="toolbar-group">
+              <div className="toolbar-group" id="draw-toolbar-group">
                 <span className="toolbar-label">Draw</span>
-                <calcite-button
-                  id="add-point-btn"
-                  data-testid="add-point-btn"
-                  icon-start="pin"
+                <calcite-action-bar
+                  layout="horizontal"
                   scale="s"
-                  appearance="outline"
+                  className="draw-action-bar"
+                  expanded
                 >
-                  Point
-                </calcite-button>
-                <calcite-button id="add-line-btn" icon-start="line" scale="s" appearance="outline">
-                  Line
-                </calcite-button>
-                <calcite-button id="add-polygon-btn" icon-start="polygon" scale="s" appearance="outline">
-                  Polygon
-                </calcite-button>
-                <calcite-button id="add-text-btn" icon-start="text-large" scale="s" appearance="outline">
-                  Annotation
-                </calcite-button>
-                <calcite-button id="import-toggle-btn" scale="s" appearance="outline">
-                  More
-                </calcite-button>
+                  <calcite-action
+                    id="add-point-btn"
+                    data-testid="add-point-btn"
+                    icon="pin"
+                    text="Point"
+                    scale="s"
+                  ></calcite-action>
+                  <calcite-action id="add-line-btn" icon="line" text="Line" scale="s"></calcite-action>
+                  <calcite-action
+                    id="add-polygon-btn"
+                    icon="polygon"
+                    text="Polygon"
+                    scale="s"
+                  ></calcite-action>
+                  <calcite-action
+                    id="add-text-btn"
+                    icon="text-large"
+                    text="Annotation"
+                    scale="s"
+                  ></calcite-action>
+                  <calcite-action
+                    id="import-toggle-btn"
+                    icon="ellipsis"
+                    text="More"
+                    scale="s"
+                  ></calcite-action>
+                </calcite-action-bar>
                 <calcite-popover reference-element="import-toggle-btn" placement="bottom-start" auto-close>
                   <div id="layer-import-advanced" className="import-advanced show">
                     <div className="import-layer-buttons">
@@ -176,12 +200,18 @@ export default function App() {
               </div>
               <span className="toolbar-divider" aria-hidden="true"></span>
               <div className="toolbar-group">
-                <span className="toolbar-label">Basemap Picker</span>
+                <span className="toolbar-label">Basemap</span>
                 <calcite-select id="basemap-select" scale="s">
                   <calcite-option value="gray-vector">Gray</calcite-option>
                   <calcite-option value="streets-vector">Streets</calcite-option>
+                  <calcite-option value="streets-navigation-vector">Streets Navigation</calcite-option>
+                  <calcite-option value="streets-night-vector">Streets Night</calcite-option>
+                  <calcite-option value="streets-relief-vector">Streets Relief</calcite-option>
                   <calcite-option value="topo-vector">Topographic</calcite-option>
                   <calcite-option value="satellite">Satellite</calcite-option>
+                  <calcite-option value="hybrid">Hybrid</calcite-option>
+                  <calcite-option value="terrain">Terrain</calcite-option>
+                  <calcite-option value="oceans">Oceans</calcite-option>
                   <calcite-option value="dark-gray-vector">Dark Gray</calcite-option>
                   <calcite-option value="osm">OpenStreetMap</calcite-option>
                   <calcite-option value="none">None</calcite-option>

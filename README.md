@@ -220,6 +220,10 @@ Notes:
 
 - Phosphor Icons (https://phosphoricons.com), MIT License. This project uses `@phosphor-icons/web`.
 
+## Contributing
+
+I am open to contributions. Please open a PR or issue and I will review.
+
 ## How we worked together
 
 We stayed in short loops:
