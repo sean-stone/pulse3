@@ -36,6 +36,7 @@ import {
   ENABLE_PROJECT_STORAGE,
   EXPORT_WARNING_ANIMATIONS,
   EXPORT_WARNING_DURATION,
+  HISTORY_LIMIT,
   APP_VERSION,
   defaultLineStyle,
   defaultPointStyle,
@@ -200,6 +201,12 @@ let sketchHasUpdateHandler = false;
 let currentAspectRatio: { width: number; height: number } | null = null;
 let isRotated = false;
 let isDrawing = false;
+let compassElement: HTMLElement | null = null;
+let compassRotationHandle: { remove: () => void } | null = null;
+let compassDebounceId: number | null = null;
+let hasCompassActivation = false;
+let isVertexEditing = false;
+let suppressNextMapClick = false;
 const exportState: ExportState = { isExporting: false };
 let isFrameExporting = false;
 let exportDownloadUrl: string | null = null;
@@ -217,6 +224,23 @@ let ffmpegLoaded = false;
 let pendingImportType: "geojson" | "csv" | null = null;
 let lastPointSizeInput = DEFAULT_PIN_SIZE;
 let projectStatusTimer: number | null = null;
+let mapContextMenuEl: HTMLElement | null = null;
+let mapContextMenuItemsEl: HTMLElement | null = null;
+let mapContextMenuTitleEl: HTMLElement | null = null;
+let mapContextMenuInitialized = false;
+let mapContextMenuScreenPoint: { x: number; y: number } | null = null;
+let mapContextMenuMapPoint: Point | null = null;
+let mapContextMenuLayerIndex: number | null = null;
+let isStorageQuotaWarningActive = false;
+
+type MapContextMenuItem = {
+  label: string;
+  onSelect: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+};
+
+type MapContextMenuEntry = MapContextMenuItem | { type: "divider" };
 
 async function handleAutoSaveAction() {
   await ensureStorageConsent(storageState, openConfirmDialog);
@@ -247,6 +271,7 @@ const timelineState: TimelineState = {
   timelineDurationOverride: null,
   selectedTimelineClip: null,
   selectedTimelineAnimation: null,
+  selectedTimelineKeyframe: null,
   isScrubbingTimeline: false,
   timelinePanelWidth: 300,
   timelinePanelResizeState: null,
@@ -259,6 +284,7 @@ const timelineState: TimelineState = {
 let updatePlayheadRef: () => void = () => undefined;
 let syncAnimationStartInputRef: () => void = () => undefined;
 let applyAnimationsAtTimeRef: (time: number) => void = () => undefined;
+let restartPlaybackFromStartRef: () => void = () => undefined;
 let zoomToLayerRef: (layerData: LayerData) => void = () => undefined;
 let scheduleProjectSaveRef: () => void = () => undefined;
 let buildProjectSnapshotRef: () => ProjectSnapshot | null = () => {
@@ -270,6 +296,7 @@ const timelineController = createTimelineController(timelineState, {
   getEl,
   getGraphicsLayers: () => graphicsLayers,
   getSelectedLayerIndex: () => selectedLayerIndex,
+  isPlaying: () => isPlaying,
   getCurrentTime: () => currentTime,
   setCurrentTime: (value) => {
     currentTime = value;
@@ -292,7 +319,9 @@ const timelineController = createTimelineController(timelineState, {
   setCalciteValue,
   upsertPointKeyframe,
   hasPointKeyframes,
-  removeAnimationAt
+  removeAnimationAt,
+  removePointKeyframeAt,
+  restartPlaybackFromStart: () => restartPlaybackFromStartRef()
 });
 const {
   updateTimeline,
@@ -358,6 +387,7 @@ const {
 } = playbackController;
 updatePlayheadRef = updatePlayhead;
 syncAnimationStartInputRef = syncAnimationStartInput;
+restartPlaybackFromStartRef = handlePlayFromStart;
 const projectIoConfig = {
   getEl,
   buildProjectSnapshot: () => buildProjectSnapshotRef(),
@@ -461,10 +491,280 @@ function setDrawInfoBoxVisible(visible: boolean) {
   infoBox.classList.toggle("is-active", visible);
 }
 
+function ensureCompassElement() {
+  if (compassElement) return;
+  compassElement = document.getElementById("map-compass");
+  if (compassElement) {
+    if (view) {
+      (compassElement as any).view = view;
+    }
+    compassElement.setAttribute("hidden", "");
+    compassElement.setAttribute("aria-hidden", "true");
+  }
+}
+
+function updateCompassVisibility(rotation: number) {
+  ensureCompassElement();
+  if (!compassElement) return;
+  const rotated = Math.abs(rotation) > 0.5;
+  if (rotated) {
+    hasCompassActivation = true;
+  }
+  if (hasCompassActivation && rotated) {
+    compassElement.removeAttribute("hidden");
+    compassElement.setAttribute("aria-hidden", "false");
+  } else {
+    compassElement.setAttribute("hidden", "");
+    compassElement.setAttribute("aria-hidden", "true");
+  }
+}
+
+function scheduleCompassVisibility(rotation: number) {
+  if (compassDebounceId) {
+    window.clearTimeout(compassDebounceId);
+  }
+  compassDebounceId = window.setTimeout(() => {
+    updateCompassVisibility(rotation);
+  }, 150);
+}
+
+function setupCompassWatcher() {
+  if (!view || compassRotationHandle) return;
+  ensureCompassElement();
+  if (compassElement && (compassElement as any).view !== view) {
+    (compassElement as any).view = view;
+  }
+  compassRotationHandle = reactiveUtils.watch(() => view.rotation, (rotation) => {
+    scheduleCompassVisibility(Number(rotation) || 0);
+  });
+  scheduleCompassVisibility(Number(view.rotation) || 0);
+}
+
 function setDrawInfoBoxText(text: string) {
   const infoBox = document.getElementById("draw-info-box");
   if (!infoBox) return;
   infoBox.textContent = text;
+}
+
+function closeMapContextMenu() {
+  if (!mapContextMenuEl) return;
+  mapContextMenuEl.classList.remove("is-open");
+  mapContextMenuEl.setAttribute("aria-hidden", "true");
+  mapContextMenuMapPoint = null;
+  mapContextMenuLayerIndex = null;
+  mapContextMenuScreenPoint = null;
+}
+
+function getViewScreenPoint(event: MouseEvent) {
+  if (!view) return null;
+  const container = view.container as HTMLElement | null;
+  if (!container) return null;
+  const rect = container.getBoundingClientRect();
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  };
+}
+
+async function getHitLayerIndex(screenPoint: { x: number; y: number }) {
+  if (!view) return -1;
+  const response = await view.hitTest(screenPoint as any);
+  const hit = response.results.find((result: any) =>
+    graphicsLayers.some((layerData) => layerData.layer === result.graphic?.layer)
+  );
+  if (!hit?.graphic?.layer) return -1;
+  return graphicsLayers.findIndex((layerData) => layerData.layer === hit.graphic.layer);
+}
+
+function renderMapContextMenu(title: string, entries: MapContextMenuEntry[]) {
+  if (!mapContextMenuEl || !mapContextMenuItemsEl || !mapContextMenuTitleEl) return;
+  const itemsEl = mapContextMenuItemsEl;
+  mapContextMenuTitleEl.textContent = title;
+  itemsEl.innerHTML = "";
+  const isDividerEntry = (entry: MapContextMenuEntry): entry is { type: "divider" } =>
+    "type" in entry && entry.type === "divider";
+  entries.forEach((entry) => {
+    if (isDividerEntry(entry)) {
+      const divider = document.createElement("div");
+      divider.className = "map-context-menu-divider";
+      itemsEl.appendChild(divider);
+      return;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "map-context-menu-item";
+    button.textContent = entry.label;
+    if (entry.danger) {
+      button.classList.add("danger");
+    }
+    if (entry.disabled) {
+      button.disabled = true;
+    }
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      closeMapContextMenu();
+      entry.onSelect();
+    });
+    itemsEl.appendChild(button);
+  });
+}
+
+function positionMapContextMenu(clientX: number, clientY: number) {
+  if (!mapContextMenuEl) return;
+  const container = document.getElementById("map-container");
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  const padding = 12;
+  let left = clientX - rect.left;
+  let top = clientY - rect.top;
+
+  mapContextMenuEl.style.left = `${left}px`;
+  mapContextMenuEl.style.top = `${top}px`;
+
+  const menuWidth = mapContextMenuEl.offsetWidth;
+  const menuHeight = mapContextMenuEl.offsetHeight;
+  const maxLeft = rect.width - menuWidth - padding;
+  const maxTop = rect.height - menuHeight - padding;
+
+  left = Math.max(padding, Math.min(left, maxLeft));
+  top = Math.max(padding, Math.min(top, maxTop));
+  mapContextMenuEl.style.left = `${left}px`;
+  mapContextMenuEl.style.top = `${top}px`;
+}
+
+function openMapContextMenu(
+  clientX: number,
+  clientY: number,
+  title: string,
+  entries: MapContextMenuEntry[]
+) {
+  if (!mapContextMenuEl) return;
+  renderMapContextMenu(title, entries);
+  mapContextMenuEl.classList.add("is-open");
+  mapContextMenuEl.setAttribute("aria-hidden", "false");
+  positionMapContextMenu(clientX, clientY);
+}
+
+async function handleMapContextMenu(event: MouseEvent) {
+  if (!view || isDrawing || isVertexEditing) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const screenPoint = getViewScreenPoint(event);
+  if (!screenPoint) return;
+
+  const mapPoint = view.toMap(screenPoint as any) as Point | null;
+  mapContextMenuMapPoint = mapPoint;
+  mapContextMenuScreenPoint = { x: event.clientX, y: event.clientY };
+
+  const layerIndex = await getHitLayerIndex(screenPoint);
+  mapContextMenuLayerIndex = layerIndex >= 0 ? layerIndex : null;
+
+  if (layerIndex >= 0) {
+    const layerData = graphicsLayers[layerIndex];
+    const styleLabel = layerData.type === "text" ? "Text settings" : "Style & effects";
+    const entries: MapContextMenuEntry[] = [
+      {
+        label: "Select layer",
+        onSelect: () => selectLayer(layerIndex)
+      },
+      {
+        label: styleLabel,
+        onSelect: () => {
+          selectLayer(layerIndex, false);
+          if (layerData.type === "text") {
+            openTextSettingsModal();
+          } else {
+            openStyleModal();
+          }
+        }
+      },
+      {
+        label: "Zoom to layer",
+        onSelect: () => zoomToLayer(layerData)
+      },
+      { type: "divider" },
+      {
+        label: "Duplicate layer",
+        onSelect: () => void duplicateLayer(layerIndex)
+      },
+      {
+        label: "Delete layer",
+        onSelect: () => void removeLayer(layerIndex),
+        danger: true
+      }
+    ];
+    openMapContextMenu(event.clientX, event.clientY, layerData.name || "Layer", entries);
+    return;
+  }
+
+  const hasMapPoint = Boolean(mapPoint);
+  const entries: MapContextMenuEntry[] = [
+    {
+      label: "Add point",
+      onSelect: () => void startDrawing("point")
+    },
+    {
+      label: "Add line",
+      onSelect: () => void startDrawing("polyline")
+    },
+    {
+      label: "Add polygon",
+      onSelect: () => void startDrawing("polygon")
+    },
+    {
+      label: "Add text",
+      onSelect: () => void startDrawing("text")
+    },
+    { type: "divider" },
+    {
+      label: "Center map here",
+      onSelect: () => {
+        if (!view || !mapPoint) return;
+        view.goTo({ center: mapPoint });
+      },
+      disabled: !hasMapPoint
+    },
+    {
+      label: "Zoom in",
+      onSelect: () => {
+        if (!view) return;
+        view.goTo({ center: mapPoint ?? view.center, zoom: view.zoom + 1 });
+      }
+    },
+    {
+      label: "Zoom out",
+      onSelect: () => {
+        if (!view) return;
+        view.goTo({ center: mapPoint ?? view.center, zoom: view.zoom - 1 });
+      }
+    }
+  ];
+
+  openMapContextMenu(event.clientX, event.clientY, "Map", entries);
+}
+
+function initMapContextMenu() {
+  if (mapContextMenuInitialized) return;
+  mapContextMenuInitialized = true;
+  mapContextMenuEl = document.getElementById("map-context-menu");
+  mapContextMenuItemsEl = document.getElementById("map-context-menu-items");
+  mapContextMenuTitleEl = document.getElementById("map-context-menu-title");
+  if (!mapContextMenuEl || !mapContextMenuItemsEl || !mapContextMenuTitleEl || !view) return;
+
+  view.container.addEventListener("contextmenu", handleMapContextMenu);
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button === 2) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("#map-context-menu")) return;
+      closeMapContextMenu();
+    },
+    true
+  );
+  window.addEventListener("blur", closeMapContextMenu);
+  view.on("drag", closeMapContextMenu);
+  view.on("mouse-wheel", closeMapContextMenu);
 }
 
 function updateSnappingOptions() {
@@ -577,7 +877,8 @@ const historyConfig: HistoryConfig = {
   applyProjectSnapshot,
   updateHistoryControls,
   setProjectError,
-  isRestoringProject: () => isRestoringProject
+  isRestoringProject: () => isRestoringProject,
+  getHistoryLimit: () => (isStorageQuotaWarningActive ? 2 : HISTORY_LIMIT)
 };
 
 
@@ -629,6 +930,12 @@ function setProjectStorageWarning(visible: boolean) {
   const warning = document.getElementById("project-status-warning");
   if (!warning) return;
   warning.toggleAttribute("hidden", !visible);
+  isStorageQuotaWarningActive = visible;
+  if (visible) {
+    historyState.historyStack = historyState.historyStack.slice(-2);
+    historyState.redoStack = historyState.redoStack.slice(-2);
+    updateHistoryControls();
+  }
   if (visible) {
     const message = "Storage full. Export to GeoJSON to save.";
     warning.setAttribute("title", message);
@@ -906,6 +1213,59 @@ function handleBasemapBackgroundChange(forcedColor?: string) {
   });
 }
 
+function getBasemapLabelsVisible() {
+  const input = document.getElementById("basemap-labels-toggle") as HTMLInputElement | null;
+  return input ? Boolean(input.checked) : true;
+}
+
+function applyBasemapLabelsVisibility() {
+  if (!view?.map?.basemap) return;
+  const basemap = view.map.basemap;
+  const visible = getBasemapLabelsVisible();
+  const referenceLayers = basemap?.referenceLayers;
+  if (referenceLayers?.forEach) {
+    referenceLayers.forEach((layer: any) => {
+      layer.visible = visible;
+    });
+  }
+}
+
+function updateBasemapLabelsToggleVisibility() {
+  const toggleWrap = document.querySelector(".basemap-labels-toggle") as HTMLElement | null;
+  if (!toggleWrap) return;
+  const basemap = view?.map?.basemap;
+  const referenceLayers: any = basemap?.referenceLayers;
+  const layerCount =
+    Number(referenceLayers?.length ?? referenceLayers?.items?.length ?? 0);
+  const supportsLabels = Boolean(basemap) && layerCount > 0;
+  if (supportsLabels) {
+    toggleWrap.removeAttribute("hidden");
+    toggleWrap.setAttribute("aria-hidden", "false");
+  } else {
+    toggleWrap.setAttribute("hidden", "");
+    toggleWrap.setAttribute("aria-hidden", "true");
+  }
+}
+
+function scheduleBasemapLabelsVisibility() {
+  if (!view?.map) return;
+  const basemap = view.map.basemap;
+  if (!basemap) {
+    updateBasemapLabelsToggleVisibility();
+    return;
+  }
+  const apply = () => {
+    updateBasemapLabelsToggleVisibility();
+    applyBasemapLabelsVisibility();
+  };
+  const loadResult = basemap?.load?.();
+  if (loadResult && typeof (loadResult as Promise<void>).then === "function") {
+    (loadResult as Promise<void>).then(apply).catch(apply);
+  } else {
+    apply();
+  }
+}
+
 function applyBasemapBackgroundColor(color: string) {
   if (!view) return;
   const viewAny = view as any;
@@ -1044,6 +1404,8 @@ function applyExportResolutionAspect() {
     currentAspectRatio = null;
     isRotated = false;
     resetMapWrapperSize();
+    mapContainer.classList.remove("has-padding");
+    mapWrapper.classList.add("no-shadow");
     if (rotationButton) {
       rotationButton.classList.remove("show");
     }
@@ -1936,6 +2298,13 @@ async function resetProject() {
   timelineController.clearSelectedTimelineAnimation();
   timelineController.setTimelineDurationOverride(null);
   setProjectName("Untitled");
+  const exportResolutionSelect = document.getElementById("export-resolution-select") as any;
+  if (exportResolutionSelect) {
+    exportResolutionSelect.value = "default";
+    updateExportResolutionControls();
+  } else {
+    applyExportResolutionAspect();
+  }
   updateLayersList();
   updateTimeline();
   updateAnimationOptions();
@@ -2046,11 +2415,12 @@ function updatePrimaryActionsState() {
     const count = graphics?.length ?? graphics?.items?.length ?? 0;
     return count > 0;
   });
+  const hasSelection = selectedLayerIndex >= 0;
   const mapActionButtons = document.getElementById("map-action-buttons");
   const onboardingStep = document.getElementById("onboarding-step-draw");
   const onboardingStyleStep = document.getElementById("onboarding-step-style");
   if (mapActionButtons) {
-    mapActionButtons.style.display = hasGraphics ? "flex" : "none";
+    mapActionButtons.style.display = hasGraphics && hasSelection ? "flex" : "none";
   }
   if (onboardingStep || onboardingStyleStep) {
     const setStepperState = (
@@ -2083,10 +2453,11 @@ function updatePrimaryActionsState() {
     };
 
     const onboardingExportStep = document.getElementById("onboarding-step-export");
-    const exportEnabled = hasPlayableAnimation();
+    const exportEnabled = hasGraphics;
+    const hasAnimations = hasPlayableAnimation();
     if (hasGraphics) {
       setStepperState(onboardingStep, { selected: false, complete: true, disabled: true });
-      setStepperState(onboardingStyleStep, { selected: true, disabled: false, complete: exportEnabled });
+      setStepperState(onboardingStyleStep, { selected: true, disabled: false, complete: hasAnimations });
       setStepperState(onboardingExportStep, { selected: false, disabled: !exportEnabled });
     } else {
       setStepperState(onboardingStep, { selected: true, complete: false, disabled: false });
@@ -2123,6 +2494,17 @@ function upsertPointKeyframe(layerData: LayerData, geometry: Point, time: number
   }
   keyframes.sort((a, b) => a.time - b.time);
   layerData.pointKeyframes = keyframes;
+  scheduleProjectSave();
+}
+
+function removePointKeyframeAt(layerIdx: number, keyframeIdx: number) {
+  const layerData = graphicsLayers[layerIdx];
+  if (!layerData || layerData.type !== "point") return;
+  const keyframes = layerData.pointKeyframes ?? [];
+  if (keyframeIdx < 0 || keyframeIdx >= keyframes.length) return;
+  keyframes.splice(keyframeIdx, 1);
+  layerData.pointKeyframes = keyframes;
+  updateTimeline();
   scheduleProjectSave();
 }
 
@@ -2274,12 +2656,14 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   }
   if (view) {
     reactiveUtils.watch(() => view.extent, () => scheduleProjectSave());
+    setupCompassWatcher();
   }
   updateTimeline();
   updateAnimationOptions();
     updateExportWarning();
     resetHistory(historyState, historyConfig);
     updateBasemapBackgroundControls();
+    scheduleBasemapLabelsVisibility();
   }
 
   function setupEventListeners() {
@@ -2359,6 +2743,13 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
         scheduleProjectSave();
       });
     }
+    const basemapLabelsToggle = document.getElementById("basemap-labels-toggle");
+    if (basemapLabelsToggle) {
+      basemapLabelsToggle.addEventListener("calciteSwitchChange", () => {
+        scheduleBasemapLabelsVisibility();
+        scheduleProjectSave();
+      });
+    }
 
   getEl("ai-ask-btn").addEventListener("click", openAiModal);
   getEl("ai-cancel-btn").addEventListener("click", closeAiModal);
@@ -2371,9 +2762,10 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     }
   });
 
-  getEl("style-confirm").addEventListener("click", confirmStyleSettings);
-  getEl("text-settings-confirm").addEventListener("click", confirmTextSettings);
-  getEl("text-settings-cancel").addEventListener("click", cancelTextSettings);
+  const styleConfirm = document.getElementById("style-confirm");
+  if (styleConfirm) {
+    styleConfirm.addEventListener("click", confirmStyleSettings);
+  }
 
   getEl("feature-field-select").addEventListener("calciteSelectChange", handleFeatureFieldChange as EventListener);
   getEl("feature-visual-select").addEventListener("calciteSelectChange", handleFeatureVisualChange as EventListener);
@@ -2382,7 +2774,9 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     "calciteSwitchChange",
     handleFeatureFadeOutChange as EventListener
   );
-  getEl("feature-style-btn").addEventListener("click", openStyleModal);
+  getEl("feature-style-btn").addEventListener("click", () => {
+    openStyleModal();
+  });
 
   getEl("point-style-options").addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null;
@@ -2394,6 +2788,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     const safeCurrentSize = Number.isFinite(currentSize) ? currentSize : DEFAULT_PIN_SIZE;
     const currentAutoYOffset = getAutoPinYOffset(safeCurrentSize);
     const yOffsetInput = getEl("point-yoffset-input") as any;
+    const xOffsetInput = getEl("point-xoffset-input") as any;
     const currentYOffset = Number(yOffsetInput?.value);
     let nextSize = safeCurrentSize;
     if (selectedValue === "map-pin" && (!Number.isFinite(currentSize) || currentSize === DEFAULT_CIRCLE_SIZE)) {
@@ -2411,6 +2806,9 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     } else if (selectedValue === "circle" && (currentYOffset === DEFAULT_PIN_Y_OFFSET || isAutoYOffset)) {
       setCalciteValue(yOffsetInput, 0);
     }
+    if (selectedValue !== "map-pin") {
+      setCalciteValue(yOffsetInput, 0);
+    }
     lastPointSizeInput = nextSize;
     const container = getEl("point-style-options");
     container.querySelectorAll(".style-option-btn").forEach((el) => {
@@ -2421,6 +2819,36 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     button.setAttribute("aria-pressed", "true");
     applyStyleSettings(false);
   });
+  const pointStyleSearch = document.getElementById("point-style-search") as HTMLInputElement | null;
+  if (pointStyleSearch) {
+    const filterPointStyles = () => {
+      const query = pointStyleSearch.value.trim().toLowerCase();
+      const container = getEl("point-style-options");
+      const buttons = Array.from(container.querySelectorAll(".style-option-btn")) as HTMLElement[];
+      buttons.forEach((button) => {
+        const label = button.textContent?.trim().toLowerCase() || "";
+        const matches = !query || label.includes(query);
+        button.style.display = matches ? "" : "none";
+      });
+      const titles = Array.from(container.querySelectorAll(".style-option-section-title")) as HTMLElement[];
+      titles.forEach((title) => {
+        let next: Element | null = title.nextElementSibling;
+        let hasVisible = false;
+        while (next && !next.classList.contains("style-option-section-title")) {
+          if (next instanceof HTMLElement && next.style.display !== "none") {
+            hasVisible = true;
+            break;
+          }
+          next = next.nextElementSibling;
+        }
+        title.style.display = !query || hasVisible ? "" : "none";
+      });
+    };
+    pointStyleSearch.addEventListener("input", filterPointStyles);
+    pointStyleSearch.addEventListener("change", filterPointStyles);
+    pointStyleSearch.addEventListener("calciteInputInput", filterPointStyles as EventListener);
+    pointStyleSearch.addEventListener("calciteInputChange", filterPointStyles as EventListener);
+  }
   getEl("point-size-input").addEventListener("calciteSliderInput", () => {
     const sizeInput = getEl("point-size-input") as any;
     const nextSize = Number(sizeInput?.value);
@@ -2493,7 +2921,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     updateColorPickerSwatch("polygon-outline-color", event?.target?.value || "");
     applyStyleSettings(false);
   });
-  getEl("polygon-outline-width").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("polygon-outline-width").addEventListener("calciteSliderInput", () => applyStyleSettings(false));
 
   getEl("layer-blend-mode-select").addEventListener("calciteSelectChange", () =>
     applyStyleSettings(false)
@@ -2528,8 +2956,12 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   getEl("text-content-input").addEventListener("calciteInputInput", handleTextContentInput);
   getEl("text-content-input").addEventListener("calciteInputChange", handleTextContentInput);
   getEl("text-content-input").addEventListener("input", handleTextContentInput);
+  getEl("text-font-select").addEventListener("calciteSelectChange", () => applyTextSettings(false));
   getEl("text-size-slider").addEventListener("calciteSliderInput", () => applyTextSettings(false));
   getEl("text-color-input").addEventListener("input", () => applyTextSettings(false));
+  getEl("text-color-input").addEventListener("change", () => applyTextSettings(false));
+  getEl("text-italic-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
+  getEl("text-underline-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
 
   getEl("play-button").addEventListener("click", handlePlayFromStart);
   getEl("rotation-button").addEventListener("click", rotateMap);
@@ -2704,13 +3136,13 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   if (view) {
     view.on("click", handleMapClick);
     view.on("double-click", handleMapDoubleClick);
+    initMapContextMenu();
   }
 
   document.addEventListener("keydown", (event) => {
+    if (isAiModalOpen()) return;
     const target = event.target as HTMLElement | null;
-    if (target?.isContentEditable) return;
-    const tag = target?.tagName?.toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (isEditableTarget(target)) return;
     if (event.key === "Delete" || event.key === "Backspace") {
       removeSelectedTimelineAnimation();
     }
@@ -2736,25 +3168,24 @@ function handleBasemapChange() {
     view.map.basemap = value;
   }
   updateBasemapBackgroundControls();
+  scheduleBasemapLabelsVisibility();
   scheduleProjectSave();
 }
 
 
 function handleGlobalKeyDown(event: KeyboardEvent) {
+  if (isAiModalOpen()) {
+    return;
+  }
   const target = event.target as HTMLElement | null;
-  if (target) {
-    const tag = target.tagName;
-    if (
-      tag === "INPUT" ||
-      tag === "TEXTAREA" ||
-      tag.startsWith("CALCITE-INPUT") ||
-      tag === "CALCITE-SELECT" ||
-      target.isContentEditable
-    ) {
-      return;
-    }
+  if (isEditableTarget(target)) {
+    return;
   }
   const key = event.key.toLowerCase();
+  if (key === "escape") {
+    closeMapContextMenu();
+    return;
+  }
   if (!event.ctrlKey && !event.metaKey) {
     if (key === " ") {
       event.preventDefault();
@@ -2833,6 +3264,27 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
     handleExportProject(projectIoConfig);
     return;
   }
+}
+
+function isAiModalOpen() {
+  const modal = document.getElementById("ai-ask-modal") as any;
+  return Boolean(modal?.open);
+}
+
+function isEditableTarget(target: HTMLElement | null) {
+  if (!target) return false;
+  const tag = target.tagName;
+  if (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "CALCITE-TEXT-AREA" ||
+    tag.startsWith("CALCITE-INPUT") ||
+    tag === "CALCITE-SELECT" ||
+    target.isContentEditable
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function toggleImportOptions() {
@@ -3201,7 +3653,12 @@ function beginTextPlacement(layerIndex: number) {
         type: "text",
         text: layerData.textContent || "Text",
         color: layerData.textColor || "#22323a",
-        font: { size: layerData.textSize || 14, family: "sans-serif" }
+        font: {
+          size: layerData.textSize || 14,
+          family: layerData.textFontFamily || "sans-serif",
+          style: layerData.textItalic ? "italic" : "normal",
+          decoration: layerData.textUnderline ? "underline" : "none"
+        }
       }
     });
 
@@ -3209,7 +3666,15 @@ function beginTextPlacement(layerIndex: number) {
     isDrawing = false;
     setDrawInfoBoxVisible(false);
     pendingTextPlacement = null;
+    suppressNextMapClick = true;
     selectLayer(layerIndex);
+    if (sketch && !isPlaying) {
+      try {
+        sketch.update(graphic);
+      } catch {
+        // ignore selection errors
+      }
+    }
     scheduleProjectSave();
     if (textPlacementHandle) {
       textPlacementHandle.remove();
@@ -3280,6 +3745,9 @@ async function startDrawing(type: LayerType) {
     layerData.textContent = "Text";
     layerData.textSize = 14;
     layerData.textColor = "#22323a";
+    layerData.textFontFamily = "sans-serif";
+    layerData.textItalic = false;
+    layerData.textUnderline = false;
     pendingTextPlacement = { layerIndex };
     selectLayer(layerIndex, false);
     openTextSettingsModal();
@@ -3338,92 +3806,67 @@ async function startDrawing(type: LayerType) {
 function updateLayersList() {
   const layersAccordion = getEl("layers-accordion");
   attachAnimationPanelTo();
+  attachStylePanelTo();
+  attachTextPanelTo();
   layersAccordion.innerHTML = "";
 
-  graphicsLayers.forEach((layerData, index) => {
-    const item = document.createElement("div");
-    item.className = "layer-item";
+  const orderedLayers = [...graphicsLayers].reverse();
+  orderedLayers.forEach((layerData) => {
+    const index = graphicsLayers.indexOf(layerData);
+    const item = document.createElement("calcite-accordion-item");
+    item.className = "layer-accordion-item";
+    item.setAttribute("heading", layerData.name);
+    item.setAttribute("icon-start", getIconForType(layerData.type));
     if (index === selectedLayerIndex) {
-      item.classList.add("expanded");
+      item.setAttribute("expanded", "");
     }
-
-    const header = document.createElement("div");
-    header.className = "layer-item-header";
-
-    const headerLeft = document.createElement("div");
-    headerLeft.className = "layer-item-header-left";
-
-    const icon = document.createElement("calcite-icon");
-    icon.setAttribute("icon", getIconForType(layerData.type));
-    icon.setAttribute("scale", "s");
-    headerLeft.appendChild(icon);
-
-    const heading = document.createElement("span");
-    heading.className = "layer-item-heading";
-    heading.textContent = layerData.name;
-    headerLeft.appendChild(heading);
-
-    header.appendChild(headerLeft);
-
-    const actionsEnd = document.createElement("div");
-    actionsEnd.className = "layer-actions";
-
-    const addAnimationChip = document.createElement("calcite-chip");
-    addAnimationChip.setAttribute("scale", "s");
-    addAnimationChip.setAttribute("kind", "neutral");
-    addAnimationChip.className = "layer-add-animation-chip";
-    addAnimationChip.textContent = "Animate";
-    addAnimationChip.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (index === selectedLayerIndex) {
-        updateAnimationOptions();
-        highlightAnimationPanel();
-        return;
-      }
-      selectLayer(index);
-    });
-    actionsEnd.appendChild(addAnimationChip);
-
-    let styleAction: HTMLElement | null = null;
-    if (layerData.type !== "feature") {
-      styleAction = createLayerTextAction("Style", () => {
-        selectLayer(index, false);
-        openStyleModal();
-      });
-      actionsEnd.appendChild(styleAction);
-    }
+    const title = document.createElement("span");
+    title.setAttribute("slot", "title");
+    title.textContent = layerData.name;
+    item.appendChild(title);
 
     const deleteAction = createLayerAction("trash", "Delete", () => {
       removeLayer(index);
     });
     deleteAction.classList.add("layer-action-delete");
-
-    actionsEnd.appendChild(deleteAction);
-
-    if (layerData.type === "text" && styleAction) {
-      styleAction.textContent = "Text";
-    }
+    deleteAction.setAttribute("slot", "actions-end");
+    item.appendChild(deleteAction);
 
     const content = document.createElement("div");
     content.className = "layer-item-content";
 
     if (index === selectedLayerIndex) {
+      const animationSection = document.createElement("div");
+      animationSection.className = "layer-section";
+
+      const animationTitle = document.createElement("div");
+      animationTitle.className = "layer-section-title";
+      animationTitle.textContent = "Animation Type";
+      animationSection.appendChild(animationTitle);
+
       const host = document.createElement("div");
       host.id = `animation-settings-host-${index}`;
-      content.appendChild(host);
+      animationSection.appendChild(host);
+
+      const styleSection = document.createElement("div");
+      styleSection.className = "layer-section";
+
+      const styleTitle = document.createElement("div");
+      styleTitle.className = "layer-section-title";
+      styleTitle.textContent = "Colour and styles";
+      styleSection.appendChild(styleTitle);
+
+      const styleHost = document.createElement("div");
+      styleHost.id = `style-settings-host-${index}`;
+      styleSection.appendChild(styleHost);
+
+      content.appendChild(animationSection);
+      content.appendChild(styleSection);
     }
 
-    header.addEventListener("click", (event) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) return;
-      if (target.closest("calcite-action")) return;
-      if (target.closest("#animation-settings-panel")) return;
-      selectLayer(index);
-    });
-
-    header.appendChild(actionsEnd);
-    item.appendChild(header);
     item.appendChild(content);
+    item.addEventListener("calciteAccordionItemExpand" as any, () => selectLayer(index));
+
     layersAccordion.appendChild(item);
   });
 
@@ -3469,6 +3912,11 @@ function createLayerTextAction(text: string, action: () => void) {
     action();
   });
   return actionButton;
+}
+
+function expandLayerAccordionSection(layerIndex: number, section: "animate" | "style") {
+  void layerIndex;
+  void section;
 }
 
 function selectLayer(index: number, focusGraphic = true) {
@@ -3692,6 +4140,9 @@ async function duplicateLayer(index: number) {
     textContent: layerData.textContent,
     textSize: layerData.textSize,
     textColor: layerData.textColor,
+    textFontFamily: layerData.textFontFamily,
+    textItalic: layerData.textItalic,
+    textUnderline: layerData.textUnderline,
     layerBlendMode: layerData.layerBlendMode,
     layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
     layerEffectsEnabled: layerData.layerEffectsEnabled
@@ -3714,6 +4165,12 @@ async function duplicateLayer(index: number) {
 
 async function handleMapClick(event: any) {
   if (!view || isDrawing) return;
+  if (suppressNextMapClick) {
+    suppressNextMapClick = false;
+    return;
+  }
+  if (event?.button === 2 || event?.native?.button === 2) return;
+  closeMapContextMenu();
   const response = await view.hitTest(event);
   const hit = response.results.find((result: any) =>
     graphicsLayers.some((layerData) => layerData.layer === result.graphic?.layer)
@@ -3772,7 +4229,12 @@ function openStyleModal() {
     openTextSettingsModal();
     return;
   }
+  attachStylePanelTo(`style-settings-host-${selectedLayerIndex}`);
+  syncStylePanelFromLayer(layerData);
+  expandLayerAccordionSection(selectedLayerIndex, "style");
+}
 
+function syncStylePanelFromLayer(layerData: LayerData) {
   const effectsToggle = document.getElementById("style-effects-toggle");
   if (effectsToggle && !effectsToggle.dataset.listenerBound) {
     effectsToggle.addEventListener("click", toggleStyleEffects);
@@ -3781,6 +4243,7 @@ function openStyleModal() {
 
   const styleType = getStyleTypeForLayer(layerData);
   setStyleSectionVisibility(styleType, layerData.type === "feature", styleType !== null);
+  // effects panel state handled below
 
   if (styleType === "point") {
     const style = layerData.pointStyle ?? defaultPointStyle;
@@ -3827,8 +4290,6 @@ function openStyleModal() {
   setCalciteValue(getEl("effect-drop-shadow-blur"), effectSettings.dropShadowBlur);
   setColorPickerValue("effect-drop-shadow-color", effectSettings.dropShadowColor, 1);
 
-  (getEl("style-settings-modal") as any).open = true;
-
   const effectsAdvanced = getEl("style-effects-advanced");
   const effectsToggleEl = getEl("style-effects-toggle");
   effectsAdvanced.classList.remove("show");
@@ -3837,7 +4298,7 @@ function openStyleModal() {
 }
 
 function confirmStyleSettings() {
-  applyStyleSettings(true);
+  applyStyleSettings(false);
 }
 
 function readEffectSettingsFromInputs(): LayerEffectSettings {
@@ -3887,6 +4348,8 @@ function applyStyleSettings(shouldClose: boolean) {
 
   if (styleType === "point") {
     const selected = getSelectedPointStyle();
+    const xOffsetInput = getEl("point-xoffset-input") as any;
+    const yOffsetInput = getEl("point-yoffset-input") as any;
     layerData.pointStyle = {
       style: selected || defaultPointStyle.style,
       size: Number((getEl("point-size-input") as any).value) || defaultPointStyle.size,
@@ -3894,8 +4357,8 @@ function applyStyleSettings(shouldClose: boolean) {
       outlineColor: getColorFromPicker("point-outline-color", 1),
       outlineWidth: readNumber((getEl("point-outline-width") as any).value, defaultPointStyle.outlineWidth),
       angle: Number((getEl("point-angle-input") as any).value) || 0,
-      xoffset: Number((getEl("point-xoffset-input") as any).value) || 0,
-      yoffset: Number((getEl("point-yoffset-input") as any).value) || 0
+      xoffset: Number(xOffsetInput.value) || 0,
+      yoffset: Number(yOffsetInput.value) || 0
     };
     updatePointAnimationPreview(
       layerData.pointStyle.color,
@@ -3936,9 +4399,6 @@ function applyStyleSettings(shouldClose: boolean) {
   }
   applyLayerEffects(layerData);
   scheduleProjectSave();
-  if (shouldClose) {
-    closeModal("style-settings-modal");
-  }
 }
 
 function toggleStyleEffects() {
@@ -4054,7 +4514,16 @@ function refreshGeometryCache(layerData: LayerData, graphic: any) {
 }
 
 function handleSketchUpdate(event: any) {
-  if (event.state !== "complete") return;
+  const state = event?.state as string | undefined;
+  const tool = String(event?.tool || "");
+  if (state === "start" || state === "active") {
+    isVertexEditing = tool === "reshape" || tool === "vertex" || tool === "vertex-edit";
+    return;
+  }
+  if (state === "complete" || state === "cancel") {
+    isVertexEditing = false;
+  }
+  if (state !== "complete") return;
   const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
   graphics.forEach((graphic: any) => {
     graphic.geometry = toGeographicGeometry(graphic.geometry);
@@ -4102,7 +4571,7 @@ function setStyleSectionVisibility(
   polygonSection.style.display = type === "polygon" ? "block" : "none";
   effectsSection.style.display = showEffects ? "block" : "none";
 
-  pointAdvanced.style.display = showFeatureExtras && type === "point" ? "block" : "none";
+  pointAdvanced.style.display = type === "point" ? "block" : "none";
   polygonOutlineStyle.style.display = showFeatureExtras && type === "polygon" ? "block" : "none";
 }
 
@@ -4184,8 +4653,11 @@ function setColorPickerValue(colorId: string, color: string, fallbackAlpha: numb
   const safeAlpha = clamp(alpha, 0, 1);
   const hex = rgbToHex(rgba.r, rgba.g, rgba.b);
   const hexAlpha = rgbToHexWithAlpha(rgba.r, rgba.g, rgba.b, safeAlpha);
+  const normalizedHex = `#${hex.replace("#", "").padStart(6, "0")}`;
+  const normalizedHexAlpha = `${normalizedHex}${hexAlpha.replace("#", "").slice(-2)}`;
   if (picker) {
-    picker.value = safeAlpha < 1 ? hexAlpha : hex;
+    picker.format = "hexa";
+    picker.value = normalizedHexAlpha;
   }
   updateColorPickerSwatch(colorId, safeAlpha < 1 ? `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${safeAlpha})` : hex);
 }
@@ -4375,12 +4847,27 @@ function openTextSettingsModal() {
   if (selectedLayerIndex < 0) return;
   const layerData = graphicsLayers[selectedLayerIndex];
 
-  (getEl("text-content-input") as any).value = layerData.textContent || "Text";
-  (getEl("text-size-slider") as any).value = layerData.textSize || 14;
-  (getEl("text-color-input") as HTMLInputElement).value = layerData.textColor || "#22323a";
   activeTextLayerIndex = selectedLayerIndex;
+  attachTextPanelTo(`style-settings-host-${selectedLayerIndex}`);
+  syncTextPanelFromLayer(layerData);
+  setTimeout(() => (getEl("text-content-input") as any)?.focus?.(), 0);
+}
 
-  (getEl("text-settings-modal") as any).open = true;
+function syncTextPanelFromLayer(layerData: LayerData) {
+  const contentInput = document.getElementById("text-content-input") as any;
+  if (!contentInput) return;
+  const sizeSlider = document.getElementById("text-size-slider") as any;
+  const colorInput = document.getElementById("text-color-input") as HTMLInputElement | null;
+  const fontSelect = document.getElementById("text-font-select") as any;
+  const italicToggle = document.getElementById("text-italic-toggle") as any;
+  const underlineToggle = document.getElementById("text-underline-toggle") as any;
+
+  contentInput.value = layerData.textContent || "Text";
+  if (sizeSlider) sizeSlider.value = layerData.textSize || 14;
+  if (colorInput) colorInput.value = layerData.textColor || "#22323a";
+  if (fontSelect) fontSelect.value = layerData.textFontFamily || "sans-serif";
+  if (italicToggle) italicToggle.checked = Boolean(layerData.textItalic);
+  if (underlineToggle) underlineToggle.checked = Boolean(layerData.textUnderline);
 }
 
 function openAiModal() {
@@ -4506,7 +4993,6 @@ function cancelTextSettings() {
     textPlacementHandle = null;
   }
   activeTextLayerIndex = null;
-  closeModal("text-settings-modal");
 }
 
 function applyTextSettings(
@@ -4519,16 +5005,25 @@ function applyTextSettings(
   if (!layerData || layerData.type !== "text") return;
 
   const contentInput = getEl("text-content-input") as any;
-    const rawContent = overrides?.content ?? String(contentInput?.value ?? "");
-    const content = sanitizePlainText(rawContent, "Text");
+  const rawContent = overrides?.content ?? String(contentInput?.value ?? "");
+  const content = sanitizePlainText(rawContent, "Text");
   const sizeInput = getEl("text-size-slider") as any;
   const size = overrides?.size ?? Number(sizeInput?.value);
   const colorInput = getEl("text-color-input") as HTMLInputElement;
   const color = overrides?.color ?? colorInput.value;
+  const fontSelect = getEl("text-font-select") as any;
+  const fontFamily = String(fontSelect?.value || layerData.textFontFamily || "sans-serif");
+  const italicToggle = getEl("text-italic-toggle") as any;
+  const underlineToggle = getEl("text-underline-toggle") as any;
+  const isItalic = Boolean(italicToggle?.checked);
+  const isUnderline = Boolean(underlineToggle?.checked);
 
   layerData.textContent = content;
   layerData.textSize = Number.isFinite(size) ? size : layerData.textSize;
   layerData.textColor = color;
+  layerData.textFontFamily = fontFamily;
+  layerData.textItalic = isItalic;
+  layerData.textUnderline = isUnderline;
 
   layerData.layer.graphics.forEach((graphic: any) => {
     const symbol = graphic.symbol?.clone?.() ?? graphic.symbol;
@@ -4537,8 +5032,16 @@ function applyTextSettings(
     symbol.text = content;
     if (symbol.font) {
       symbol.font.size = layerData.textSize ?? 14;
+      symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
+      symbol.font.style = layerData.textItalic ? "italic" : "normal";
+      symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
     } else {
-      symbol.font = { size: layerData.textSize ?? 14, family: "sans-serif" };
+      symbol.font = {
+        size: layerData.textSize ?? 14,
+        family: layerData.textFontFamily || "sans-serif",
+        style: layerData.textItalic ? "italic" : "normal",
+        decoration: layerData.textUnderline ? "underline" : "none"
+      };
     }
     symbol.color = color;
     graphic.symbol = symbol;
@@ -4548,18 +5051,38 @@ function applyTextSettings(
 
   if (shouldClose) {
     activeTextLayerIndex = null;
-    closeModal("text-settings-modal");
   }
+}
+
+function updateStylePanel() {
+  if (selectedLayerIndex < 0) {
+    attachStylePanelTo();
+    attachTextPanelTo();
+    return;
+  }
+  const layerData = graphicsLayers[selectedLayerIndex];
+  if (layerData.type === "text") {
+    attachStylePanelTo();
+    attachTextPanelTo(`style-settings-host-${selectedLayerIndex}`);
+    syncTextPanelFromLayer(layerData);
+    return;
+  }
+  attachTextPanelTo();
+  attachStylePanelTo(`style-settings-host-${selectedLayerIndex}`);
+  syncStylePanelFromLayer(layerData);
 }
 
 function updateAnimationOptions() {
   if (selectedLayerIndex < 0) {
     setAnimationPanelVisible(false);
     attachAnimationPanelTo();
+    attachStylePanelTo();
+    attachTextPanelTo();
     return;
   }
   setAnimationPanelVisible(true);
   attachAnimationPanelTo(`animation-settings-host-${selectedLayerIndex}`);
+  updateStylePanel();
   syncAnimationStartInput();
   const layerData = graphicsLayers[selectedLayerIndex];
 
@@ -4678,6 +5201,38 @@ function highlightAnimationPanel() {
 function attachAnimationPanelTo(hostId?: string) {
   const panel = document.getElementById("animation-settings-panel");
   const stash = document.getElementById("animation-settings-stash");
+  if (!panel || !stash) return;
+  if (!hostId) {
+    stash.appendChild(panel);
+    return;
+  }
+  const host = document.getElementById(hostId);
+  if (!host) {
+    stash.appendChild(panel);
+    return;
+  }
+  host.appendChild(panel);
+}
+
+function attachStylePanelTo(hostId?: string) {
+  const panel = document.getElementById("style-settings-panel");
+  const stash = document.getElementById("style-settings-stash");
+  if (!panel || !stash) return;
+  if (!hostId) {
+    stash.appendChild(panel);
+    return;
+  }
+  const host = document.getElementById(hostId);
+  if (!host) {
+    stash.appendChild(panel);
+    return;
+  }
+  host.appendChild(panel);
+}
+
+function attachTextPanelTo(hostId?: string) {
+  const panel = document.getElementById("text-settings-panel");
+  const stash = document.getElementById("text-settings-stash");
   if (!panel || !stash) return;
   if (!hostId) {
     stash.appendChild(panel);

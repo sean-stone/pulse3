@@ -10,7 +10,7 @@ import type {
 
 export const TIMELINE_SNAP_INCREMENT = 0.1;
 export const TIMELINE_SNAP_PX = 8;
-export const HISTORY_LIMIT = 30;
+export const HISTORY_LIMIT = 10;
 export const EXPORT_WARNING_DURATION = 60;
 export const EXPORT_WARNING_ANIMATIONS = 80;
 
@@ -50,7 +50,7 @@ export const PROJECT_STORAGE_KEY_RECENTS = "pulse.project.recents";
 export const PROJECT_STORAGE_KEY_NAME = "pulse.project.name";
 export const STORAGE_CONSENT_KEY = "pulse.storage.consent";
 export const PROJECT_VERSION = 1;
-export const APP_VERSION = "3.6.0";
+export const APP_VERSION = "3.7.0";
 export const ENABLE_PROJECT_STORAGE = true;
 
 export const allowedBasemaps = new Set([
@@ -81,6 +81,9 @@ export type ProjectLayerSnapshot = {
   textContent?: string;
   textSize?: number;
   textColor?: string;
+  textFontFamily?: string;
+  textItalic?: boolean;
+  textUnderline?: boolean;
   featureLayerUrl?: string;
   featureFields?: Array<{ name: string; type: string }>;
   featureField?: string;
@@ -114,6 +117,7 @@ export type ProjectSnapshot = {
         isRotated: boolean;
         basemap: string;
         basemapVisible: boolean;
+        basemapLabelsVisible?: boolean;
         backgroundColor?: string;
         backgroundTransparent?: boolean;
         extent?: { xmin: number; ymin: number; xmax: number; ymax: number; wkid?: number };

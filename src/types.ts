@@ -64,6 +64,9 @@ export interface LayerData {
   textContent?: string;
   textSize?: number;
   textColor?: string;
+  textFontFamily?: string;
+  textItalic?: boolean;
+  textUnderline?: boolean;
   pointStyle?: PointStyle;
   lineStyle?: LineStyle;
   polygonStyle?: PolygonStyle;

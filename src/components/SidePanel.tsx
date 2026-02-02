@@ -32,16 +32,15 @@ function SidePanel() {
             icon
             heading="Animations and Styles"
           >
-            <div id="layers-accordion" data-testid="layers-accordion"></div>
+            <calcite-accordion id="layers-accordion" data-testid="layers-accordion" selection-mode="single"></calcite-accordion>
 
             <div id="animation-settings-stash" style={{ display: "none" }}>
               <div id="animation-settings-panel" className="animation-settings-panel">
-                <calcite-label className="animation-type-row">
-                  Animation Type
+                <div className="animation-type-row">
                   <div className="animation-type-inline">
                     <div id="animation-type-options" className="animation-type-options"></div>
                   </div>
-                </calcite-label>
+                </div>
 
                 <div id="feature-animation-settings" style={{ display: "none" }}>
                   <calcite-label style={{ marginTop: 12 }}>

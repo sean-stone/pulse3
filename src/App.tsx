@@ -244,6 +244,10 @@ export default function App() {
                   <calcite-option value="osm">OpenStreetMap</calcite-option>
                     <calcite-option value="none">None</calcite-option>
                   </calcite-select>
+                  <label className="basemap-labels-toggle">
+                    <calcite-switch id="basemap-labels-toggle" scale="s" checked></calcite-switch>
+                    <span>Labels</span>
+                  </label>
                 </div>
                 <div
                   id="basemap-bg-picker"

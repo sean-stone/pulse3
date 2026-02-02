@@ -110,6 +110,9 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
     textContent: layerData.textContent,
     textSize: layerData.textSize,
     textColor: layerData.textColor,
+    textFontFamily: layerData.textFontFamily,
+    textItalic: layerData.textItalic,
+    textUnderline: layerData.textUnderline,
     featureLayerUrl: layerData.featureLayerUrl,
     featureFields: layerData.featureFields?.map((field) => ({ ...field })),
     featureField: layerData.featureField,
@@ -155,12 +158,14 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   const basemapBackgroundTransparentInput = document.getElementById(
     "basemap-bg-transparent"
   ) as HTMLInputElement | null;
+  const basemapLabelsToggle = document.getElementById("basemap-labels-toggle") as HTMLInputElement | null;
   const customWidthInput = document.getElementById("custom-width") as any;
   const customHeightInput = document.getElementById("custom-height") as any;
   const customWidth = Number(customWidthInput?.value);
   const customHeight = Number(customHeightInput?.value);
   const backgroundColor = basemapBackgroundInput?.value || "#ffffff";
   const backgroundTransparent = Boolean(basemapBackgroundTransparentInput?.checked);
+  const basemapLabelsVisible = basemapLabelsToggle ? Boolean(basemapLabelsToggle.checked) : true;
 
   return {
     type: "FeatureCollection",
@@ -178,6 +183,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           isRotated: config.isRotated,
           basemap: String(basemapSelect?.value || "gray-vector"),
           basemapVisible: basemapSelect?.value !== "none",
+          basemapLabelsVisible,
           backgroundColor,
           backgroundTransparent,
           extent: config.view.extent
@@ -256,6 +262,10 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     const basemapBackgroundInput = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
     if (basemapBackgroundInput && meta.app?.backgroundColor) {
       basemapBackgroundInput.value = String(meta.app.backgroundColor);
+    }
+    const basemapLabelsToggle = document.getElementById("basemap-labels-toggle") as HTMLInputElement | null;
+    if (basemapLabelsToggle) {
+      basemapLabelsToggle.checked = meta.app?.basemapLabelsVisible !== false;
     }
     const basemapBackgroundTransparentInput = document.getElementById(
       "basemap-bg-transparent"
@@ -387,6 +397,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         textContent: layerSnapshot.textContent,
         textSize: layerSnapshot.textSize,
         textColor: layerSnapshot.textColor,
+        textFontFamily: layerSnapshot.textFontFamily,
+        textItalic: layerSnapshot.textItalic,
+        textUnderline: layerSnapshot.textUnderline,
         layerBlendMode: layerSnapshot.layerBlendMode,
         layerEffectSettings: layerSnapshot.layerEffectSettings
           ? { ...layerSnapshot.layerEffectSettings }
@@ -416,7 +429,12 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
             type: "text",
             text: layerData.textContent || "Text",
             color: layerData.textColor || "#22323a",
-            font: { size: layerData.textSize || 14, family: "sans-serif" }
+            font: {
+              size: layerData.textSize || 14,
+              family: layerData.textFontFamily || "sans-serif",
+              style: layerData.textItalic ? "italic" : "normal",
+              decoration: layerData.textUnderline ? "underline" : "none"
+            }
           };
         }
         config.ensureGeometryCache(layerData, graphic);

@@ -189,6 +189,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           symbol.text = baseText;
           symbol.font = symbol.font || { size: baseSize, family: "sans-serif" };
           symbol.font.size = baseSize;
+          symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
+          symbol.font.style = layerData.textItalic ? "italic" : "normal";
+          symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
           graphic.symbol = symbol;
         });
       }
@@ -345,6 +348,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const symbol = graphic.symbol.clone();
         symbol.font = symbol.font || { size: baseSize, family: "sans-serif" };
         symbol.font.size = baseSize * scale;
+        symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
+        symbol.font.style = layerData.textItalic ? "italic" : "normal";
+        symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
         if (hasTypewriterAnimation) {
           if (activeTypewriter) {
             const length = Math.max(0, Math.floor(baseText.length * activeTypewriter.progress));

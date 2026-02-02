@@ -204,6 +204,14 @@ body {
   color: var(--color-text-muted);
 }
 
+.basemap-labels-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .toolbar-left {
   display: flex;
   align-items: center;
@@ -717,6 +725,21 @@ body {
 .panel-section {
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-border);
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.panel-section calcite-stepper-item::part(content) {
+  padding-right: 12px;
+  box-sizing: border-box;
+}
+
+.panel-section calcite-stepper,
+.panel-section calcite-stepper-item {
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .panel-section-title {
@@ -784,6 +807,84 @@ body.timeline-panel-resizing {
   border-radius: 10px;
   box-shadow: 0 6px 14px rgba(10, 76, 102, 0.12);
   backdrop-filter: blur(6px);
+}
+
+#map-context-menu {
+  position: absolute;
+  min-width: 220px;
+  max-width: 280px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(10, 76, 102, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(10, 76, 102, 0.2);
+  backdrop-filter: blur(8px);
+  padding: 8px;
+  z-index: 1200;
+  opacity: 0;
+  transform: scale(0.97);
+  transform-origin: top left;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+#map-context-menu.is-open {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.map-context-menu__header {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  padding: 6px 10px 4px;
+}
+
+.map-context-menu__items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.map-context-menu-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.map-context-menu-item:hover {
+  background: rgba(10, 76, 102, 0.08);
+}
+
+.map-context-menu-item:active {
+  background: rgba(10, 76, 102, 0.14);
+}
+
+.map-context-menu-item.danger {
+  color: var(--color-danger);
+}
+
+.map-context-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.map-context-menu-divider {
+  height: 1px;
+  background: rgba(10, 76, 102, 0.12);
+  margin: 4px 6px;
 }
 
 #delete-layer-btn {
@@ -861,8 +962,6 @@ arcgis-map {
 }
 
 #rename-modal,
-#style-settings-modal,
-#text-settings-modal,
 #export-preview-modal {
   position: absolute;
   top: 0;
@@ -879,6 +978,22 @@ arcgis-map {
   --calcite-dialog-size-y: 100%;
   --calcite-dialog-max-size-x: 100%;
   --calcite-dialog-max-size-y: 100%;
+}
+
+#style-settings-panel {
+  display: block;
+  padding: 4px 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#text-settings-panel {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 #export-preview-modal::part(content) {
@@ -942,6 +1057,53 @@ body.is-mobile #ai-ask-modal {
   border-color: var(--color-primary);
 }
 
+.style-compact-colors {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.style-compact-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.style-compact-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--calcite-color-text-2, #5f6b78);
+}
+
+.style-compact-colors .color-swatch-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.color-swatch-input {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.color-swatch-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-swatch-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
 .color-picker-row {
   display: flex;
   align-items: center;
@@ -956,9 +1118,10 @@ body.is-mobile #ai-ask-modal {
 
 .style-grid-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+  max-width: 100%;
 }
 
 .style-grid-label {
@@ -967,6 +1130,12 @@ body.is-mobile #ai-ask-modal {
 
 .style-grid-control {
   width: 100%;
+  min-width: 0;
+}
+
+.style-grid-control calcite-slider {
+  width: 100%;
+  max-width: 100%;
 }
 
 .style-grid-colors {
@@ -1362,10 +1531,6 @@ body.is-mobile #ai-ask-modal {
   color: var(--color-text);
 }
 
-#point-advanced-section {
-  display: none;
-}
-
 #polygon-outline-style-row {
   display: none;
 }
@@ -1452,6 +1617,16 @@ body.is-mobile #ai-ask-modal {
   margin-top: 6px;
 }
 
+.point-style-options {
+  max-height: 100px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#point-style-search {
+  margin: 8px 0 10px;
+}
+
 .style-option-section-title {
   grid-column: 1 / -1;
   font-size: 11px;
@@ -1489,6 +1664,7 @@ body.is-mobile #ai-ask-modal {
   outline: 2px solid var(--color-secondary);
   outline-offset: 2px;
 }
+
 
 .line-style-swatch {
   width: 36px;
@@ -1942,62 +2118,109 @@ body.is-mobile #ai-ask-modal {
 }
 
 #layers-accordion {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow-x: hidden;
+    margin-top: 0px;
+    display: block;
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding-right: 0;
 }
 
-.layer-item {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: #ffffff;
-  overflow: hidden;
-  max-width: 100%;
-}
-
-.layer-item-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+#layers-accordion calcite-accordion-item::part(header) {
   padding: 8px 10px;
-  overflow: hidden;
-  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.layer-item-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  width: 0;
-}
-
-.layer-item-heading {
+#layers-accordion calcite-accordion-item::part(title) {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1 1 0;
+}
+
+#layers-accordion calcite-accordion-item::part(container) {
+  width: 100%;
   max-width: 100%;
-  display: block;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#layers-accordion calcite-accordion-item::part(content) {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-right: 8px;
+}
+
+#layers-accordion calcite-accordion-item::part(actions-end) {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .layer-item-content {
-  display: none;
-  padding: 8px 10px 12px;
-  border-top: 1px solid var(--color-border);
+  padding: 0 12px 0 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.layer-item.expanded .layer-item-content {
-  display: block;
+#layers-accordion calcite-accordion-item {
+  width: 100%;
+  max-width: 345px;
+  box-sizing: border-box;
+}
+
+#layers-accordion calcite-accordion-item::part(header) {
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#layers-accordion calcite-accordion-item::part(title) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-item-content .style-option-grid {
+  width: 100%;
+  max-width: 100%;
+}
+
+.layer-item-content .style-option-btn {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.layer-item-content calcite-label,
+.layer-item-content calcite-input,
+.layer-item-content calcite-select,
+.layer-item-content calcite-input-number,
+.layer-item-content calcite-slider {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.layer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layer-section + .layer-section {
+  margin-top: 12px;
+}
+
+.layer-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
 }
 
 .layer-add-animation-chip::part(text) {
@@ -2092,6 +2315,9 @@ calcite-accordion-item::part(toggle-icon) {
   display: none;
   border-radius: 8px;
   transition: box-shadow 0.2s ease;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .animation-settings-panel.show {

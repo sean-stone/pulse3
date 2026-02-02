@@ -13,6 +13,7 @@ type HistoryConfig = {
   updateHistoryControls: () => void;
   setProjectError: (message: string | null) => void;
   isRestoringProject: () => boolean;
+  getHistoryLimit?: () => number;
 };
 
 const captureHistorySnapshot = (config: HistoryConfig) => {
@@ -27,7 +28,8 @@ const pushHistorySnapshot = (state: HistoryState, config: HistoryConfig) => {
   if (!payload) return;
   if (state.historyStack[state.historyStack.length - 1] === payload) return;
   state.historyStack.push(payload);
-  if (state.historyStack.length > HISTORY_LIMIT) {
+  const historyLimit = config.getHistoryLimit ? config.getHistoryLimit() : HISTORY_LIMIT;
+  if (state.historyStack.length > historyLimit) {
     state.historyStack.shift();
   }
   state.redoStack = [];

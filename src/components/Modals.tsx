@@ -1,20 +1,24 @@
 function Modals() {
   return (
     <>
-      <calcite-dialog
-        id="style-settings-modal"
-        data-testid="style-settings-modal"
-        heading="Style Settings"
-        scale="s"
-        overlay-positioning="absolute"
-        placement="cover"
-        embedded
-      >
-        <div>
+      <div id="style-settings-stash" style={{ display: "none" }}>
+        <div id="style-settings-panel" data-testid="style-settings-panel" className="style-settings-panel">
+          <div>
           <div id="point-style-section">
             <calcite-label>
               Point Style
-              <div id="point-style-options" className="style-option-grid" role="group" aria-label="Point style">
+              <calcite-input
+                id="point-style-search"
+                placeholder="Search pins"
+                scale="s"
+                clearable
+              ></calcite-input>
+              <div
+                id="point-style-options"
+                className="style-option-grid point-style-options"
+                role="group"
+                aria-label="Point style"
+              >
                 <div className="style-option-section-title">Basic</div>
                 <button type="button" className="style-option-btn" data-value="circle">
                   <span className="point-style-swatch point-style-swatch--circle"></span>
@@ -177,6 +181,7 @@ function Modals() {
                   </svg>
                   Path
                 </button>
+                
                 <div className="style-option-section-title">Phosphor Flags</div>
                 <button type="button" className="style-option-btn" data-value="phosphor-flag">
                   <svg className="point-style-swatch-icon" viewBox="0 0 1024 1024" aria-hidden="true">
@@ -202,6 +207,7 @@ function Modals() {
                   </svg>
                   Flag Pennant
                 </button>
+                
                 <div className="style-option-section-title">Phosphor Transport</div>
                 <button type="button" className="style-option-btn" data-value="phosphor-car">
                   <svg className="point-style-swatch-icon" viewBox="0 0 1024 1024" aria-hidden="true">
@@ -323,6 +329,7 @@ function Modals() {
                   </svg>
                   Lighthouse
                 </button>
+                
                 <div className="style-option-section-title">Phosphor Places</div>
                 <button type="button" className="style-option-btn" data-value="phosphor-house">
                   <svg className="point-style-swatch-icon" viewBox="0 0 1024 1024" aria-hidden="true">
@@ -396,6 +403,7 @@ function Modals() {
                   </svg>
                   Bank
                 </button>
+                
                 <div className="style-option-section-title">Phosphor Services</div>
                 <button type="button" className="style-option-btn" data-value="phosphor-gas-pump">
                   <svg className="point-style-swatch-icon" viewBox="0 0 1024 1024" aria-hidden="true">
@@ -469,6 +477,7 @@ function Modals() {
                   </svg>
                   Bed
                 </button>
+                
                 <div className="style-option-section-title">Phosphor Numbers</div>
                 <button type="button" className="style-option-btn" data-value="phosphor-number-circle-zero">
                   <svg className="point-style-swatch-icon" viewBox="0 0 1024 1024" aria-hidden="true">
@@ -530,6 +539,7 @@ function Modals() {
                   </svg>
                   9
                 </button>
+              
               </div>
             </calcite-label>
 
@@ -541,7 +551,7 @@ function Modals() {
                   data-testid="point-size-input"
                   className="style-grid-control"
                   min="1"
-                  max="64"
+                  max="128"
                   step="1"
                   value="20"
                   label-handles="true"
@@ -561,89 +571,50 @@ function Modals() {
                   scale="m"
                 ></calcite-slider>
               </div>
-              <div className="style-grid-row">
-                <span className="style-grid-label">Colors</span>
-                <div className="style-grid-colors">
-                  <div className="color-picker-row style-grid-color">
-                    <span className="color-picker-label">Inner:</span>
-                    <button
-                      type="button"
-                      id="point-fill-color"
-                      className="color-swatch-button"
-                      aria-label="Inner color"
-                    ></button>
-                    <calcite-popover reference-element="point-fill-color" placement="bottom-start" auto-close>
-                      <calcite-color-picker
-                        id="point-fill-color-picker"
-                        value="#0a4c66"
-                        scale="s"
-                        alpha-channel
-                        channels-disabled
-                        saved-disabled
-                      ></calcite-color-picker>
-                    </calcite-popover>
-                  </div>
-                  <div className="color-picker-row style-grid-color">
-                    <span className="color-picker-label">Outer:</span>
-                    <button
-                      type="button"
-                      id="point-outline-color"
-                      className="color-swatch-button"
-                      aria-label="Outer color"
-                    ></button>
-                    <calcite-popover reference-element="point-outline-color" placement="bottom-start" auto-close>
-                      <calcite-color-picker
-                        id="point-outline-color-picker"
-                        value="#ffffff"
-                        scale="s"
-                        alpha-channel
-                        channels-disabled
-                        saved-disabled
-                      ></calcite-color-picker>
-                    </calcite-popover>
-                  </div>
-                </div>
+            </div>
+
+            <div className="style-compact-colors" role="group" aria-label="Point colors">
+              <div className="style-compact-group">
+                <span className="style-compact-label">Fill</span>
+                <button
+                  type="button"
+                  id="point-fill-color"
+                  className="color-swatch-button"
+                  aria-label="Fill color"
+                ></button>
+                <calcite-popover reference-element="point-fill-color" placement="bottom-start" auto-close>
+                  <calcite-color-picker
+                    id="point-fill-color-picker"
+                    value="#0a4c66"
+                    scale="s"
+                    alpha-channel
+                    channels-disabled
+                    saved-disabled
+                  ></calcite-color-picker>
+                </calcite-popover>
+              </div>
+              <div className="style-compact-group">
+                <span className="style-compact-label">Outline</span>
+                <button
+                  type="button"
+                  id="point-outline-color"
+                  className="color-swatch-button"
+                  aria-label="Outline color"
+                ></button>
+                <calcite-popover reference-element="point-outline-color" placement="bottom-start" auto-close>
+                  <calcite-color-picker
+                    id="point-outline-color-picker"
+                    value="#ffffff"
+                    scale="s"
+                    alpha-channel
+                    channels-disabled
+                    saved-disabled
+                  ></calcite-color-picker>
+                </calcite-popover>
               </div>
             </div>
 
 
-            <div id="point-advanced-section">
-              <calcite-label style={{ marginTop: 12 }}>
-                Angle (degrees)
-                <calcite-input-number
-                  id="point-angle-input"
-                  value="0"
-                  min="-360"
-                  max="360"
-                  step="1"
-                  scale="m"
-                ></calcite-input-number>
-              </calcite-label>
-
-              <calcite-label style={{ marginTop: 12 }}>
-                X Offset (px)
-                <calcite-input-number
-                  id="point-xoffset-input"
-                  value="0"
-                  min="-200"
-                  max="200"
-                  step="1"
-                  scale="m"
-                ></calcite-input-number>
-              </calcite-label>
-
-              <calcite-label style={{ marginTop: 12 }}>
-                Y Offset (px)
-                <calcite-input-number
-                  id="point-yoffset-input"
-                  value="0"
-                  min="-200"
-                  max="200"
-                  step="1"
-                  scale="m"
-                ></calcite-input-number>
-              </calcite-label>
-            </div>
           </div>
 
           <div id="line-style-section">
@@ -718,9 +689,9 @@ function Modals() {
               ></calcite-slider>
             </calcite-label>
 
-            <calcite-label style={{ marginTop: 12 }}>
-              <div className="color-picker-row">
-                <span className="color-picker-label">Line Color:</span>
+            <div className="style-compact-colors" role="group" aria-label="Line color">
+              <div className="style-compact-group">
+                <span className="style-compact-label">Line</span>
                 <button
                   type="button"
                   id="line-color-input"
@@ -738,7 +709,7 @@ function Modals() {
                   ></calcite-color-picker>
                 </calcite-popover>
               </div>
-            </calcite-label>
+            </div>
           </div>
 
           <div id="polygon-style-section">
@@ -785,9 +756,9 @@ function Modals() {
               </div>
             </calcite-label>
 
-            <calcite-label style={{ marginTop: 12 }}>
-              <div className="color-picker-row">
-                <span className="color-picker-label">Fill Color:</span>
+            <div className="style-compact-colors" role="group" aria-label="Polygon colors">
+              <div className="style-compact-group">
+                <span className="style-compact-label">Fill</span>
                 <button
                   type="button"
                   id="polygon-fill-color"
@@ -805,11 +776,8 @@ function Modals() {
                   ></calcite-color-picker>
                 </calcite-popover>
               </div>
-            </calcite-label>
-
-            <calcite-label style={{ marginTop: 12 }}>
-              <div className="color-picker-row">
-                <span className="color-picker-label">Outline Color:</span>
+              <div className="style-compact-group">
+                <span className="style-compact-label">Outline</span>
                 <button
                   type="button"
                   id="polygon-outline-color"
@@ -827,7 +795,7 @@ function Modals() {
                   ></calcite-color-picker>
                 </calcite-popover>
               </div>
-            </calcite-label>
+            </div>
 
             <div id="polygon-outline-style-row">
               <calcite-label style={{ marginTop: 12 }}>
@@ -849,14 +817,15 @@ function Modals() {
 
             <calcite-label style={{ marginTop: 12 }}>
               Outline Width
-              <calcite-input-number
+              <calcite-slider
                 id="polygon-outline-width"
-                value="2"
                 min="0"
                 max="10"
                 step="1"
+                value="2"
+                label-handles="true"
                 scale="m"
-              ></calcite-input-number>
+              ></calcite-slider>
             </calcite-label>
           </div>
 
@@ -871,6 +840,43 @@ function Modals() {
             </button>
 
             <div id="style-effects-advanced" className="style-effects-advanced">
+              <div id="point-advanced-section">
+                <calcite-label style={{ marginTop: 12 }}>
+                  X Offset (px)
+                  <calcite-input-number
+                    id="point-xoffset-input"
+                    value="0"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    scale="m"
+                  ></calcite-input-number>
+                </calcite-label>
+
+                <calcite-label style={{ marginTop: 12 }}>
+                  Y Offset (px)
+                  <calcite-input-number
+                    id="point-yoffset-input"
+                    value="0"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    scale="m"
+                  ></calcite-input-number>
+                </calcite-label>
+
+                <calcite-label style={{ marginTop: 12 }}>
+                  Angle (degrees)
+                  <calcite-input-number
+                    id="point-angle-input"
+                    value="0"
+                    min="-360"
+                    max="360"
+                    step="1"
+                    scale="m"
+                  ></calcite-input-number>
+                </calcite-label>
+              </div>
               <calcite-label style={{ marginTop: 12 }}>
                 Blend Mode
                 <calcite-select id="layer-blend-mode-select" scale="m">
@@ -1063,44 +1069,35 @@ function Modals() {
                 ></calcite-slider>
               </calcite-label>
 
-            <calcite-label className="filter-control">
-              Drop Shadow Color
-              <button
-                type="button"
-                id="effect-drop-shadow-color"
-                className="color-swatch-button"
-                aria-label="Drop shadow color"
-              ></button>
-              <calcite-popover reference-element="effect-drop-shadow-color" placement="bottom-start" auto-close>
-                <calcite-color-picker
-                  id="effect-drop-shadow-color-picker"
-                  value="#000000"
-                  scale="s"
-                  alpha-channel
-                  channels-disabled
-                  saved-disabled
-                ></calcite-color-picker>
-              </calcite-popover>
-            </calcite-label>
+            <div className="style-compact-colors filter-control" role="group" aria-label="Drop shadow color">
+              <div className="style-compact-group">
+                <span className="style-compact-label">Drop Shadow</span>
+                <button
+                  type="button"
+                  id="effect-drop-shadow-color"
+                  className="color-swatch-button"
+                  aria-label="Drop shadow color"
+                ></button>
+                <calcite-popover reference-element="effect-drop-shadow-color" placement="bottom-start" auto-close>
+                  <calcite-color-picker
+                    id="effect-drop-shadow-color-picker"
+                    value="#000000"
+                    scale="s"
+                    alpha-channel
+                    channels-disabled
+                    saved-disabled
+                  ></calcite-color-picker>
+                </calcite-popover>
+              </div>
+            </div>
             </div>
           </div>
+          </div>
         </div>
-        <div slot="footer" className="dialog-footer">
-          <calcite-button id="style-confirm">
-            Ok
-          </calcite-button>
-        </div>
-      </calcite-dialog>
+      </div>
 
-      <calcite-dialog
-        id="text-settings-modal"
-        heading="Text Settings"
-        scale="s"
-        overlay-positioning="absolute"
-        placement="cover"
-        embedded
-      >
-        <div>
+      <div id="text-settings-stash" style={{ display: "none" }}>
+        <div id="text-settings-panel" data-testid="text-settings-panel" className="text-settings-panel">
           <calcite-label>
             Text Content
             <calcite-input
@@ -1108,6 +1105,20 @@ function Modals() {
               placeholder="Enter text"
               scale="m"
             ></calcite-input>
+          </calcite-label>
+          <calcite-label style={{ marginTop: 12 }}>
+            Font Family
+            <calcite-select id="text-font-select" scale="m">
+              <calcite-option value="sans-serif">Sans Serif</calcite-option>
+              <calcite-option value="serif">Serif</calcite-option>
+              <calcite-option value="monospace">Monospace</calcite-option>
+              <calcite-option value="Arial">Arial</calcite-option>
+              <calcite-option value="Georgia">Georgia</calcite-option>
+              <calcite-option value="Times New Roman">Times New Roman</calcite-option>
+              <calcite-option value="Verdana">Verdana</calcite-option>
+              <calcite-option value="Tahoma">Tahoma</calcite-option>
+              <calcite-option value="Trebuchet MS">Trebuchet MS</calcite-option>
+            </calcite-select>
           </calcite-label>
           <calcite-label style={{ marginTop: 12 }}>
             Font Size
@@ -1121,27 +1132,27 @@ function Modals() {
               scale="m"
             ></calcite-slider>
           </calcite-label>
-          <calcite-label style={{ marginTop: 12 }}>
-            <div className="color-picker-row">
-              <span className="color-picker-label">Text Color:</span>
+          <div className="style-compact-colors" role="group" aria-label="Text color" style={{ marginTop: 12 }}>
+            <div className="style-compact-group">
+              <span className="style-compact-label">Text</span>
               <input
                 type="color"
                 id="text-color-input"
                 defaultValue="#22323a"
-                className="color-picker-compact"
+                className="color-swatch-input"
               />
             </div>
+          </div>
+          <calcite-label style={{ marginTop: 12 }}>
+            Italic
+            <calcite-switch id="text-italic-toggle"></calcite-switch>
+          </calcite-label>
+          <calcite-label style={{ marginTop: 12 }}>
+            Underline
+            <calcite-switch id="text-underline-toggle"></calcite-switch>
           </calcite-label>
         </div>
-        <div slot="footer" className="dialog-footer">
-          <calcite-button id="text-settings-cancel" appearance="outline">
-            Cancel
-          </calcite-button>
-          <calcite-button id="text-settings-confirm">
-            Apply
-          </calcite-button>
-        </div>
-      </calcite-dialog>
+      </div>
       <calcite-dialog
         id="keyboard-shortcuts-modal"
         heading="Keyboard shortcuts"

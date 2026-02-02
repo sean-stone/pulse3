@@ -13,6 +13,7 @@ export type TimelineState = {
   timelineDurationOverride: number | null;
   selectedTimelineClip: HTMLElement | null;
   selectedTimelineAnimation: { layerIdx: number; animIdx: number } | null;
+  selectedTimelineKeyframe: { layerIdx: number; keyframeIdx: number } | null;
   isScrubbingTimeline: boolean;
   timelinePanelWidth: number;
   timelinePanelResizeState: { startX: number; startWidth: number } | null;
@@ -42,6 +43,7 @@ export type TimelineConfig = {
   getEl: (id: string) => HTMLElement;
   getGraphicsLayers: () => LayerData[];
   getSelectedLayerIndex: () => number;
+  isPlaying?: () => boolean;
   getCurrentTime: () => number;
   setCurrentTime: (value: number) => void;
   updatePlayhead: () => void;
@@ -63,6 +65,8 @@ export type TimelineConfig = {
   upsertPointKeyframe: (layerData: LayerData, geometry: Point, time: number) => void;
   hasPointKeyframes: (layerData: LayerData) => boolean;
   removeAnimationAt: (layerIdx: number, animIdx: number) => void;
+  removePointKeyframeAt?: (layerIdx: number, keyframeIdx: number) => void;
+  restartPlaybackFromStart?: () => void;
 };
 
 export const createTimelineController = (state: TimelineState, config: TimelineConfig) => {
@@ -327,6 +331,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
     state.selectedTimelineAnimation = null;
     state.selectedTimelineClip = null;
+    state.selectedTimelineKeyframe = null;
     const deleteButton = document.getElementById("timeline-delete-clip-btn");
     if (deleteButton) {
       deleteButton.setAttribute("disabled", "true");
@@ -359,6 +364,12 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
   };
 
   const removeSelectedTimelineAnimation = () => {
+    if (state.selectedTimelineKeyframe) {
+      const { layerIdx, keyframeIdx } = state.selectedTimelineKeyframe;
+      config.removePointKeyframeAt?.(layerIdx, keyframeIdx);
+      clearSelectedTimelineAnimation();
+      return;
+    }
     if (!state.selectedTimelineAnimation) return;
     const { layerIdx, animIdx } = state.selectedTimelineAnimation;
     config.removeAnimationAt(layerIdx, animIdx);
@@ -399,6 +410,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     const animatedLayers = config
       .getGraphicsLayers()
       .filter((layer) => layer.animations.length > 0 || config.hasPointKeyframes(layer));
+    const orderedLayers = [...animatedLayers].reverse();
     let selectionVisible = false;
 
     if (animatedLayers.length === 0) {
@@ -426,7 +438,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
 
     layersPanel.innerHTML = "";
-    animatedLayers.forEach((layerData) => {
+    orderedLayers.forEach((layerData) => {
       const layerIndex = config.getGraphicsLayers().indexOf(layerData);
       const label = document.createElement("div");
       label.className = "timeline-layer-label";
@@ -445,13 +457,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       moveUpButton.setAttribute("icon-start", "chevron-up");
       moveUpButton.title = "Move layer up";
       moveUpButton.setAttribute("aria-label", "Move layer up");
-      if (layerIndex <= 0) {
+      if (layerIndex >= config.getGraphicsLayers().length - 1) {
         moveUpButton.setAttribute("disabled", "true");
       }
       moveUpButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layerIndex > 0) {
-          config.moveLayer(layerIndex, -1);
+        if (layerIndex < config.getGraphicsLayers().length - 1) {
+          config.moveLayer(layerIndex, 1);
         }
       });
       reorder.appendChild(moveUpButton);
@@ -463,13 +475,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       moveDownButton.setAttribute("icon-start", "chevron-down");
       moveDownButton.title = "Move layer down";
       moveDownButton.setAttribute("aria-label", "Move layer down");
-      if (layerIndex >= config.getGraphicsLayers().length - 1) {
+      if (layerIndex <= 0) {
         moveDownButton.setAttribute("disabled", "true");
       }
       moveDownButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layerIndex < config.getGraphicsLayers().length - 1) {
-          config.moveLayer(layerIndex, 1);
+        if (layerIndex > 0) {
+          config.moveLayer(layerIndex, -1);
         }
       });
       reorder.appendChild(moveDownButton);
@@ -612,7 +624,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     tracksArea.innerHTML = "";
     tracksArea.style.width = `${totalWidth}px`;
 
-    animatedLayers.forEach((layerData, layerIdx) => {
+    orderedLayers.forEach((layerData, layerIdx) => {
       const track = document.createElement("div");
       track.className = "timeline-track";
       track.dataset.layerIdx = String(config.getGraphicsLayers().indexOf(layerData));
@@ -659,6 +671,14 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
           marker.style.left = `${frame.time * state.timelineZoom}px`;
           marker.dataset.layerIdx = String(config.getGraphicsLayers().indexOf(layerData));
           marker.dataset.keyframeIdx = String(frameIdx);
+          if (
+            state.selectedTimelineKeyframe &&
+            state.selectedTimelineKeyframe.layerIdx === Number(marker.dataset.layerIdx) &&
+            state.selectedTimelineKeyframe.keyframeIdx === frameIdx
+          ) {
+            marker.classList.add("selected");
+            selectionVisible = true;
+          }
           track.appendChild(marker);
         });
       }
@@ -666,7 +686,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       tracksArea.appendChild(track);
     });
 
-    if (selectionVisible) {
+    if (selectionVisible || state.selectedTimelineKeyframe) {
       const deleteButton = document.getElementById("timeline-delete-clip-btn");
       if (deleteButton) {
         deleteButton.removeAttribute("disabled");
@@ -703,12 +723,18 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     state.timelineDurationOverride = next;
     config.setCalciteValue(input as HTMLElement, next.toFixed(1));
     updateTimeline();
+    if (config.isPlaying?.() && config.restartPlaybackFromStart) {
+      config.restartPlaybackFromStart();
+    }
     config.scheduleProjectSave();
   };
 
   const handleTimelineDurationAutoFit = () => {
     state.timelineDurationOverride = getMinTimelineDuration();
     updateTimeline();
+    if (config.isPlaying?.() && config.restartPlaybackFromStart) {
+      config.restartPlaybackFromStart();
+    }
     config.scheduleProjectSave();
   };
 
@@ -846,6 +872,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       const frame = config.getGraphicsLayers()[layerIdx]?.pointKeyframes?.[keyframeIdx];
 
       if (frame) {
+        state.selectedTimelineKeyframe = { layerIdx, keyframeIdx };
+        keyframe.classList.add("selected");
+        const deleteButton = document.getElementById("timeline-delete-clip-btn");
+        if (deleteButton) {
+          deleteButton.removeAttribute("disabled");
+          deleteButton.classList.add("show");
+        }
         state.keyframeDragState = {
           layerIdx,
           keyframe: frame,
