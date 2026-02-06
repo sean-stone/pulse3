@@ -54,6 +54,25 @@ import ffmpegWasmUrl from "@ffmpeg/core/wasm?url";
 let ffmpegClassWorkerUrl: string | null = null;
 let ffmpegCoreBaseUrl: string | null = null;
 
+const webglAnimationTypes = new Set([
+  "neonTrail",
+  "glow",
+  "glowPulse",
+  "electricFlicker",
+  "heatHaze",
+  "scanline",
+  "sparkEmit",
+  "arrowMarch",
+  "barrageOfArrows",
+  "jitterSketch",
+  "noiseDissolve",
+  "ghostTrail",
+  "breathe",
+  "pixelate",
+  "timeGradient",
+  "prismShift"
+]);
+
 const appendCacheBust = (url: string) => {
   if (!APP_VERSION) return url;
   const separator = url.includes("?") ? "&" : "?";
@@ -232,6 +251,13 @@ let mapContextMenuScreenPoint: { x: number; y: number } | null = null;
 let mapContextMenuMapPoint: Point | null = null;
 let mapContextMenuLayerIndex: number | null = null;
 let isStorageQuotaWarningActive = false;
+let worldCountriesLayer: FeatureLayer | null = null;
+let worldCountriesLayerPromise: Promise<FeatureLayer> | null = null;
+
+const WORLD_COUNTRIES_GENERALIZED_URL =
+  "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/World_Countries_(Generalized)/FeatureServer/0";
+const WORLD_COUNTRIES_ATTRIBUTION_FALLBACK =
+  "Sources: Esri; Garmin International, Inc.; U.S. Central Intelligence Agency (The World Factbook); National Geographic Society";
 
 type MapContextMenuItem = {
   label: string;
@@ -409,6 +435,7 @@ const importConfig: ImportConfig = {
   setProjectError
 };
 const animationPlaybackConfig = {
+  getView: () => view,
   getGraphicsLayers: () => graphicsLayers,
   defaultPointStyle,
   hasPointKeyframes,
@@ -712,6 +739,11 @@ async function handleMapContextMenu(event: MouseEvent) {
       onSelect: () => void startDrawing("polygon")
     },
     {
+      label: "Add country polygon (generalized)",
+      onSelect: () => void addCountryPolygonFromPoint(mapPoint),
+      disabled: !hasMapPoint
+    },
+    {
       label: "Add text",
       onSelect: () => void startDrawing("text")
     },
@@ -959,6 +991,109 @@ function setProjectError(message: string | null) {
   }
   errorEl.textContent = message;
   errorEl.classList.add("show");
+}
+
+function flashProjectError(message: string, duration = 3200) {
+  setProjectError(message);
+  window.setTimeout(() => {
+    const current = document.getElementById("project-error")?.textContent?.trim() || "";
+    if (current === message) {
+      setProjectError(null);
+    }
+  }, duration);
+}
+
+function resolveCountryName(attributes?: Record<string, any>) {
+  if (!attributes) return "";
+  const candidates = new Set([
+    "country",
+    "country_name",
+    "countryname",
+    "country_aff",
+    "countryaff",
+    "admin",
+    "name",
+    "name_long",
+    "name_en",
+    "cntry_name",
+    "cntryname"
+  ]);
+  const entries = Object.entries(attributes);
+  for (const [key, value] of entries) {
+    if (!value || typeof value !== "string") continue;
+    const normalized = key.replace(/\s+/g, "").toLowerCase();
+    if (candidates.has(normalized)) {
+      return value.trim();
+    }
+  }
+  for (const [, value] of entries) {
+    if (typeof value === "string" && value.trim().length) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+async function getWorldCountriesLayer() {
+  if (worldCountriesLayer) return worldCountriesLayer;
+  if (!worldCountriesLayerPromise) {
+    const layer = new FeatureLayer({
+      url: WORLD_COUNTRIES_GENERALIZED_URL
+    });
+    worldCountriesLayerPromise = layer
+      .load()
+      .then(() => {
+        worldCountriesLayer = layer;
+        return layer;
+      })
+      .catch((error) => {
+        worldCountriesLayerPromise = null;
+        throw error;
+      });
+  }
+  return worldCountriesLayerPromise;
+}
+
+async function addCountryPolygonFromPoint(mapPoint: Point | null) {
+  if (!view || !mapPoint) {
+    flashProjectError("Click on the map to choose a location first.");
+    return;
+  }
+  try {
+    const countryLayer = await getWorldCountriesLayer();
+    const result = await countryLayer.queryFeatures({
+      geometry: mapPoint,
+      spatialRelationship: "intersects",
+      outFields: ["*"],
+      returnGeometry: true,
+      outSpatialReference: view.spatialReference,
+      num: 1
+    });
+
+    const feature = result?.features?.[0];
+    const geometry = feature?.geometry;
+    if (!feature || !geometry || geometry.type !== "polygon") {
+      flashProjectError("No country found there. Try clicking on land.");
+      return;
+    }
+
+    const countryName = resolveCountryName(feature.attributes);
+    const layerName = countryName ? `Country: ${countryName}` : "Country polygon";
+    const graphic = createGraphicForType("polygon", geometry, feature.attributes);
+    const layerData = createImportedLayer("polygon", layerName, [graphic]);
+    if (!layerData) return;
+
+    const attribution =
+      String((countryLayer as any).attribution || "").trim() ||
+      String((countryLayer as any).copyrightText || "").trim() ||
+      WORLD_COUNTRIES_ATTRIBUTION_FALLBACK;
+    layerData.customAttribution = attribution;
+    layerData.layer.attribution = attribution;
+    scheduleExportAttributionRefresh();
+  } catch (error) {
+    console.error("Failed to fetch country geometry", error);
+    flashProjectError("Could not fetch country geometry. Please try again.");
+  }
 }
 
 function setGifExportStatus(message: string | null, allowHtml = false) {
@@ -1482,11 +1617,19 @@ function hideExportPreviewModal() {
 }
 
 function updateExportAttribution() {
+  updateGeneralizedCountryNotice();
   const attributionEl = document.getElementById("export-attribution-text");
   if (!attributionEl) return;
   const sourceText = findMapAttributionText();
   const suffix = sourceText ? ` Data attribution: ${sourceText}` : "";
   attributionEl.textContent = `Made with Pulse and Powered by Esri.${suffix}`;
+}
+
+function updateGeneralizedCountryNotice() {
+  const noteEl = document.getElementById("export-attribution-note");
+  const noteText = document.getElementById("export-attribution-note-text");
+  if (!noteEl || !noteText) return;
+  noteText.textContent = WORLD_COUNTRIES_ATTRIBUTION_FALLBACK;
 }
 
 function scheduleExportAttributionRefresh() {
@@ -1503,21 +1646,34 @@ function scheduleExportAttributionRefresh() {
   window.setTimeout(tick, 250);
 }
 
+function mergeAttributionStrings(...parts: Array<string | null | undefined>) {
+  const sources = new Set<string>();
+  const add = (raw?: string | null) => {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value) return;
+    value
+      .split(/[,;]\s*/g)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => sources.add(item));
+  };
+  parts.forEach((part) => add(part));
+  return Array.from(sources).join("; ");
+}
+
 function findMapAttributionText() {
   const direct = document.querySelector(".esri-attribution__sources") as HTMLElement | null;
-  if (direct?.innerText) return direct.innerText.trim();
+  const directText = direct?.innerText?.trim();
 
   const mapEl = document.getElementById("arcgisMap") as HTMLElement | null;
-  if (mapEl) {
-    const fromShadow = findInShadow(mapEl, ".esri-attribution__sources");
-    if (fromShadow?.innerText) return fromShadow.innerText.trim();
-  }
+  const fromShadow = mapEl ? findInShadow(mapEl, ".esri-attribution__sources") : null;
+  const shadowText = fromShadow?.innerText?.trim();
 
   const fromDocument = findInShadow(document.documentElement, ".esri-attribution__sources");
-  if (fromDocument?.innerText) return fromDocument.innerText.trim();
+  const documentText = fromDocument?.innerText?.trim();
 
   const fromLayers = collectMapAttributions();
-  return fromLayers;
+  return mergeAttributionStrings(directText, shadowText, documentText, fromLayers);
 }
 
 function collectMapAttributions() {
@@ -1558,8 +1714,15 @@ function collectMapAttributions() {
     const referenceLayers = basemap?.referenceLayers;
     if (referenceLayers?.forEach) referenceLayers.forEach((layer: any) => tryAddLayer(layer));
   }
+  if (Array.isArray(graphicsLayers)) {
+    graphicsLayers.forEach((layerData) => {
+      if (!layerData) return;
+      addAttribution(layerData.customAttribution);
+      addAttribution(layerData.layer?.attribution);
+    });
+  }
 
-  return Array.from(sources).join(", ");
+  return Array.from(sources).join("; ");
 }
 
 function findInShadow(root: Element | ShadowRoot, selector: string): HTMLElement | null {
@@ -2290,6 +2453,16 @@ async function resetProject() {
   }
   view.graphics?.removeAll?.();
   view.map.removeMany(graphicsLayers.map((layerData) => layerData.layer));
+  const arrowLayers = graphicsLayers
+    .map((layerData) => (layerData as any).__arrowLayer)
+    .filter(Boolean);
+  const barrageLayers = graphicsLayers
+    .map((layerData) => (layerData as any).__barrageLayer)
+    .filter(Boolean);
+  const overlayLayers = [...arrowLayers, ...barrageLayers];
+  if (overlayLayers.length) {
+    view.map.removeMany(overlayLayers);
+  }
   graphicsLayers = [];
   selectedLayerIndex = -1;
   isDrawing = false;
@@ -3990,6 +4163,14 @@ async function removeLayer(index: number, options?: { confirmHostId?: string }) 
   const layerData = graphicsLayers[index];
   if (!(await confirmDeleteLayer(layerData, options?.confirmHostId))) return;
   view.map.remove(layerData.layer);
+  const arrowLayer = (layerData as any).__arrowLayer;
+  if (arrowLayer) {
+    view.map.remove(arrowLayer);
+  }
+  const barrageLayer = (layerData as any).__barrageLayer;
+  if (barrageLayer) {
+    view.map.remove(barrageLayer);
+  }
   graphicsLayers.splice(index, 1);
   updateSnappingOptions();
 
@@ -4536,7 +4717,11 @@ function handleSketchUpdate(event: any) {
 
 function hasPathAnimation(layerData: LayerData) {
   return layerData.animations.some(
-    (anim) => anim.type === "draw" || anim.type === "drawReverse" || anim.type === "fill"
+    (anim) =>
+      anim.type === "draw" ||
+      anim.type === "drawReverse" ||
+      anim.type === "fill" ||
+      anim.type === "neonTrail"
   );
 }
 
@@ -4727,40 +4912,51 @@ function getSelectedPolygonFillStyle() {
 }
 
 function updateLineAnimationPreview(color: string, style: string) {
-  const container = document.getElementById("animation-type-options");
-  if (!container) return;
-  container.style.setProperty("--preview-color", color);
-  const previews = Array.from(container.querySelectorAll(".animation-type-preview--polyline")) as HTMLElement[];
-  previews.forEach((preview) => {
-    Array.from(preview.classList)
-      .filter((cls) => cls.startsWith("line-style-"))
-      .forEach((cls) => preview.classList.remove(cls));
-    preview.classList.add(`line-style-${style}`);
+  const containers = Array.from(
+    document.querySelectorAll(".animation-type-options")
+  ) as HTMLElement[];
+  if (!containers.length) return;
+  containers.forEach((container) => {
+    container.style.setProperty("--preview-color", color);
+    const previews = Array.from(
+      container.querySelectorAll(".animation-type-preview--polyline")
+    ) as HTMLElement[];
+    previews.forEach((preview) => {
+      Array.from(preview.classList)
+        .filter((cls) => cls.startsWith("line-style-"))
+        .forEach((cls) => preview.classList.remove(cls));
+      preview.classList.add(`line-style-${style}`);
+    });
   });
 }
 
 function updatePointAnimationPreview(color: string, outlineColor: string, style: string) {
-  const container = document.getElementById("animation-type-options");
-  if (!container) return;
-  container.style.setProperty("--preview-color", color);
-  container.style.setProperty("--preview-outline-color", outlineColor);
-  const previews = Array.from(container.querySelectorAll(".animation-type-preview--point")) as HTMLElement[];
-  previews.forEach((preview) => {
-    Array.from(preview.classList)
-      .filter((cls) => cls.startsWith("point-style-"))
-      .forEach((cls) => preview.classList.remove(cls));
-    preview.classList.add(`point-style-${style}`);
-    const path = pointPathStyles[style];
-    if (path) {
-      const viewBox = style.startsWith("phosphor-") ? "0 0 1024 1024" : "0 0 24 24";
-      preview.innerHTML = `<svg viewBox="${viewBox}" aria-hidden="true"><path d="${path}"></path></svg>`;
-      preview.classList.add("animation-type-preview--icon");
-    } else {
-      preview.innerHTML = "";
-      preview.classList.remove("animation-type-preview--icon");
-    }
+  const containers = Array.from(
+    document.querySelectorAll(".animation-type-options")
+  ) as HTMLElement[];
+  if (!containers.length) return;
+  containers.forEach((container) => {
+    container.style.setProperty("--preview-color", color);
+    container.style.setProperty("--preview-outline-color", outlineColor);
+    const previews = Array.from(
+      container.querySelectorAll(".animation-type-preview--point")
+    ) as HTMLElement[];
+    previews.forEach((preview) => {
+      Array.from(preview.classList)
+        .filter((cls) => cls.startsWith("point-style-"))
+        .forEach((cls) => preview.classList.remove(cls));
+      preview.classList.add(`point-style-${style}`);
+      const path = pointPathStyles[style];
+      if (path) {
+        const viewBox = style.startsWith("phosphor-") ? "0 0 1024 1024" : "0 0 24 24";
+        preview.innerHTML = `<svg viewBox="${viewBox}" aria-hidden="true"><path d="${path}"></path></svg>`;
+        preview.classList.add("animation-type-preview--icon");
+      } else {
+        preview.innerHTML = "";
+        preview.classList.remove("animation-type-preview--icon");
+      }
+    });
   });
-
 }
 
 function updatePointStyleOptionColors(color: string, outlineColor: string) {
@@ -4771,10 +4967,14 @@ function updatePointStyleOptionColors(color: string, outlineColor: string) {
 }
 
 function updatePolygonAnimationPreview(fillColor: string, outlineColor: string) {
-  const container = document.getElementById("animation-type-options");
-  if (!container) return;
-  container.style.setProperty("--preview-fill-color", fillColor);
-  container.style.setProperty("--preview-outline-color", outlineColor);
+  const containers = Array.from(
+    document.querySelectorAll(".animation-type-options")
+  ) as HTMLElement[];
+  if (!containers.length) return;
+  containers.forEach((container) => {
+    container.style.setProperty("--preview-fill-color", fillColor);
+    container.style.setProperty("--preview-outline-color", outlineColor);
+  });
 }
 
 function updatePolygonStyleOptionColors(fillColor: string, outlineColor: string) {
@@ -5087,26 +5287,44 @@ function updateAnimationOptions() {
   const layerData = graphicsLayers[selectedLayerIndex];
 
   const optionsContainer = document.getElementById("animation-type-options");
-  if (!optionsContainer) return;
+  const webglOptionsContainer = document.getElementById("animation-type-options-webgl");
+  const webglSection = document.getElementById("webgl-animation-section");
+  if (!optionsContainer || !webglOptionsContainer) return;
   optionsContainer.innerHTML = "";
+  webglOptionsContainer.innerHTML = "";
 
   const types = animationTypes[layerData.type] || animationTypes.point;
-  types.forEach((type) => {
-    const optionButton = document.createElement("button");
-    optionButton.type = "button";
-    optionButton.className = "animation-type-option";
-    optionButton.dataset.value = type.value;
-    optionButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      addAnimation(type.value);
-    });
+  const baseTypes = types.filter((type) => !webglAnimationTypes.has(type.value));
+  const webglTypes = types.filter((type) => webglAnimationTypes.has(type.value));
 
-    const preview = document.createElement("span");
-    preview.className = `animation-type-preview animation-type-preview--${layerData.type} animation-type-preview--${type.value}`;
-    optionButton.appendChild(preview);
-    optionButton.appendChild(document.createTextNode(type.label));
-    optionsContainer.appendChild(optionButton);
-  });
+  const renderTypeOptions = (
+    container: HTMLElement,
+    list: ReadonlyArray<{ value: string; label: string }>
+  ) => {
+    list.forEach((type) => {
+      const optionButton = document.createElement("button");
+      optionButton.type = "button";
+      optionButton.className = "animation-type-option";
+      optionButton.dataset.value = type.value;
+      optionButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        addAnimation(type.value);
+      });
+
+      const preview = document.createElement("span");
+      preview.className = `animation-type-preview animation-type-preview--${layerData.type} animation-type-preview--${type.value}`;
+      optionButton.appendChild(preview);
+      optionButton.appendChild(document.createTextNode(type.label));
+      container.appendChild(optionButton);
+    });
+  };
+
+  renderTypeOptions(optionsContainer, baseTypes);
+  renderTypeOptions(webglOptionsContainer, webglTypes);
+
+  if (webglSection) {
+    webglSection.style.display = webglTypes.length ? "block" : "none";
+  }
 
   if (layerData.type === "polyline") {
     const style = layerData.lineStyle ?? defaultLineStyle;
@@ -5401,3 +5619,4 @@ function restoreLayerGeometry(layerData: LayerData) {
     }
   });
 }
+

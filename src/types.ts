@@ -79,6 +79,7 @@ export interface LayerData {
   featureHideNulls?: boolean;
   featureLastValue?: number;
   featureKeepVisible?: boolean;
+  customAttribution?: string;
   layerBlendMode?: string;
   layerEffectSettings?: LayerEffectSettings;
   layerEffectsEnabled?: boolean;

@@ -41,6 +41,20 @@ function SidePanel() {
                     <div id="animation-type-options" className="animation-type-options"></div>
                   </div>
                 </div>
+                <div id="webgl-animation-section" className="animation-type-row animation-type-webgl-section">
+                  <div className="animation-type-header">
+                    <span>WebGL animations</span>
+                    <calcite-chip className="animation-beta-chip" scale="s" appearance="outline">
+                      BETA
+                    </calcite-chip>
+                  </div>
+                  <div className="animation-type-inline">
+                    <div
+                      id="animation-type-options-webgl"
+                      className="animation-type-options"
+                    ></div>
+                  </div>
+                </div>
 
                 <div id="feature-animation-settings" style={{ display: "none" }}>
                   <calcite-label style={{ marginTop: 12 }}>

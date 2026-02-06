@@ -121,6 +121,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
     featureVisualVariable: layerData.featureVisualVariable,
     featureHideNulls: layerData.featureHideNulls,
     featureKeepVisible: layerData.featureKeepVisible,
+    customAttribution: layerData.customAttribution,
     layerBlendMode: layerData.layerBlendMode,
     layerEffectSettings: layerData.layerEffectSettings
       ? { ...layerData.layerEffectSettings }
@@ -330,6 +331,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
           featureVisualVariable: layerSnapshot.featureVisualVariable,
           featureHideNulls: layerSnapshot.featureHideNulls,
           featureKeepVisible: layerSnapshot.featureKeepVisible,
+          customAttribution: layerSnapshot.customAttribution,
           pointStyle: layerSnapshot.pointStyle ? { ...layerSnapshot.pointStyle } : undefined,
           lineStyle: layerSnapshot.lineStyle ? { ...layerSnapshot.lineStyle } : undefined,
           polygonStyle: layerSnapshot.polygonStyle ? { ...layerSnapshot.polygonStyle } : undefined,
@@ -339,6 +341,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
             : undefined,
           layerEffectsEnabled: layerSnapshot.layerEffectsEnabled
         };
+        if (layerData.customAttribution) {
+          layerData.layer.attribution = layerData.customAttribution;
+        }
 
         if (!layerData.featureFields || !layerData.featureFields.length) {
           layerData.featureFields = config.getFeatureLayerFields(featureLayer);
@@ -400,6 +405,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         textFontFamily: layerSnapshot.textFontFamily,
         textItalic: layerSnapshot.textItalic,
         textUnderline: layerSnapshot.textUnderline,
+        customAttribution: layerSnapshot.customAttribution,
         layerBlendMode: layerSnapshot.layerBlendMode,
         layerEffectSettings: layerSnapshot.layerEffectSettings
           ? { ...layerSnapshot.layerEffectSettings }
@@ -416,6 +422,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
       }
       if (layerData.layerEffectsEnabled === undefined) {
         layerData.layerEffectsEnabled = true;
+      }
+      if (layerData.customAttribution) {
+        layerData.layer.attribution = layerData.customAttribution;
       }
 
       const layerFeatures = featuresByLayer.get(layerSnapshot.id) || [];

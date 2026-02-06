@@ -92,6 +92,7 @@ export type ProjectLayerSnapshot = {
   featureVisualVariable?: "opacity" | "size" | "color";
   featureHideNulls?: boolean;
   featureKeepVisible?: boolean;
+  customAttribution?: string;
   layerBlendMode?: string;
   layerEffectSettings?: LayerEffectSettings;
   layerEffectsEnabled?: boolean;

@@ -974,7 +974,12 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
 
     updateTimeline();
-    if (anim.type === "draw" || anim.type === "drawReverse" || anim.type === "fill") {
+    if (
+      anim.type === "draw" ||
+      anim.type === "drawReverse" ||
+      anim.type === "fill" ||
+      anim.type === "neonTrail"
+    ) {
       config.resetAnimationGeometryCaches();
     }
     config.applyAnimationsAtTime(config.getCurrentTime());

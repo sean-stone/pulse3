@@ -1265,6 +1265,11 @@ function Modals() {
         <div className="export-terms">
           You are responsible for complying with Esri and data source terms when sharing exports.
         </div>
+        <div className="export-attribution-note" id="export-attribution-note">
+          <strong>Note:</strong> If you used the Generalised countries (right click get country as geometry) then the
+          following attributions apply:
+          <div className="export-attribution-note-source" id="export-attribution-note-text"></div>
+        </div>
         <div className="export-attribution">
           <strong>Attribution:</strong>
           <span id="export-attribution-text">Made with Pulse and Powered by Esri.</span>
