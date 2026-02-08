@@ -62,6 +62,11 @@ const webglAnimationTypes = new Set([
   "heatHaze",
   "scanline",
   "sparkEmit",
+  "weldTrail",
+  "flightRoute",
+  "flightRouteCartoon",
+  "waypointRoute",
+  "waypointRouteCartoon",
   "arrowMarch",
   "barrageOfArrows",
   "jitterSketch",
@@ -830,6 +835,19 @@ const buildProjectSnapshot = () => {
 buildProjectSnapshotRef = buildProjectSnapshot;
 
 async function applyProjectSnapshot(snapshot: unknown) {
+  if (view) {
+    const overlayLayers = graphicsLayers.flatMap((layerData) => getLayerOverlayLayers(layerData));
+    if (overlayLayers.length) {
+      view.map.removeMany(overlayLayers);
+    }
+    graphicsLayers.forEach((layerData) => {
+      delete (layerData as any).__arrowLayer;
+      delete (layerData as any).__barrageLayer;
+      delete (layerData as any).__weldSparkLayer;
+      delete (layerData as any).__flightLayer;
+      delete (layerData as any).__waypointLayer;
+    });
+  }
   await applyProjectSnapshotFromState(
     {
       view,
@@ -2430,6 +2448,29 @@ function setDeleteLayerButtonVisible(visible: boolean) {
   button.classList.toggle("show", visible);
 }
 
+function getLayerOverlayLayers(layerData: LayerData) {
+  return [
+    (layerData as any).__arrowLayer,
+    (layerData as any).__barrageLayer,
+    (layerData as any).__weldSparkLayer,
+    (layerData as any).__flightLayer,
+    (layerData as any).__waypointLayer
+  ].filter(Boolean);
+}
+
+function clearLayerOverlayLayers(layerData: LayerData) {
+  if (!view) return;
+  const overlays = getLayerOverlayLayers(layerData);
+  if (overlays.length) {
+    view.map.removeMany(overlays);
+  }
+  delete (layerData as any).__arrowLayer;
+  delete (layerData as any).__barrageLayer;
+  delete (layerData as any).__weldSparkLayer;
+  delete (layerData as any).__flightLayer;
+  delete (layerData as any).__waypointLayer;
+}
+
 async function resetProject() {
   if (!view) return;
   if (graphicsLayers.length > 0) {
@@ -2453,16 +2494,17 @@ async function resetProject() {
   }
   view.graphics?.removeAll?.();
   view.map.removeMany(graphicsLayers.map((layerData) => layerData.layer));
-  const arrowLayers = graphicsLayers
-    .map((layerData) => (layerData as any).__arrowLayer)
-    .filter(Boolean);
-  const barrageLayers = graphicsLayers
-    .map((layerData) => (layerData as any).__barrageLayer)
-    .filter(Boolean);
-  const overlayLayers = [...arrowLayers, ...barrageLayers];
+  const overlayLayers = graphicsLayers.flatMap((layerData) => getLayerOverlayLayers(layerData));
   if (overlayLayers.length) {
     view.map.removeMany(overlayLayers);
   }
+  graphicsLayers.forEach((layerData) => {
+    delete (layerData as any).__arrowLayer;
+    delete (layerData as any).__barrageLayer;
+    delete (layerData as any).__weldSparkLayer;
+    delete (layerData as any).__flightLayer;
+    delete (layerData as any).__waypointLayer;
+  });
   graphicsLayers = [];
   selectedLayerIndex = -1;
   isDrawing = false;
@@ -4161,16 +4203,10 @@ async function confirmDeleteLayer(layerData: LayerData, hostId?: string) {
 
 async function removeLayer(index: number, options?: { confirmHostId?: string }) {
   const layerData = graphicsLayers[index];
+  if (!layerData) return;
   if (!(await confirmDeleteLayer(layerData, options?.confirmHostId))) return;
   view.map.remove(layerData.layer);
-  const arrowLayer = (layerData as any).__arrowLayer;
-  if (arrowLayer) {
-    view.map.remove(arrowLayer);
-  }
-  const barrageLayer = (layerData as any).__barrageLayer;
-  if (barrageLayer) {
-    view.map.remove(barrageLayer);
-  }
+  clearLayerOverlayLayers(layerData);
   graphicsLayers.splice(index, 1);
   updateSnappingOptions();
 
@@ -4706,11 +4742,21 @@ function handleSketchUpdate(event: any) {
   }
   if (state !== "complete") return;
   const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
+  const touchedLayers = new Set<LayerData>();
   graphics.forEach((graphic: any) => {
     graphic.geometry = toGeographicGeometry(graphic.geometry);
     const layerData = graphicsLayers.find((entry) => entry.layer === graphic.layer);
     if (!layerData) return;
     refreshGeometryCache(layerData, graphic);
+    touchedLayers.add(layerData);
+  });
+  touchedLayers.forEach((layerData) => {
+    clearLayerOverlayLayers(layerData);
+  });
+  graphicsLayers.forEach((layerData) => {
+    if ((layerData.layer?.graphics?.length ?? 0) === 0) {
+      clearLayerOverlayLayers(layerData);
+    }
   });
   scheduleProjectSave();
 }
@@ -4721,7 +4767,12 @@ function hasPathAnimation(layerData: LayerData) {
       anim.type === "draw" ||
       anim.type === "drawReverse" ||
       anim.type === "fill" ||
-      anim.type === "neonTrail"
+      anim.type === "neonTrail" ||
+      anim.type === "weldTrail" ||
+      anim.type === "flightRoute" ||
+      anim.type === "flightRouteCartoon" ||
+      anim.type === "waypointRoute" ||
+      anim.type === "waypointRouteCartoon"
   );
 }
 

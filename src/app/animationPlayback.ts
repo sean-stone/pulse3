@@ -185,6 +185,9 @@ const joinEffects = (parts: Array<string | null | undefined>) =>
   parts.filter((part) => part && part.length > 0).join(" ");
 
 const arrowMarkerPath = "M12 2 L22 22 L12 17 L2 22 Z";
+const planeMarkerPath = "M12 1 L14.8 8.8 L22.5 11 L14.8 13.2 L12 23 L9.2 13.2 L1.5 11 L9.2 8.8 Z";
+const cartoonPlaneMarkerPath =
+  "M2 12 L8 10 L9 6 L15 4 L21 7 L16 10 L23 12 L16 14 L21 17 L15 20 L9 18 L8 14 Z";
 
 const toRgbaArray = (color: string, alpha = 1) => {
   try {
@@ -276,6 +279,12 @@ type MarchSegment = {
   accum: number;
 };
 
+type VertexStop = {
+  x: number;
+  y: number;
+  accum: number;
+};
+
 const buildMarchSegments = (geometry: Polyline) => {
   const segments: MarchSegment[] = [];
   let total = 0;
@@ -313,6 +322,53 @@ const sampleMarchPoint = (segments: MarchSegment[], distance: number) => {
   return null;
 };
 
+const toViewPolyline = (geometry: Polyline, view: any) => {
+  let workingGeometry = geometry;
+  if (
+    view?.spatialReference?.isWebMercator &&
+    geometry.spatialReference?.isGeographic
+  ) {
+    workingGeometry = webMercatorUtils.geographicToWebMercator(geometry) as Polyline;
+  } else if (
+    view?.spatialReference?.isGeographic &&
+    geometry.spatialReference?.isWebMercator
+  ) {
+    workingGeometry = webMercatorUtils.webMercatorToGeographic(geometry) as Polyline;
+  }
+  return workingGeometry;
+};
+
+const buildVertexStops = (geometry: Polyline) => {
+  const stops: VertexStop[] = [];
+  let total = 0;
+  geometry.paths?.forEach((path) => {
+    if (!path?.length) return;
+    for (let i = 0; i < path.length; i += 1) {
+      const point = path[i];
+      if (i > 0) {
+        const prev = path[i - 1];
+        total += Math.hypot(point[0] - prev[0], point[1] - prev[1]);
+      }
+      const prevStop = stops[stops.length - 1];
+      if (prevStop && prevStop.x === point[0] && prevStop.y === point[1]) {
+        continue;
+      }
+      stops.push({ x: point[0], y: point[1], accum: total });
+    }
+  });
+  return { stops, total };
+};
+
+const toWaypointLabel = (index: number) => {
+  let value = Math.max(0, Math.floor(index));
+  let label = "";
+  do {
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26) - 1;
+  } while (value >= 0);
+  return label;
+};
+
 const getArrowLayer = (layerData: LayerData, view: any) => {
   const existing = (layerData as any).__arrowLayer as GraphicsLayer | undefined;
   if (existing) return existing;
@@ -346,6 +402,66 @@ const getBarrageLayer = (layerData: LayerData, view: any) => {
 
 const clearBarrageLayer = (layerData: LayerData) => {
   const layer = (layerData as any).__barrageLayer as GraphicsLayer | undefined;
+  if (!layer) return;
+  layer.removeAll();
+  layer.visible = false;
+};
+
+const getWeldSparkLayer = (layerData: LayerData, view: any) => {
+  const existing = (layerData as any).__weldSparkLayer as GraphicsLayer | undefined;
+  if (existing) return existing;
+  const layer = new GraphicsLayer({
+    listMode: "hide",
+    opacity: 1,
+    blendMode: "screen"
+  });
+  view?.map?.add(layer);
+  (layerData as any).__weldSparkLayer = layer;
+  return layer;
+};
+
+const clearWeldSparkLayer = (layerData: LayerData) => {
+  const layer = (layerData as any).__weldSparkLayer as GraphicsLayer | undefined;
+  if (!layer) return;
+  layer.removeAll();
+  layer.visible = false;
+};
+
+const getFlightLayer = (layerData: LayerData, view: any) => {
+  const existing = (layerData as any).__flightLayer as GraphicsLayer | undefined;
+  if (existing) return existing;
+  const layer = new GraphicsLayer({
+    listMode: "hide",
+    opacity: 1,
+    blendMode: "screen"
+  });
+  view?.map?.add(layer);
+  (layerData as any).__flightLayer = layer;
+  return layer;
+};
+
+const clearFlightLayer = (layerData: LayerData) => {
+  const layer = (layerData as any).__flightLayer as GraphicsLayer | undefined;
+  if (!layer) return;
+  layer.removeAll();
+  layer.visible = false;
+};
+
+const getWaypointLayer = (layerData: LayerData, view: any) => {
+  const existing = (layerData as any).__waypointLayer as GraphicsLayer | undefined;
+  if (existing) return existing;
+  const layer = new GraphicsLayer({
+    listMode: "hide",
+    opacity: 1,
+    blendMode: "screen"
+  });
+  view?.map?.add(layer);
+  (layerData as any).__waypointLayer = layer;
+  return layer;
+};
+
+const clearWaypointLayer = (layerData: LayerData) => {
+  const layer = (layerData as any).__waypointLayer as GraphicsLayer | undefined;
   if (!layer) return;
   layer.removeAll();
   layer.visible = false;
@@ -401,6 +517,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       applyBaseLayerEffect(layerData);
       clearArrowLayer(layerData);
       clearBarrageLayer(layerData);
+      clearWeldSparkLayer(layerData);
+      clearFlightLayer(layerData);
+      clearWaypointLayer(layerData);
       if (layerData.type === "point") {
         const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
         const baseAngle = layerData.pointStyle?.angle ?? 0;
@@ -481,6 +600,15 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let hazeProgress: number | null = null;
     let scanlineProgress: number | null = null;
     let sparkProgress: number | null = null;
+    let weldProgress: number | null = null;
+    let flightProgress: number | null = null;
+    let waypointProgress: number | null = null;
+    let flightMode: "default" | "cartoon" = "default";
+    let waypointMode: "default" | "cartoon" = "default";
+    let hasFlightRouteAnimation = false;
+    let hasFlightRouteCartoonAnimation = false;
+    let hasWaypointRouteAnimation = false;
+    let hasWaypointRouteCartoonAnimation = false;
     let arrowProgress: number | null = null;
     let barrageProgress: number | null = null;
     let jitterProgress: number | null = null;
@@ -495,12 +623,33 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         return;
       }
       const animEnd = anim.start + anim.duration;
-      if (anim.type === "draw" || anim.type === "drawReverse" || anim.type === "neonTrail") {
+      if (
+        anim.type === "draw" ||
+        anim.type === "drawReverse" ||
+        anim.type === "neonTrail" ||
+        anim.type === "weldTrail" ||
+        anim.type === "flightRoute" ||
+        anim.type === "flightRouteCartoon" ||
+        anim.type === "waypointRoute" ||
+        anim.type === "waypointRouteCartoon"
+      ) {
         hasDrawAnimation = true;
         maxDrawEnd = Math.max(maxDrawEnd, animEnd);
         minDrawStart = Math.min(minDrawStart, anim.start);
         if (time >= anim.start && time <= animEnd) {
           activeDrawAnimation = anim;
+        }
+      }
+      if (anim.type === "flightRoute" || anim.type === "flightRouteCartoon") {
+        hasFlightRouteAnimation = true;
+        if (anim.type === "flightRouteCartoon") {
+          hasFlightRouteCartoonAnimation = true;
+        }
+      }
+      if (anim.type === "waypointRoute" || anim.type === "waypointRouteCartoon") {
+        hasWaypointRouteAnimation = true;
+        if (anim.type === "waypointRouteCartoon") {
+          hasWaypointRouteCartoonAnimation = true;
         }
       }
       if (anim.type === "fill") {
@@ -575,6 +724,30 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             sparkProgress = progress;
             opacity = 1;
             break;
+          case "weldTrail":
+            weldProgress = progress;
+            opacity = 1;
+            break;
+          case "flightRoute":
+            flightProgress = progress;
+            flightMode = "default";
+            opacity = 1;
+            break;
+          case "flightRouteCartoon":
+            flightProgress = progress;
+            flightMode = "cartoon";
+            opacity = 1;
+            break;
+          case "waypointRoute":
+            waypointProgress = progress;
+            waypointMode = "default";
+            opacity = 1;
+            break;
+          case "waypointRouteCartoon":
+            waypointProgress = progress;
+            waypointMode = "cartoon";
+            opacity = 1;
+            break;
           case "arrowMarch":
             arrowProgress = progress;
             opacity = 1;
@@ -635,6 +808,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         latestEndedAnimationEnd = animEnd;
       }
     });
+    if (flightProgress === null && hasFlightRouteAnimation) {
+      flightMode = hasFlightRouteCartoonAnimation ? "cartoon" : "default";
+    }
+    if (waypointProgress === null && hasWaypointRouteAnimation) {
+      waypointMode = hasWaypointRouteCartoonAnimation ? "cartoon" : "default";
+    }
 
     const timeSeed = time + layerSeed * 0.001;
     if (flickerProgress !== null) {
@@ -813,7 +992,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           const arrowSize = Math.max(8, baseWidth * 3);
           const arrowGraphics: Graphic[] = [];
 
-          layerData.layer.graphics.forEach((graphic: any) => {
+          layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
             if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
             const geometry = graphic.geometry as Polyline;
             const marchGeometry =
@@ -860,6 +1039,1089 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         }
       } else {
         clearArrowLayer(layerData);
+      }
+
+      if (weldProgress !== null) {
+        const view = config.getView?.();
+        if (view) {
+          const weldLayer = getWeldSparkLayer(layerData, view);
+          weldLayer.visible = true;
+          weldLayer.opacity = Math.max(baseLayerOpacity, 0.92);
+          const sparkGraphics: Graphic[] = [];
+          const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
+          const frameStep = Math.floor(timeSeed * 45);
+
+          layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
+            if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
+            const renderedGeometry = graphic.geometry as Polyline;
+            const sourceGeometry =
+              renderedGeometry.paths?.length
+                ? renderedGeometry
+                : ((graphic.__densifiedGeometry as Polyline | undefined) ??
+                  (graphic.__originalGeometry as Polyline | undefined) ??
+                  renderedGeometry);
+            let workingGeometry = sourceGeometry;
+            if (
+              view?.spatialReference?.isWebMercator &&
+              sourceGeometry.spatialReference?.isGeographic
+            ) {
+              workingGeometry = webMercatorUtils.geographicToWebMercator(sourceGeometry) as Polyline;
+            } else if (
+              view?.spatialReference?.isGeographic &&
+              sourceGeometry.spatialReference?.isWebMercator
+            ) {
+              workingGeometry = webMercatorUtils.webMercatorToGeographic(sourceGeometry) as Polyline;
+            }
+
+            const { segments, total } = buildMarchSegments(workingGeometry);
+            if (!segments.length || total <= 0) return;
+
+            const head = sampleMarchPoint(segments, total);
+            if (!head) return;
+            const nx = -head.uy;
+            const ny = head.ux;
+            const headX = head.x;
+            const headY = head.y;
+
+            const trailLength = clamp(baseWidth * 36, 26, 170) * resolution;
+            const trailStart = Math.max(0, total - trailLength);
+            const trailSteps = clamp(Math.round((trailLength / Math.max(resolution, 1e-6)) / 6), 12, 28);
+            const trailPoints: Array<{ x: number; y: number }> = [];
+            for (let step = 0; step <= trailSteps; step += 1) {
+              const dist = trailStart + (total - trailStart) * (step / trailSteps);
+              const sample = sampleMarchPoint(segments, dist);
+              if (!sample) continue;
+              trailPoints.push({ x: sample.x, y: sample.y });
+            }
+            for (let i = 1; i < trailPoints.length; i += 1) {
+              const nearHead = i / Math.max(trailPoints.length - 1, 1);
+              const slowFade = Math.pow(nearHead, 0.65);
+              const glowAlpha = clamp(0.09 + slowFade * 0.16, 0.08, 0.26);
+              const coreAlpha = clamp(0.16 + slowFade * 0.33, 0.14, 0.58);
+              const dotSize = clamp(baseWidth * (0.8 + slowFade * 1.95), 2.2, 9.5);
+              const dotGlowSize = clamp(dotSize * 1.75, 4, 16);
+              const dotAlpha = clamp(0.14 + slowFade * 0.48, 0.12, 0.64);
+              const prev = trailPoints[i - 1];
+              const curr = trailPoints[i];
+              sparkGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: workingGeometry.spatialReference,
+                    paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "solid",
+                    width: Math.max(baseWidth * 2.9, 2.2),
+                    color: [214, 102, 48, glowAlpha]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: workingGeometry.spatialReference,
+                    paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "solid",
+                    width: Math.max(baseWidth * 1.55, 1.2),
+                    color: [238, 182, 112, coreAlpha]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: curr.x,
+                    y: curr.y,
+                    spatialReference: workingGeometry.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    size: dotGlowSize,
+                    color: [198, 88, 39, dotAlpha * 0.3],
+                    outline: {
+                      color: [198, 88, 39, 0],
+                      width: 0
+                    }
+                  }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: curr.x,
+                    y: curr.y,
+                    spatialReference: workingGeometry.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    size: dotSize,
+                    color: [238, 182, 112, dotAlpha],
+                    outline: {
+                      color: [255, 223, 171, dotAlpha * 0.35],
+                      width: Math.max(0.4, dotSize * 0.08)
+                    }
+                  }
+                })
+              );
+            }
+
+            const sparkCount = clamp(Math.round(11 + baseWidth * 2.1), 10, 24);
+
+            sparkGraphics.push(
+              new Graphic({
+                geometry: new Point({
+                  x: headX,
+                  y: headY,
+                  spatialReference: workingGeometry.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "circle",
+                  size: clamp(baseWidth * 6.2, 9, 22),
+                  color: [255, 162, 78, 0.42],
+                  outline: {
+                    color: [255, 199, 134, 0],
+                    width: 0
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: headX,
+                  y: headY,
+                  spatialReference: workingGeometry.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "circle",
+                  size: clamp(baseWidth * 3.4, 5, 13),
+                  color: [255, 247, 222, 0.98],
+                  outline: {
+                    color: [255, 186, 110, 0.8],
+                    width: Math.max(0.8, baseWidth * 0.22)
+                  }
+                }
+              })
+            );
+
+            for (let i = 0; i < sparkCount; i += 1) {
+              const seed = layerSeed * 0.41 + graphicIndex * 19.3 + i * 1.97 + frameStep * 0.83;
+              const spread = noise1(seed + 0.7) * 2 - 1;
+              const arc = noise1(seed + 1.3) * 2 - 1;
+              const travel = (11 + noise1(seed + 2.1) * 34) * resolution;
+              const trail = (6 + noise1(seed + 3.9) * 18) * resolution;
+              const emitsForward = (i + frameStep + graphicIndex) % 7 === 0;
+              const directionBase = emitsForward ? head.heading : head.heading + Math.PI;
+              const direction =
+                directionBase + spread * (emitsForward ? 0.7 : 1.45) + arc * (emitsForward ? 0.2 : 0.45);
+              const ux = Math.cos(direction);
+              const uy = Math.sin(direction);
+              const lateral = (noise1(seed + 4.7) - 0.5) * resolution * 14;
+              const startX = headX + nx * lateral * 0.35;
+              const startY = headY + ny * lateral * 0.35;
+              const endX = startX + ux * travel + nx * lateral;
+              const endY = startY + uy * travel + ny * lateral;
+              const tailX = endX - ux * trail;
+              const tailY = endY - uy * trail;
+              const alpha = clamp(0.5 + noise1(seed + 5.9) * 0.5, 0.42, 1);
+              const width = Math.max(1.05, baseWidth * (0.24 + noise1(seed + 6.3) * 0.35));
+
+              sparkGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: workingGeometry.spatialReference,
+                    paths: [[[tailX, tailY], [endX, endY]]]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "solid",
+                    width: Math.max(width * 1.8, 1.4),
+                    color: [255, 139, 66, alpha * 0.34]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: workingGeometry.spatialReference,
+                    paths: [[[tailX, tailY], [endX, endY]]]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "solid",
+                    width,
+                    color: [255, 230, 168, alpha]
+                  }
+                })
+              );
+
+              if (i % 2 === 0) {
+                sparkGraphics.push(
+                  new Graphic({
+                    geometry: new Point({
+                      x: endX,
+                      y: endY,
+                      spatialReference: workingGeometry.spatialReference
+                    }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: "circle",
+                      size: clamp(2.8 + baseWidth * 0.85 + noise1(seed + 8.1) * 3.2, 3, 11),
+                      color: [255, 247, 210, alpha],
+                      outline: {
+                        color: [255, 199, 134, 0],
+                        width: 0
+                      }
+                    }
+                  })
+                );
+              }
+            }
+          });
+
+          weldLayer.removeAll();
+          if (sparkGraphics.length) {
+            weldLayer.addMany(sparkGraphics);
+          }
+        }
+      } else {
+        clearWeldSparkLayer(layerData);
+      }
+
+      if (flightProgress !== null) {
+        const view = config.getView?.();
+        if (view) {
+          const flightLayer = getFlightLayer(layerData, view);
+          flightLayer.visible = true;
+          flightLayer.opacity = Math.max(baseLayerOpacity, 0.9);
+          const flightGraphics: Graphic[] = [];
+          const progress = clamp(flightProgress, 0, 1);
+          const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
+          const pulse = 0.5 + 0.5 * Math.sin(timeSeed * 5.2);
+          const cartoon = flightMode === "cartoon";
+          const trailOuterColor = cartoon ? [255, 133, 70] : [86, 187, 237];
+          const trailInnerColor = cartoon ? [255, 231, 181] : [212, 242, 255];
+          const planeGlowColor = cartoon ? [255, 160, 94] : [109, 197, 238];
+          const planeBodyColor = cartoon ? [255, 246, 208] : [248, 252, 255];
+          const planeOutlineColor = cartoon ? [198, 102, 54] : [76, 177, 227];
+          const startMarkerColor = cartoon ? [84, 208, 120] : [43, 167, 220];
+          const endMarkerColor = cartoon ? [255, 156, 98] : [236, 146, 95];
+
+          layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
+            if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
+            const renderedGeometry = graphic.geometry as Polyline;
+            const routeGeometry =
+              (graphic.__densifiedGeometry as Polyline | undefined) ??
+              (graphic.__originalGeometry as Polyline | undefined) ??
+              renderedGeometry;
+
+            const toViewGeometry = (geometry: Polyline) => {
+              let workingGeometry = geometry;
+              if (
+                view?.spatialReference?.isWebMercator &&
+                geometry.spatialReference?.isGeographic
+              ) {
+                workingGeometry = webMercatorUtils.geographicToWebMercator(geometry) as Polyline;
+              } else if (
+                view?.spatialReference?.isGeographic &&
+                geometry.spatialReference?.isWebMercator
+              ) {
+                workingGeometry = webMercatorUtils.webMercatorToGeographic(geometry) as Polyline;
+              }
+              return workingGeometry;
+            };
+
+            const displayedWorking = toViewGeometry(
+              renderedGeometry.paths?.length ? renderedGeometry : routeGeometry
+            );
+            const fullRouteWorking = toViewGeometry(routeGeometry);
+            const { segments, total } = buildMarchSegments(displayedWorking);
+            if (!segments.length || total <= 0) return;
+            const head = sampleMarchPoint(segments, total);
+            if (!head) return;
+
+            const trailLength = clamp(baseWidth * 52, 30, 220) * resolution;
+            const trailStart = Math.max(0, total - trailLength);
+            const trailSteps = clamp(Math.round((trailLength / Math.max(resolution, 1e-6)) / 8), 8, 30);
+            const trailPoints: Array<{ x: number; y: number }> = [];
+            for (let step = 0; step <= trailSteps; step += 1) {
+              const dist = trailStart + (total - trailStart) * (step / trailSteps);
+              const sample = sampleMarchPoint(segments, dist);
+              if (!sample) continue;
+              trailPoints.push({ x: sample.x, y: sample.y });
+            }
+            if (cartoon && trailPoints.length > 1) {
+              const trailPath = trailPoints.map((point) => [point.x, point.y]);
+              flightGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: displayedWorking.spatialReference,
+                    paths: [trailPath]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "short-dot",
+                    width: Math.max(baseWidth * 2.4, 1.8),
+                    color: [...trailOuterColor, 0.34]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: displayedWorking.spatialReference,
+                    paths: [trailPath]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "short-dot",
+                    width: Math.max(baseWidth * 1.35, 1),
+                    color: [...trailInnerColor, 0.72]
+                  }
+                })
+              );
+              for (let i = 2; i < trailPoints.length; i += 2) {
+                const nearHead = i / Math.max(trailPoints.length - 1, 1);
+                const fade = Math.pow(nearHead, 0.84);
+                const prev = trailPoints[i - 1];
+                const curr = trailPoints[i];
+                const dx = curr.x - prev.x;
+                const dy = curr.y - prev.y;
+                const len = Math.max(Math.hypot(dx, dy), 1e-6);
+                const nx = -dy / len;
+                const ny = dx / len;
+                const wobble = noise1(layerSeed + graphicIndex * 19.7 + i * 2.13) * 2 - 1;
+                const offset = wobble * clamp(baseWidth * 1.35, 0.9, 4.2) * resolution;
+                const puffX = curr.x + nx * offset;
+                const puffY = curr.y + ny * offset;
+                const puffSize = clamp(baseWidth * (3.2 - nearHead * 1.85), 3.4, 14);
+                const puffAlpha = clamp(0.08 + fade * 0.32, 0.08, 0.38);
+
+                flightGraphics.push(
+                  new Graphic({
+                    geometry: new Point({
+                      x: puffX,
+                      y: puffY,
+                      spatialReference: displayedWorking.spatialReference
+                    }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: "circle",
+                      size: puffSize * 1.4,
+                      color: [255, 212, 168, puffAlpha * 0.42],
+                      outline: {
+                        color: [255, 214, 173, 0],
+                        width: 0
+                      }
+                    }
+                  }),
+                  new Graphic({
+                    geometry: new Point({
+                      x: puffX,
+                      y: puffY,
+                      spatialReference: displayedWorking.spatialReference
+                    }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: "circle",
+                      size: puffSize,
+                      color: [255, 244, 229, puffAlpha],
+                      outline: {
+                        color: [255, 223, 188, puffAlpha * 0.45],
+                        width: 0.8
+                      }
+                    }
+                  })
+                );
+              }
+            } else {
+              for (let i = 1; i < trailPoints.length; i += 1) {
+                const nearHead = i / Math.max(trailPoints.length - 1, 1);
+                const fade = Math.pow(nearHead, 0.8);
+                const prev = trailPoints[i - 1];
+                const curr = trailPoints[i];
+                flightGraphics.push(
+                  new Graphic({
+                    geometry: new Polyline({
+                      spatialReference: displayedWorking.spatialReference,
+                      paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                    }),
+                    symbol: {
+                      type: "simple-line",
+                      style: "solid",
+                      width: Math.max(baseWidth * 2.1, 1.3),
+                      color: [...trailOuterColor, clamp(0.05 + fade * 0.22, 0.04, 0.3)]
+                    }
+                  }),
+                  new Graphic({
+                    geometry: new Polyline({
+                      spatialReference: displayedWorking.spatialReference,
+                      paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                    }),
+                    symbol: {
+                      type: "simple-line",
+                      style: "solid",
+                      width: Math.max(baseWidth * 1.2, 0.9),
+                      color: [...trailInnerColor, clamp(0.1 + fade * 0.45, 0.08, 0.55)]
+                    }
+                  })
+                );
+              }
+            }
+
+            const cruise = Math.sin(progress * Math.PI);
+            const planeSize = clamp(baseWidth * (4.1 + cruise * 0.9), 10, 24);
+            const planeAlpha = clamp(0.74 + cruise * 0.22, 0.7, 1);
+            const wobblePhase = timeSeed * 7.5 + progress * TAU * 2;
+            const bobOffset =
+              cartoon
+                ? Math.sin(wobblePhase) * clamp(baseWidth * 2.1, 1.2, 8) * resolution
+                : 0;
+            const planeX = head.x - head.uy * bobOffset;
+            const planeY = head.y + head.ux * bobOffset;
+            const planeAngle = head.angle + (cartoon ? Math.sin(wobblePhase * 0.8) * 9 : 0);
+            const noseOffset = cartoon ? planeSize * 0.32 * resolution : 0;
+            const noseX = planeX + Math.cos(head.heading) * noseOffset;
+            const noseY = planeY + Math.sin(head.heading) * noseOffset;
+            flightGraphics.push(
+              new Graphic({
+                geometry: new Point({
+                  x: planeX,
+                  y: planeY,
+                  spatialReference: displayedWorking.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "circle",
+                  size: clamp(planeSize * 1.45, 12, 34),
+                  color: [...planeGlowColor, 0.12 + pulse * 0.14],
+                  outline: {
+                    color: [...planeGlowColor, 0],
+                    width: 0
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: planeX,
+                  y: planeY,
+                  spatialReference: displayedWorking.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "path",
+                  path: cartoon ? cartoonPlaneMarkerPath : planeMarkerPath,
+                  size: planeSize,
+                  color: [...planeBodyColor, planeAlpha],
+                  angle: planeAngle,
+                  outline: {
+                    color: [...planeOutlineColor, cartoon ? 0.82 : 0.45],
+                    width: Math.max(cartoon ? 1.1 : 0.5, baseWidth * (cartoon ? 0.2 : 0.12))
+                  }
+                }
+              })
+            );
+            if (cartoon) {
+              flightGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: noseX,
+                    y: noseY,
+                    spatialReference: displayedWorking.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    size: clamp(planeSize * 0.3, 2.4, 6.2),
+                    color: [255, 145, 96, 0.95],
+                    outline: {
+                      color: [255, 239, 220, 0.86],
+                      width: 1
+                    }
+                  }
+                })
+              );
+            }
+
+            const { segments: routeSegments, total: routeTotal } = buildMarchSegments(fullRouteWorking);
+            const start = routeSegments.length ? sampleMarchPoint(routeSegments, 0) : null;
+            const end = routeSegments.length ? sampleMarchPoint(routeSegments, routeTotal) : null;
+            if (start && end) {
+              const baseMarkerSize = Math.max(6, baseWidth * 2.2);
+              flightGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: start.x,
+                    y: start.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: cartoon ? "diamond" : "circle",
+                      size: baseMarkerSize * (cartoon ? 1.1 : 1),
+                      color: [...startMarkerColor, cartoon ? 0.72 : 0.58],
+                      outline: {
+                        color: cartoon ? [239, 255, 242, 0.9] : [205, 244, 255, 0.8],
+                        width: 1
+                      }
+                    }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: end.x,
+                    y: end.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: cartoon ? "diamond" : "circle",
+                      size: baseMarkerSize * (cartoon ? 1.1 : 1),
+                      color: [...endMarkerColor, cartoon ? 0.72 : 0.58],
+                      outline: {
+                        color: cartoon ? [255, 241, 227, 0.95] : [255, 233, 204, 0.85],
+                        width: 1
+                      }
+                    }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: start.x,
+                    y: start.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                    symbol: {
+                      type: "text",
+                      text: "A",
+                      color: cartoon ? [238, 255, 243, 1] : [215, 245, 255, 0.98],
+                      yoffset: cartoon ? -16 : -12,
+                      haloColor: cartoon ? [23, 68, 31, 0.88] : [26, 72, 91, 0.8],
+                      haloSize: cartoon ? 1.8 : 1,
+                      font: {
+                        size: cartoon ? 12 : 9,
+                        family: "sans-serif"
+                      }
+                    }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: end.x,
+                    y: end.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                    symbol: {
+                      type: "text",
+                      text: "B",
+                      color: cartoon ? [255, 244, 232, 1] : [255, 235, 208, 0.98],
+                      yoffset: cartoon ? -16 : -12,
+                      haloColor: cartoon ? [91, 43, 20, 0.86] : [93, 61, 40, 0.78],
+                      haloSize: cartoon ? 1.8 : 1,
+                      font: {
+                        size: cartoon ? 12 : 9,
+                        family: "sans-serif"
+                      }
+                    }
+                })
+              );
+
+              const takeoffPulse = clamp(1 - progress / 0.22, 0, 1);
+              if (takeoffPulse > 0) {
+                flightGraphics.push(
+                  new Graphic({
+                    geometry: new Point({
+                      x: start.x,
+                      y: start.y,
+                      spatialReference: fullRouteWorking.spatialReference
+                    }),
+                      symbol: {
+                        type: "simple-marker",
+                        style: "circle",
+                        size: baseMarkerSize + (1 - takeoffPulse) * 20,
+                        color: [...startMarkerColor, takeoffPulse * (cartoon ? 0.34 : 0.26)],
+                        outline: {
+                          color: cartoon
+                            ? [239, 255, 242, takeoffPulse * 0.62]
+                            : [205, 244, 255, takeoffPulse * 0.5],
+                          width: 1
+                        }
+                      }
+                  })
+                );
+              }
+
+              const landingPulse = clamp((progress - 0.78) / 0.22, 0, 1);
+              if (landingPulse > 0) {
+                flightGraphics.push(
+                  new Graphic({
+                    geometry: new Point({
+                      x: end.x,
+                      y: end.y,
+                      spatialReference: fullRouteWorking.spatialReference
+                    }),
+                      symbol: {
+                        type: "simple-marker",
+                        style: "circle",
+                        size: baseMarkerSize + landingPulse * 22,
+                        color: [...endMarkerColor, (1 - landingPulse * 0.35) * (cartoon ? 0.38 : 0.28)],
+                        outline: {
+                          color: cartoon
+                            ? [255, 241, 227, (1 - landingPulse * 0.3) * 0.72]
+                            : [255, 233, 204, (1 - landingPulse * 0.3) * 0.6],
+                          width: 1
+                        }
+                      }
+                  })
+                );
+              }
+            }
+          });
+
+          flightLayer.removeAll();
+          if (flightGraphics.length) {
+            flightLayer.addMany(flightGraphics);
+          }
+        }
+      } else {
+        clearFlightLayer(layerData);
+      }
+      if (flightProgress === null && hasFlightRouteAnimation) {
+        const view = config.getView?.();
+        if (view) {
+          const flightLayer = getFlightLayer(layerData, view);
+          flightLayer.visible = true;
+          flightLayer.opacity = Math.max(baseLayerOpacity, 0.9);
+          const flightGraphics: Graphic[] = [];
+          const cartoon = flightMode === "cartoon";
+          const startMarkerColor = cartoon ? [84, 208, 120] : [43, 167, 220];
+          const endMarkerColor = cartoon ? [255, 156, 98] : [236, 146, 95];
+          const baseWidth = layerData.lineStyle?.width ?? defaultLineStyle.width;
+
+          layerData.layer.graphics.forEach((graphic: any) => {
+            const sourceGeometry =
+              (graphic.__originalGeometry as Polyline | undefined) ??
+              (graphic.__densifiedGeometry as Polyline | undefined) ??
+              (graphic.geometry as Polyline | undefined);
+            if (!sourceGeometry || sourceGeometry.type !== "polyline") return;
+
+            const fullRouteWorking = toViewPolyline(sourceGeometry, view);
+            const { segments: routeSegments, total: routeTotal } = buildMarchSegments(fullRouteWorking);
+            const start = routeSegments.length ? sampleMarchPoint(routeSegments, 0) : null;
+            const end = routeSegments.length ? sampleMarchPoint(routeSegments, routeTotal) : null;
+            if (!start || !end) return;
+
+            const baseMarkerSize = Math.max(6, baseWidth * 2.2);
+            flightGraphics.push(
+              new Graphic({
+                geometry: new Point({
+                  x: start.x,
+                  y: start.y,
+                  spatialReference: fullRouteWorking.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: cartoon ? "diamond" : "circle",
+                  size: baseMarkerSize * (cartoon ? 1.1 : 1),
+                  color: [...startMarkerColor, cartoon ? 0.72 : 0.58],
+                  outline: {
+                    color: cartoon ? [239, 255, 242, 0.9] : [205, 244, 255, 0.8],
+                    width: 1
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: end.x,
+                  y: end.y,
+                  spatialReference: fullRouteWorking.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: cartoon ? "diamond" : "circle",
+                  size: baseMarkerSize * (cartoon ? 1.1 : 1),
+                  color: [...endMarkerColor, cartoon ? 0.72 : 0.58],
+                  outline: {
+                    color: cartoon ? [255, 241, 227, 0.95] : [255, 233, 204, 0.85],
+                    width: 1
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: start.x,
+                  y: start.y,
+                  spatialReference: fullRouteWorking.spatialReference
+                }),
+                symbol: {
+                  type: "text",
+                  text: "A",
+                  color: cartoon ? [238, 255, 243, 1] : [215, 245, 255, 0.98],
+                  yoffset: cartoon ? -16 : -12,
+                  haloColor: cartoon ? [23, 68, 31, 0.88] : [26, 72, 91, 0.8],
+                  haloSize: cartoon ? 1.8 : 1,
+                  font: {
+                    size: cartoon ? 12 : 9,
+                    family: "sans-serif"
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: end.x,
+                  y: end.y,
+                  spatialReference: fullRouteWorking.spatialReference
+                }),
+                symbol: {
+                  type: "text",
+                  text: "B",
+                  color: cartoon ? [255, 244, 232, 1] : [255, 235, 208, 0.98],
+                  yoffset: cartoon ? -16 : -12,
+                  haloColor: cartoon ? [91, 43, 20, 0.86] : [93, 61, 40, 0.78],
+                  haloSize: cartoon ? 1.8 : 1,
+                  font: {
+                    size: cartoon ? 12 : 9,
+                    family: "sans-serif"
+                  }
+                }
+              })
+            );
+          });
+
+          flightLayer.removeAll();
+          if (flightGraphics.length) {
+            flightLayer.addMany(flightGraphics);
+          }
+        }
+      }
+
+      if (waypointProgress !== null) {
+        const view = config.getView?.();
+        if (view) {
+          const waypointLayer = getWaypointLayer(layerData, view);
+          waypointLayer.visible = true;
+          waypointLayer.opacity = Math.max(baseLayerOpacity, 0.9);
+          const waypointGraphics: Graphic[] = [];
+          const progress = clamp(waypointProgress, 0, 1);
+          const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
+          const pulse = 0.5 + 0.5 * Math.sin(timeSeed * 4.3 + 0.7);
+          const cartoon = waypointMode === "cartoon";
+
+          layerData.layer.graphics.forEach((graphic: any) => {
+            if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
+            const renderedGeometry = graphic.geometry as Polyline;
+            const sourceGeometry =
+              (graphic.__originalGeometry as Polyline | undefined) ??
+              renderedGeometry;
+
+            const displayedWorking = toViewPolyline(
+              renderedGeometry.paths?.length ? renderedGeometry : sourceGeometry,
+              view
+            );
+            const fullRouteWorking = toViewPolyline(sourceGeometry, view);
+            const { total: visibleDistance } = buildMarchSegments(displayedWorking);
+            const { stops, total } = buildVertexStops(fullRouteWorking);
+            if (!stops.length) return;
+
+            const revealLead = Math.max(total * 0.002, resolution * 2.5);
+            const revealDistance = clamp(
+              Math.max(progress * total, Math.min(visibleDistance, total)),
+              0,
+              total
+            );
+            const markerSize = clamp(baseWidth * 2.2, 8, 18);
+            const reachedPoints: number[][] = [];
+            let activeStop: VertexStop | null = null;
+            let activeIndex = -1;
+
+            for (let index = 0; index < stops.length; index += 1) {
+              const stop = stops[index];
+              const reached = index === 0 || stop.accum <= revealDistance + revealLead;
+              if (!reached) continue;
+              reachedPoints.push([stop.x, stop.y]);
+              activeStop = stop;
+              activeIndex = index;
+
+              const t = total > 0 ? clamp(stop.accum / total, 0, 1) : 0;
+              const r = cartoon
+                ? Math.round(92 + 158 * t)
+                : Math.round(67 + 168 * t);
+              const g = cartoon
+                ? Math.round(210 - 52 * t)
+                : Math.round(178 - 34 * t);
+              const b = cartoon
+                ? Math.round(124 + 52 * (1 - t))
+                : Math.round(232 - 104 * t);
+              const label = toWaypointLabel(index);
+              const bounce = cartoon ? 0.5 + 0.5 * Math.sin(timeSeed * 6.2 + index * 0.9) : 0;
+              const stopMarkerSize = markerSize * (cartoon ? 0.94 + bounce * 0.26 : 1);
+
+              waypointGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: stop.x,
+                    y: stop.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: cartoon ? "diamond" : "circle",
+                    size: stopMarkerSize,
+                    color: [r, g, b, cartoon ? 0.78 : 0.62],
+                    outline: {
+                      color: cartoon ? [255, 252, 238, 0.95] : [240, 248, 255, 0.85],
+                      width: cartoon ? 1.6 : 1
+                    }
+                  }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: stop.x,
+                    y: stop.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                  symbol: {
+                    type: "text",
+                    text: label,
+                    color: cartoon ? [255, 251, 241, 1] : [246, 251, 255, 0.98],
+                    yoffset: cartoon ? -17 : -13,
+                    haloColor: cartoon ? [88, 52, 28, 0.88] : [21, 53, 74, 0.9],
+                    haloSize: cartoon ? 1.9 : 1.1,
+                    font: {
+                      size: cartoon ? 13 : 10,
+                      family: "sans-serif"
+                    }
+                  }
+                })
+              );
+              if (cartoon) {
+                waypointGraphics.push(
+                  new Graphic({
+                    geometry: new Point({
+                      x: stop.x,
+                      y: stop.y,
+                      spatialReference: fullRouteWorking.spatialReference
+                    }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: "circle",
+                      size: stopMarkerSize * 0.34,
+                      color: [255, 250, 239, 0.95],
+                      outline: {
+                        color: [255, 218, 170, 0.82],
+                        width: 1
+                      }
+                    }
+                  })
+                );
+              }
+            }
+
+            if (cartoon && reachedPoints.length > 1) {
+              waypointGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: fullRouteWorking.spatialReference,
+                    paths: [reachedPoints]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "short-dot",
+                    width: Math.max(baseWidth * 2, 1.5),
+                    color: [255, 190, 123, 0.48]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: fullRouteWorking.spatialReference,
+                    paths: [reachedPoints]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "short-dot",
+                    width: Math.max(baseWidth * 1.05, 0.9),
+                    color: [255, 248, 234, 0.84]
+                  }
+                })
+              );
+            }
+
+            if (activeStop && activeIndex >= 0) {
+              const activeT = stops.length > 1
+                ? clamp(activeIndex / Math.max(stops.length - 1, 1), 0, 1)
+                : 0;
+              const rr = cartoon
+                ? Math.round(114 + 126 * activeT)
+                : Math.round(84 + 158 * activeT);
+              const gg = cartoon
+                ? Math.round(214 - 48 * activeT)
+                : Math.round(184 - 28 * activeT);
+              const bb = cartoon
+                ? Math.round(117 + 62 * (1 - activeT))
+                : Math.round(238 - 90 * activeT);
+              const haloSize = markerSize * (cartoon ? 1.45 + pulse * 0.65 : 1.15 + pulse * 0.55);
+              const haloAlpha = clamp(
+                (cartoon ? 0.2 : 0.12) + pulse * (cartoon ? 0.2 : 0.16) + (1 - progress) * 0.06,
+                cartoon ? 0.18 : 0.12,
+                cartoon ? 0.44 : 0.34
+              );
+              waypointGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: activeStop.x,
+                    y: activeStop.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    size: haloSize,
+                    color: [rr, gg, bb, haloAlpha],
+                    outline: {
+                      color: cartoon
+                        ? [255, 251, 241, haloAlpha * 0.82]
+                        : [235, 247, 255, haloAlpha * 0.65],
+                      width: cartoon ? 1.4 : 1
+                    }
+                  }
+                })
+              );
+            }
+          });
+
+          waypointLayer.removeAll();
+          if (waypointGraphics.length) {
+            waypointLayer.addMany(waypointGraphics);
+          }
+        }
+      } else {
+        clearWaypointLayer(layerData);
+      }
+      if (waypointProgress === null && hasWaypointRouteAnimation) {
+        const view = config.getView?.();
+        if (view) {
+          const waypointLayer = getWaypointLayer(layerData, view);
+          waypointLayer.visible = true;
+          waypointLayer.opacity = Math.max(baseLayerOpacity, 0.9);
+          const waypointGraphics: Graphic[] = [];
+          const cartoon = waypointMode === "cartoon";
+          const baseWidth = layerData.lineStyle?.width ?? defaultLineStyle.width;
+          const markerSize = clamp(baseWidth * 2.2, 8, 18);
+
+          layerData.layer.graphics.forEach((graphic: any) => {
+            const sourceGeometry =
+              (graphic.__originalGeometry as Polyline | undefined) ??
+              (graphic.geometry as Polyline | undefined);
+            if (!sourceGeometry || sourceGeometry.type !== "polyline") return;
+
+            const fullRouteWorking = toViewPolyline(sourceGeometry, view);
+            const { stops, total } = buildVertexStops(fullRouteWorking);
+            if (!stops.length) return;
+            const reachedPoints: number[][] = [];
+
+            stops.forEach((stop, index) => {
+              reachedPoints.push([stop.x, stop.y]);
+              const t = total > 0 ? clamp(stop.accum / total, 0, 1) : 0;
+              const r = cartoon
+                ? Math.round(92 + 158 * t)
+                : Math.round(67 + 168 * t);
+              const g = cartoon
+                ? Math.round(210 - 52 * t)
+                : Math.round(178 - 34 * t);
+              const b = cartoon
+                ? Math.round(124 + 52 * (1 - t))
+                : Math.round(232 - 104 * t);
+              const label = toWaypointLabel(index);
+
+              waypointGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: stop.x,
+                    y: stop.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: cartoon ? "diamond" : "circle",
+                    size: markerSize,
+                    color: [r, g, b, cartoon ? 0.78 : 0.62],
+                    outline: {
+                      color: cartoon ? [255, 252, 238, 0.95] : [240, 248, 255, 0.85],
+                      width: cartoon ? 1.6 : 1
+                    }
+                  }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: stop.x,
+                    y: stop.y,
+                    spatialReference: fullRouteWorking.spatialReference
+                  }),
+                  symbol: {
+                    type: "text",
+                    text: label,
+                    color: cartoon ? [255, 251, 241, 1] : [246, 251, 255, 0.98],
+                    yoffset: cartoon ? -17 : -13,
+                    haloColor: cartoon ? [88, 52, 28, 0.88] : [21, 53, 74, 0.9],
+                    haloSize: cartoon ? 1.9 : 1.1,
+                    font: {
+                      size: cartoon ? 13 : 10,
+                      family: "sans-serif"
+                    }
+                  }
+                })
+              );
+              if (cartoon) {
+                waypointGraphics.push(
+                  new Graphic({
+                    geometry: new Point({
+                      x: stop.x,
+                      y: stop.y,
+                      spatialReference: fullRouteWorking.spatialReference
+                    }),
+                    symbol: {
+                      type: "simple-marker",
+                      style: "circle",
+                      size: markerSize * 0.34,
+                      color: [255, 250, 239, 0.95],
+                      outline: {
+                        color: [255, 218, 170, 0.82],
+                        width: 1
+                      }
+                    }
+                  })
+                );
+              }
+            });
+
+            if (cartoon && reachedPoints.length > 1) {
+              waypointGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: fullRouteWorking.spatialReference,
+                    paths: [reachedPoints]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "short-dot",
+                    width: Math.max(baseWidth * 2, 1.5),
+                    color: [255, 190, 123, 0.48]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: fullRouteWorking.spatialReference,
+                    paths: [reachedPoints]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "short-dot",
+                    width: Math.max(baseWidth * 1.05, 0.9),
+                    color: [255, 248, 234, 0.84]
+                  }
+                })
+              );
+            }
+          });
+
+          waypointLayer.removeAll();
+          if (waypointGraphics.length) {
+            waypointLayer.addMany(waypointGraphics);
+          }
+        }
       }
 
       if (barrageProgress !== null) {

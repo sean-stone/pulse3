@@ -2934,6 +2934,127 @@ calcite-accordion-item::part(toggle-icon) {
   box-shadow: 0 0 8px rgba(255, 188, 120, 0.6);
 }
 
+.animation-type-preview--polyline.animation-type-preview--weldTrail {
+  background-image:
+    radial-gradient(circle at 82% 50%, rgba(255, 245, 220, 0.95) 0 1.2px, transparent 1.7px),
+    linear-gradient(
+      90deg,
+      rgba(255, 150, 70, 0.14),
+      rgba(255, 181, 97, 0.86) 56%,
+      rgba(255, 242, 201, 0.98) 78%,
+      rgba(255, 242, 201, 0.2)
+    );
+  background-size: 100% 100%, 220% 100%;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 8px rgba(255, 173, 98, 0.55);
+  animation: preview-weld-trail 1.3s linear infinite;
+  transform-origin: left center;
+}
+
+.animation-type-preview--polyline.animation-type-preview--flightRoute {
+  background: linear-gradient(
+    90deg,
+    rgba(82, 184, 235, 0.25),
+    rgba(210, 242, 255, 0.9),
+    rgba(82, 184, 235, 0.18)
+  );
+  background-size: 180% 100%;
+  box-shadow: 0 0 8px rgba(82, 184, 235, 0.5);
+  animation: preview-flight-route 1.9s ease-in-out infinite;
+  overflow: visible;
+}
+
+.animation-type-preview--polyline.animation-type-preview--flightRoute::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(245, 252, 255, 0.95);
+  box-shadow:
+    0 0 7px rgba(132, 209, 247, 0.8),
+    -7px 0 8px rgba(104, 197, 244, 0.45);
+  transform: translate(-50%, -50%);
+  animation: preview-flight-plane 1.9s ease-in-out infinite;
+}
+
+.animation-type-preview--polyline.animation-type-preview--flightRouteCartoon {
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 241, 212, 0.88) 0 8px,
+      rgba(255, 191, 126, 0.7) 8px 14px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255, 150, 82, 0.32),
+      rgba(255, 239, 194, 0.9),
+      rgba(255, 168, 98, 0.3)
+    );
+  background-size: 220% 100%, 180% 100%;
+  box-shadow: 0 0 8px rgba(255, 166, 98, 0.52);
+  animation: preview-flight-route-cartoon 1.9s ease-in-out infinite;
+  overflow: visible;
+}
+
+.animation-type-preview--polyline.animation-type-preview--flightRouteCartoon::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 10px;
+  height: 8px;
+  border-radius: 2px;
+  clip-path: polygon(0% 52%, 100% 0%, 68% 50%, 100% 100%);
+  background: rgba(255, 249, 227, 0.98);
+  box-shadow:
+    0 0 8px rgba(255, 163, 96, 0.82),
+    -8px 0 8px rgba(255, 189, 130, 0.5);
+  transform: translate(-50%, -50%) rotate(-6deg);
+  animation: preview-flight-plane-cartoon 1.9s ease-in-out infinite;
+}
+
+.animation-type-preview--polyline.animation-type-preview--waypointRoute {
+  background-image:
+    radial-gradient(circle at 12% 50%, rgba(222, 245, 255, 0.95) 0 1.6px, rgba(69, 173, 226, 0.85) 1.7px 2.8px, transparent 3px),
+    radial-gradient(circle at 50% 50%, rgba(240, 246, 255, 0.95) 0 1.6px, rgba(138, 191, 228, 0.8) 1.7px 2.8px, transparent 3px),
+    radial-gradient(circle at 88% 50%, rgba(255, 243, 231, 0.95) 0 1.6px, rgba(228, 149, 98, 0.82) 1.7px 2.8px, transparent 3px),
+    linear-gradient(
+      90deg,
+      rgba(80, 182, 234, 0.25),
+      rgba(210, 242, 255, 0.85),
+      rgba(237, 155, 99, 0.32)
+    );
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 8px rgba(109, 195, 239, 0.46);
+  animation: preview-waypoint-route 2.1s ease-in-out infinite;
+}
+
+.animation-type-preview--polyline.animation-type-preview--waypointRouteCartoon {
+  background-image:
+    radial-gradient(circle at 14% 50%, rgba(255, 251, 235, 0.98) 0 2.1px, rgba(117, 220, 142, 0.9) 2.2px 3.8px, transparent 3.9px),
+    radial-gradient(circle at 50% 50%, rgba(255, 251, 235, 0.98) 0 2.1px, rgba(255, 189, 116, 0.9) 2.2px 3.8px, transparent 3.9px),
+    radial-gradient(circle at 86% 50%, rgba(255, 251, 235, 0.98) 0 2.1px, rgba(255, 141, 92, 0.9) 2.2px 3.8px, transparent 3.9px),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 240, 197, 0.8) 0 6px,
+      rgba(255, 176, 108, 0.72) 6px 10px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(115, 214, 139, 0.24),
+      rgba(255, 235, 172, 0.78),
+      rgba(255, 150, 98, 0.34)
+    );
+  background-size: 100% 100%, 100% 100%, 100% 100%, 180% 100%, 100% 100%;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 8px rgba(255, 179, 113, 0.48);
+  animation: preview-waypoint-route-cartoon 2.1s ease-in-out infinite;
+}
+
 .animation-type-preview--arrowMarch {
   animation: preview-arrow-march 1.6s linear infinite;
   background: repeating-linear-gradient(
@@ -3164,6 +3285,157 @@ calcite-accordion-item::part(toggle-icon) {
   100% {
     opacity: 0.6;
     filter: brightness(1);
+  }
+}
+
+@keyframes preview-weld-trail {
+  0% {
+    transform: scaleX(0.12);
+    background-position: 86% 50%, 0% 50%;
+    filter: brightness(1.05) saturate(1.05);
+    opacity: 0.7;
+  }
+  45% {
+    transform: scaleX(0.75);
+    background-position: 80% 50%, 65% 50%;
+    filter: brightness(1.22) saturate(1.3);
+    opacity: 1;
+  }
+  75% {
+    transform: scaleX(1);
+    background-position: 78% 50%, 100% 50%;
+    filter: brightness(1.4) saturate(1.45);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scaleX(1);
+    background-position: 84% 50%, 130% 50%;
+    filter: brightness(1.1) saturate(1.2);
+    opacity: 0.75;
+  }
+}
+
+@keyframes preview-flight-route {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.65;
+  }
+  35% {
+    background-position: 48% 50%;
+    opacity: 0.95;
+  }
+  70% {
+    background-position: 95% 50%;
+    opacity: 1;
+  }
+  100% {
+    background-position: 130% 50%;
+    opacity: 0.75;
+  }
+}
+
+@keyframes preview-flight-plane {
+  0% {
+    left: 2%;
+    transform: translate(-50%, -58%) scale(0.75);
+    opacity: 0.6;
+  }
+  20% {
+    transform: translate(-50%, -70%) scale(1);
+    opacity: 1;
+  }
+  72% {
+    left: 85%;
+    transform: translate(-50%, -46%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    left: 98%;
+    transform: translate(-50%, -35%) scale(0.74);
+    opacity: 0.7;
+  }
+}
+
+@keyframes preview-flight-route-cartoon {
+  0% {
+    background-position: 0% 50%, 0% 50%;
+    opacity: 0.68;
+    filter: saturate(1.02) brightness(0.98);
+  }
+  35% {
+    background-position: 52% 50%, 48% 50%;
+    opacity: 0.96;
+    filter: saturate(1.2) brightness(1.1);
+  }
+  70% {
+    background-position: 102% 50%, 95% 50%;
+    opacity: 1;
+    filter: saturate(1.28) brightness(1.16);
+  }
+  100% {
+    background-position: 146% 50%, 130% 50%;
+    opacity: 0.78;
+    filter: saturate(1.04) brightness(1);
+  }
+}
+
+@keyframes preview-flight-plane-cartoon {
+  0% {
+    left: 2%;
+    transform: translate(-50%, -60%) rotate(-11deg) scale(0.72);
+    opacity: 0.7;
+  }
+  22% {
+    transform: translate(-50%, -78%) rotate(6deg) scale(1.08);
+    opacity: 1;
+  }
+  72% {
+    left: 85%;
+    transform: translate(-50%, -43%) rotate(-5deg) scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    left: 98%;
+    transform: translate(-50%, -28%) rotate(8deg) scale(0.7);
+    opacity: 0.74;
+  }
+}
+
+@keyframes preview-waypoint-route {
+  0% {
+    opacity: 0.62;
+    filter: saturate(0.9) brightness(0.95);
+  }
+  45% {
+    opacity: 1;
+    filter: saturate(1.18) brightness(1.14);
+  }
+  75% {
+    opacity: 0.96;
+    filter: saturate(1.24) brightness(1.2);
+  }
+  100% {
+    opacity: 0.72;
+    filter: saturate(0.96) brightness(1);
+  }
+}
+
+@keyframes preview-waypoint-route-cartoon {
+  0% {
+    opacity: 0.66;
+    filter: saturate(0.96) brightness(0.98);
+  }
+  45% {
+    opacity: 1;
+    filter: saturate(1.2) brightness(1.13);
+  }
+  75% {
+    opacity: 0.97;
+    filter: saturate(1.24) brightness(1.17);
+  }
+  100% {
+    opacity: 0.76;
+    filter: saturate(1) brightness(1);
   }
 }
 
