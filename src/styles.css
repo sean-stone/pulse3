@@ -10,9 +10,9 @@
   --color-muted: #6c7a82;
   --color-danger: #c4584a;
 
-  --calcite-color-brand: var(--color-primary);
-  --calcite-color-brand-hover: var(--color-primary-dark);
-  --calcite-color-brand-press: #084054;
+  --calcite-color-brand: #0a4c66;
+  --calcite-color-brand-hover: #0a4c66;
+  --calcite-color-brand-press: #0a4c66;
   --calcite-color-text-1: var(--color-text);
   --calcite-color-text-2: var(--color-muted);
   --calcite-ui-background: var(--color-surface);
@@ -23,6 +23,56 @@
   --calcite-ui-border-2: #cfd4cf;
 }
 
+body.theme-dark {
+  --color-primary: #4aa7c8;
+  --color-primary-dark: #78bcd5;
+  --color-secondary: #4f9f88;
+  --color-secondary-light: #6cb8a3;
+  --color-surface: #0f171c;
+  --color-surface-alt: #17232b;
+  --color-border: #2b3a44;
+  --color-text: #f3f7fb;
+  --color-muted: #c3d0d9;
+  --color-danger: #e28a7f;
+
+  --calcite-color-brand: #0a4c66;
+  --calcite-color-brand-hover: #0a4c66;
+  --calcite-color-brand-press: #0a4c66;
+  --calcite-color-text-1: var(--color-text);
+  --calcite-color-text-2: var(--color-muted);
+  --calcite-ui-background: var(--color-surface);
+  --calcite-ui-background-2: #1a262e;
+  --calcite-ui-foreground-1: #24323b;
+  --calcite-ui-foreground-2: #1c2a32;
+  --calcite-ui-border-1: var(--color-border);
+  --calcite-ui-border-2: #3a4a55;
+}
+
+:root,
+body,
+:root.calcite-mode-light,
+:root.calcite-mode-dark,
+body.calcite-mode-light,
+body.calcite-mode-dark,
+calcite-button,
+calcite-switch,
+calcite-radio-button,
+calcite-radio-button-group,
+calcite-slider,
+calcite-action,
+calcite-segmented-control,
+calcite-checkbox {
+  --calcite-color-brand: #0a4c66 !important;
+  --calcite-color-brand-hover: #0a4c66 !important;
+  --calcite-color-brand-press: #0a4c66 !important;
+}
+
+body.theme-dark,
+body.calcite-mode-dark,
+:root.calcite-mode-dark {
+  --calcite-color-text-1: #f3f7fb !important;
+  --calcite-color-text-2: #c3d0d9 !important;
+}
 * {
   box-sizing: border-box;
   margin: 0;
@@ -64,6 +114,10 @@ body {
   padding: 6px 12px;
   background: linear-gradient(90deg, #f9fbfb 0%, #ffffff 60%, #f4f7f6 100%);
   border-bottom: 1px solid rgba(10, 76, 102, 0.08);
+  --calcite-color-text-1: #0a4c66;
+  --calcite-color-text-2: #0a4c66;
+  --calcite-color-brand: #0a4c66;
+  --calcite-color-brand-hover: #0a4c66;
 }
 
 .menu-bar-left {
@@ -87,7 +141,7 @@ body {
 .menu-button::part(button):focus-visible {
   background: rgba(10, 76, 102, 0.08);
   border-color: rgba(10, 76, 102, 0.2);
-  color: var(--color-primary);
+  color: #0a4c66;
 }
 
 .menu-divider {
@@ -124,6 +178,42 @@ body {
   display: inline-flex;
   align-items: center;
   justify-self: end;
+  gap: 8px;
+}
+
+.theme-toggle-btn::part(button) {
+  border: 1px solid rgba(10, 76, 102, 0.2);
+  background: #ffffff;
+  color: var(--color-text);
+  min-width: 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+body:not(.theme-dark) #menu-bar .menu-button {
+  --calcite-color-text-1: #0a4c66;
+  --calcite-color-text-2: #0a4c66;
+  --calcite-color-brand: #0a4c66;
+  --calcite-color-brand-hover: #0a4c66;
+  --calcite-button-text-color: #0a4c66;
+  --calcite-button-icon-color: #0a4c66;
+}
+
+body:not(.theme-dark) #menu-bar .menu-button::part(button),
+body:not(.theme-dark) #menu-bar .menu-button::part(text),
+body:not(.theme-dark) #menu-bar .menu-button::part(icon) {
+  color: #0a4c66 !important;
+  fill: #0a4c66 !important;
+}
+
+.theme-toggle-btn:hover::part(button),
+.theme-toggle-btn:focus-visible::part(button) {
+  background: rgba(10, 76, 102, 0.08);
+  border-color: rgba(10, 76, 102, 0.3);
+  color: var(--color-primary);
 }
 
 .menu-dropdown {
@@ -152,7 +242,7 @@ body {
 .menu-trigger::part(button):focus-visible {
   background: rgba(10, 76, 102, 0.08);
   border-color: rgba(10, 76, 102, 0.2);
-  color: var(--color-primary);
+  color: #0a4c66;
 }
 
 #toolbar-bar {
@@ -161,6 +251,287 @@ body {
   justify-content: space-between;
   padding: 8px 12px;
   background: #f5f8f7;
+}
+
+
+
+body.theme-dark #app-topbars {
+  background: #121d24;
+  border-bottom-color: var(--color-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+body.theme-dark #menu-bar {
+  background: linear-gradient(90deg, #16242c 0%, #121d24 60%, #1a2830 100%);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  --calcite-color-text-1: var(--color-text);
+  --calcite-color-text-2: var(--color-muted);
+}
+
+body.theme-dark #menu-bar .menu-button {
+  --calcite-color-text-1: var(--color-text);
+  --calcite-color-text-2: var(--color-muted);
+  --calcite-color-brand: var(--color-text);
+  --calcite-color-brand-hover: var(--color-text);
+  --calcite-button-text-color: var(--color-text);
+  --calcite-button-icon-color: var(--color-text);
+}
+
+body.theme-dark #toolbar-bar {
+  background: #16232b;
+}
+
+body.theme-dark .menu-divider,
+body.theme-dark .toolbar-divider {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+body.theme-dark .theme-toggle-btn::part(button) {
+  background: #1a2830;
+  border-color: #36505f;
+}
+
+body.theme-dark .theme-toggle-btn:hover::part(button),
+body.theme-dark .theme-toggle-btn:focus-visible::part(button) {
+  background: rgba(122, 199, 176, 0.14);
+  border-color: #6ca99b;
+}
+
+body.theme-dark .menu-button::part(button):hover,
+body.theme-dark .menu-button::part(button):focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+body.theme-dark #menu-bar calcite-button.menu-button::part(button),
+body.theme-dark #menu-bar calcite-button.menu-button::part(text),
+body.theme-dark #menu-bar calcite-button.menu-button::part(icon) {
+  color: #f3f7fb !important;
+  fill: #f3f7fb !important;
+}
+
+body.theme-dark #menu-bar calcite-button.menu-button {
+  color: #f3f7fb !important;
+  --calcite-color-text-1: #f3f7fb !important;
+  --calcite-color-text-2: #c3d0d9 !important;
+  --calcite-button-text-color: #f3f7fb !important;
+  --calcite-button-icon-color: #f3f7fb !important;
+}
+
+:root.calcite-mode-dark #menu-bar calcite-button.menu-button::part(button),
+:root.calcite-mode-dark #menu-bar calcite-button.menu-button::part(text),
+:root.calcite-mode-dark #menu-bar calcite-button.menu-button::part(icon),
+body.calcite-mode-dark #menu-bar calcite-button.menu-button::part(button),
+body.calcite-mode-dark #menu-bar calcite-button.menu-button::part(text),
+body.calcite-mode-dark #menu-bar calcite-button.menu-button::part(icon) {
+  color: #f3f7fb !important;
+  fill: #f3f7fb !important;
+}
+
+:root.calcite-mode-dark #menu-bar calcite-button.menu-button,
+body.calcite-mode-dark #menu-bar calcite-button.menu-button {
+  color: #f3f7fb !important;
+  --calcite-color-text-1: #f3f7fb !important;
+  --calcite-color-text-2: #c3d0d9 !important;
+  --calcite-button-text-color: #f3f7fb !important;
+  --calcite-button-icon-color: #f3f7fb !important;
+}
+
+body.theme-dark #menu-bar .menu-bar-title {
+  color: #f3f7fb;
+}
+
+body.theme-dark #menu-bar .menu-status-badge {
+  color: #f3f7fb;
+}
+
+body.theme-dark .draw-action-bar calcite-action::part(container) {
+  border-color: #36505f;
+  background: #1a2830;
+}
+
+body.theme-dark #basemap-bg-color {
+  border-color: #36505f;
+  background: #1a2830;
+}
+
+body.theme-dark #side-panel {
+  background: #121d24;
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.35);
+}
+
+body.theme-dark #onboarding-where-btn::part(button),
+body.theme-dark #onboarding-where-btn::part(text),
+body.theme-dark #onboarding-where-btn::part(icon) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+body.theme-dark #timeline-container {
+  background: #101920;
+  border-top-color: #2d99bd;
+}
+
+body.theme-dark #timeline-header {
+  background: #121d24;
+  border-bottom-color: var(--color-border);
+}
+
+body.theme-dark #timeline-zoom-label {
+  background: rgba(122, 199, 176, 0.14);
+  border-color: rgba(122, 199, 176, 0.35);
+}
+
+body.theme-dark .timeline-duration calcite-input-number::part(input),
+body.theme-dark .timeline-layer-input::part(input),
+body.theme-dark .timeline-rename-btn::part(button),
+body.theme-dark .timeline-duplicate-layer-btn::part(button),
+body.theme-dark .timeline-zoom-btn::part(button),
+body.theme-dark .timeline-move-layer-btn::part(button) {
+  background: #1a2830;
+  border-color: #36505f;
+  color: var(--color-text);
+}
+
+body.theme-dark .timeline-rename-btn::part(text),
+body.theme-dark .timeline-rename-btn::part(icon),
+body.theme-dark .timeline-duplicate-layer-btn::part(text),
+body.theme-dark .timeline-duplicate-layer-btn::part(icon),
+body.theme-dark .timeline-zoom-btn::part(text),
+body.theme-dark .timeline-zoom-btn::part(icon),
+body.theme-dark .timeline-delete-btn::part(text),
+body.theme-dark .timeline-delete-btn::part(icon),
+body.calcite-mode-dark .timeline-rename-btn::part(text),
+body.calcite-mode-dark .timeline-rename-btn::part(icon),
+body.calcite-mode-dark .timeline-duplicate-layer-btn::part(text),
+body.calcite-mode-dark .timeline-duplicate-layer-btn::part(icon),
+body.calcite-mode-dark .timeline-zoom-btn::part(text),
+body.calcite-mode-dark .timeline-zoom-btn::part(icon),
+body.calcite-mode-dark .timeline-delete-btn::part(text),
+body.calcite-mode-dark .timeline-delete-btn::part(icon),
+:root.calcite-mode-dark .timeline-rename-btn::part(text),
+:root.calcite-mode-dark .timeline-rename-btn::part(icon),
+:root.calcite-mode-dark .timeline-duplicate-layer-btn::part(text),
+:root.calcite-mode-dark .timeline-duplicate-layer-btn::part(icon),
+:root.calcite-mode-dark .timeline-zoom-btn::part(text),
+:root.calcite-mode-dark .timeline-zoom-btn::part(icon),
+:root.calcite-mode-dark .timeline-delete-btn::part(text),
+:root.calcite-mode-dark .timeline-delete-btn::part(icon) {
+  color: #ffffff;
+  fill: #ffffff;
+}
+
+body.theme-dark .timeline-rename-btn,
+body.theme-dark .timeline-duplicate-layer-btn,
+body.theme-dark .timeline-zoom-btn,
+body.theme-dark .timeline-delete-btn,
+body.calcite-mode-dark .timeline-rename-btn,
+body.calcite-mode-dark .timeline-duplicate-layer-btn,
+body.calcite-mode-dark .timeline-zoom-btn,
+body.calcite-mode-dark .timeline-delete-btn,
+:root.calcite-mode-dark .timeline-rename-btn,
+:root.calcite-mode-dark .timeline-duplicate-layer-btn,
+:root.calcite-mode-dark .timeline-zoom-btn,
+:root.calcite-mode-dark .timeline-delete-btn {
+  --calcite-button-text-color: #ffffff !important;
+  --calcite-button-icon-color: #ffffff !important;
+}
+
+body.theme-dark #timeline-layers-panel {
+  background: #121d24;
+  border-right-color: var(--color-border);
+}
+
+body.theme-dark #timeline-tracks-container {
+  background: #0f171c;
+}
+
+body.theme-dark .timeline-layer-name {
+  color: #ffffff;
+}
+
+body.theme-dark .timeline-clip {
+  background: rgba(74, 167, 200, 0.24);
+  background-image: linear-gradient(
+    135deg,
+    rgba(36, 63, 79, 0.8) 0%,
+    rgba(61, 118, 141, 0.75) 100%
+  );
+  border-color: rgba(171, 218, 237, 0.4);
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+body.theme-dark #timeline-delete-clip-btn::part(button),
+body.theme-dark .timeline-delete-btn::part(button) {
+  background: #0a0a0a;
+  border-color: #3a3a3a;
+  color: #ffffff;
+}
+
+body.theme-dark #timeline-delete-clip-btn:hover::part(button),
+body.theme-dark .timeline-delete-btn:hover::part(button) {
+  background: #1a1a1a;
+  border-color: #5a5a5a;
+  color: #ffffff;
+}
+
+body.theme-dark .animation-type-option {
+  background: #1a2830;
+  border-color: #36505f;
+  color: #eaf3f8;
+}
+
+body.theme-dark .animation-type-option:hover {
+  background: #21323b;
+  border-color: #6ca99b;
+}
+
+body.theme-dark .animation-type-option:active {
+  background: #223940;
+  border-color: #7bc6b3;
+  box-shadow: 0 0 0 2px rgba(122, 199, 176, 0.28);
+}
+
+body.theme-dark .style-option-btn {
+  background: #1a2830;
+  border-color: #36505f;
+  color: #eaf3f8;
+}
+
+body.theme-dark .style-option-btn:hover {
+  background: #21323b;
+  border-color: #6ca99b;
+}
+
+body.theme-dark .style-option-btn.selected {
+  background: #223940;
+  border-color: #7bc6b3;
+  box-shadow: 0 0 0 2px rgba(122, 199, 176, 0.28);
+}
+
+body.theme-dark .animation-beta-chip {
+  --calcite-chip-background-color: rgba(255, 193, 7, 0.22);
+  --calcite-chip-text-color: #ffe7a1;
+  --calcite-chip-border-color: rgba(255, 193, 7, 0.5);
+}
+
+body.theme-dark #timeline-ruler {
+  border-bottom-color: #2b3a44;
+}
+
+body.theme-dark #timeline-panel-resizer {
+  background: rgba(122, 199, 176, 0.12);
+  border-left-color: rgba(122, 199, 176, 0.22);
+  border-right-color: rgba(122, 199, 176, 0.22);
+}
+
+body.theme-dark.is-mobile #mobile-header,
+body.theme-dark.is-mobile #mobile-animation-suggestions,
+body.theme-dark.is-mobile #export-section {
+  background: #121d24;
+  border-color: var(--color-border);
 }
 
 .basemap-bg-picker {
@@ -334,6 +705,7 @@ body {
 .topbar-github-link {
   width: 26px;
   height: 26px;
+  color: #0a4c66;
 }
 
 .topbar-github-link svg {
@@ -376,6 +748,12 @@ body {
   align-items: center;
   justify-content: center;
   transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+
+
+body.theme-dark #map-loading-overlay {
+  background: #0f171c;
 }
 
 #map-loading-overlay.is-hidden {
@@ -633,6 +1011,13 @@ body {
   box-shadow: 0 6px 12px rgba(10, 76, 102, 0.18);
 }
 
+body.theme-dark .panel-ai-btn::part(button),
+body.theme-dark .panel-ai-btn::part(text),
+body.theme-dark .panel-ai-btn::part(icon) {
+  color: #f3f7fb;
+  fill: #f3f7fb;
+}
+
 .panel-ai-btn::part(button):hover {
   background-size: 240% 240%;
 }
@@ -670,6 +1055,14 @@ body {
   outline-offset: 2px;
 }
 
+.panel-github-link.topbar-github-link {
+  color: #0a4c66;
+}
+
+body.theme-dark .panel-github-link.topbar-github-link {
+  color: var(--color-text);
+}
+
 .ai-dialog-body {
   display: flex;
   flex-direction: column;
@@ -692,6 +1085,10 @@ body {
   margin: 0;
   color: #b11717;
   font-weight: 600;
+}
+
+body.theme-dark .ai-dialog-note {
+  color: #ff6b6b;
 }
 
 .ai-error {
@@ -801,12 +1198,12 @@ body.timeline-panel-resizing {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(10, 76, 102, 0.15);
-  border-radius: 10px;
-  box-shadow: 0 6px 14px rgba(10, 76, 102, 0.12);
-  backdrop-filter: blur(6px);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 #map-context-menu {
@@ -825,6 +1222,14 @@ body.timeline-panel-resizing {
   transform-origin: top left;
   pointer-events: none;
   transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+body.theme-dark #map-context-menu,
+body.calcite-mode-dark #map-context-menu,
+:root.calcite-mode-dark #map-context-menu {
+  background: #1a2830;
+  border-color: #36505f;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
 }
 
 #map-context-menu.is-open {
@@ -872,6 +1277,24 @@ body.timeline-panel-resizing {
   background: rgba(10, 76, 102, 0.14);
 }
 
+body.theme-dark .map-context-menu-item,
+body.calcite-mode-dark .map-context-menu-item,
+:root.calcite-mode-dark .map-context-menu-item {
+  color: #f3f7fb;
+}
+
+body.theme-dark .map-context-menu-item:hover,
+body.calcite-mode-dark .map-context-menu-item:hover,
+:root.calcite-mode-dark .map-context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+body.theme-dark .map-context-menu-item:active,
+body.calcite-mode-dark .map-context-menu-item:active,
+:root.calcite-mode-dark .map-context-menu-item:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .map-context-menu-item.danger {
   color: var(--color-danger);
 }
@@ -887,8 +1310,39 @@ body.timeline-panel-resizing {
   margin: 4px 6px;
 }
 
+body.theme-dark .map-context-menu-divider,
+body.calcite-mode-dark .map-context-menu-divider,
+:root.calcite-mode-dark .map-context-menu-divider {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 #delete-layer-btn {
   display: none;
+}
+
+#delete-layer-btn::part(button),
+#delete-layer-btn:hover::part(button),
+#delete-layer-btn:focus-visible::part(button) {
+  color: #ffffff !important;
+}
+
+#delete-layer-btn::part(icon),
+#delete-layer-btn::part(text) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
+body.theme-dark #delete-layer-btn::part(button),
+body.theme-dark #delete-layer-btn::part(text),
+body.theme-dark #delete-layer-btn::part(icon),
+body.calcite-mode-dark #delete-layer-btn::part(button),
+body.calcite-mode-dark #delete-layer-btn::part(text),
+body.calcite-mode-dark #delete-layer-btn::part(icon),
+:root.calcite-mode-dark #delete-layer-btn::part(button),
+:root.calcite-mode-dark #delete-layer-btn::part(text),
+:root.calcite-mode-dark #delete-layer-btn::part(icon) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
 }
 
 #delete-layer-btn.show {
@@ -930,11 +1384,44 @@ arcgis-map {
   display: inline-flex;
 }
 
+body.theme-dark #rotation-button::part(button),
+body.theme-dark #rotation-button::part(text),
+body.theme-dark #rotation-button::part(icon),
+body.calcite-mode-dark #rotation-button::part(button),
+body.calcite-mode-dark #rotation-button::part(text),
+body.calcite-mode-dark #rotation-button::part(icon),
+:root.calcite-mode-dark #rotation-button::part(button),
+:root.calcite-mode-dark #rotation-button::part(text),
+:root.calcite-mode-dark #rotation-button::part(icon) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
 #play-button {
   position: absolute;
   bottom: 30px;
   left: 30px;
   z-index: 1000;
+  --calcite-color-brand: #0a4c66;
+  --calcite-color-brand-hover: #0a4c66;
+  --calcite-color-brand-press: #0a4c66;
+  --calcite-button-color: #0a4c66;
+  --calcite-button-color-hover: #0a4c66;
+  --calcite-button-color-press: #0a4c66;
+}
+
+#play-button::part(button),
+#play-button:hover::part(button),
+#play-button:focus-visible::part(button) {
+  background-color: #0a4c66 !important;
+  border-color: #0a4c66 !important;
+  color: #ffffff !important;
+}
+
+#play-button::part(text),
+#play-button::part(icon) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
 }
 
 #side-panel {
@@ -1193,6 +1680,14 @@ body.is-mobile #ai-ask-modal {
 #export-cancel-btn::part(button) {
   padding: 4px 10px;
   font-size: 11px;
+}
+
+body.theme-dark #export-cancel-btn::part(button),
+body.theme-dark #export-cancel-btn::part(text),
+body.theme-dark #export-cancel-btn::part(icon) {
+  color: #f3f7fb;
+  fill: #f3f7fb;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 #export-preview-close {
@@ -1456,6 +1951,24 @@ body.is-mobile #ai-ask-modal {
 #gif-download-btn {
   margin-top: 10px;
   flex: 0 0 auto;
+}
+
+#gif-download-btn::part(button) {
+  background: #0a4c66 !important;
+  border-color: #0a4c66 !important;
+  color: #ffffff !important;
+}
+
+body.theme-dark #gif-download-btn::part(button) {
+  background: #0a4c66 !important;
+  border-color: #0a4c66 !important;
+  color: #ffffff !important;
+}
+
+#gif-download-btn::part(text),
+#gif-download-btn::part(icon) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
 }
 
 .export-attribution-copy {
@@ -2128,6 +2641,120 @@ body.is-mobile #ai-ask-modal {
   margin-bottom: 16px;
 }
 
+body.theme-dark #import-geojson-btn::part(button),
+body.theme-dark #import-csv-btn::part(button),
+body.theme-dark #add-feature-layer-btn::part(button),
+body.theme-dark #confirm-cancel::part(button),
+body.theme-dark #confirm-accept::part(button),
+body.calcite-mode-dark #import-geojson-btn::part(button),
+body.calcite-mode-dark #import-csv-btn::part(button),
+body.calcite-mode-dark #add-feature-layer-btn::part(button),
+body.calcite-mode-dark #confirm-cancel::part(button),
+body.calcite-mode-dark #confirm-accept::part(button),
+:root.calcite-mode-dark #import-geojson-btn::part(button),
+:root.calcite-mode-dark #import-csv-btn::part(button),
+:root.calcite-mode-dark #add-feature-layer-btn::part(button),
+:root.calcite-mode-dark #confirm-cancel::part(button),
+:root.calcite-mode-dark #confirm-accept::part(button) {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+body.theme-dark #import-geojson-btn,
+body.theme-dark #import-csv-btn,
+body.theme-dark #add-feature-layer-btn,
+body.theme-dark #menu-new-project-btn,
+body.theme-dark #confirm-cancel,
+body.theme-dark #confirm-accept,
+body.calcite-mode-dark #import-geojson-btn,
+body.calcite-mode-dark #import-csv-btn,
+body.calcite-mode-dark #add-feature-layer-btn,
+body.calcite-mode-dark #menu-new-project-btn,
+body.calcite-mode-dark #confirm-cancel,
+body.calcite-mode-dark #confirm-accept,
+:root.calcite-mode-dark #import-geojson-btn,
+:root.calcite-mode-dark #import-csv-btn,
+:root.calcite-mode-dark #add-feature-layer-btn,
+:root.calcite-mode-dark #menu-new-project-btn,
+:root.calcite-mode-dark #confirm-cancel,
+:root.calcite-mode-dark #confirm-accept {
+  --calcite-button-text-color: #ffffff !important;
+  --calcite-button-text-color-press: #ffffff !important;
+  --calcite-button-icon-color: #ffffff !important;
+  --calcite-button-icon-color-press: #ffffff !important;
+  --calcite-button-border-color: rgba(255, 255, 255, 0.56) !important;
+  --calcite-button-background-color: rgba(255, 255, 255, 0.12) !important;
+  --calcite-button-background-color-hover: rgba(255, 255, 255, 0.18) !important;
+  --calcite-button-background-color-press: rgba(255, 255, 255, 0.24) !important;
+}
+
+body.theme-dark #layer-import-advanced calcite-button,
+body.theme-dark #confirm-dialog calcite-button,
+body.calcite-mode-dark #layer-import-advanced calcite-button,
+body.calcite-mode-dark #confirm-dialog calcite-button,
+:root.calcite-mode-dark #layer-import-advanced calcite-button,
+:root.calcite-mode-dark #confirm-dialog calcite-button {
+  --calcite-button-text-color: #ffffff !important;
+  --calcite-button-icon-color: #ffffff !important;
+  --calcite-button-border-color: rgba(255, 255, 255, 0.56) !important;
+}
+
+body.theme-dark calcite-dialog .dialog-footer calcite-button,
+body.calcite-mode-dark calcite-dialog .dialog-footer calcite-button,
+:root.calcite-mode-dark calcite-dialog .dialog-footer calcite-button {
+  --calcite-button-text-color: #ffffff !important;
+  --calcite-button-icon-color: #ffffff !important;
+}
+
+body.theme-dark calcite-dialog .dialog-footer calcite-button[appearance="outline"],
+body.calcite-mode-dark calcite-dialog .dialog-footer calcite-button[appearance="outline"],
+:root.calcite-mode-dark calcite-dialog .dialog-footer calcite-button[appearance="outline"] {
+  --calcite-button-border-color: rgba(255, 255, 255, 0.56) !important;
+  --calcite-button-background-color: rgba(255, 255, 255, 0.12) !important;
+  --calcite-button-background-color-hover: rgba(255, 255, 255, 0.18) !important;
+  --calcite-button-background-color-press: rgba(255, 255, 255, 0.24) !important;
+}
+
+body.theme-dark #import-geojson-btn::part(text),
+body.theme-dark #import-geojson-btn::part(icon),
+body.theme-dark #import-csv-btn::part(text),
+body.theme-dark #import-csv-btn::part(icon),
+body.theme-dark #add-feature-layer-btn::part(text),
+body.theme-dark #add-feature-layer-btn::part(icon),
+body.theme-dark #menu-new-project-btn::part(text),
+body.theme-dark #menu-new-project-btn::part(icon),
+body.theme-dark #confirm-cancel::part(text),
+body.theme-dark #confirm-cancel::part(icon),
+body.theme-dark #confirm-accept::part(text),
+body.theme-dark #confirm-accept::part(icon),
+body.calcite-mode-dark #import-geojson-btn::part(text),
+body.calcite-mode-dark #import-geojson-btn::part(icon),
+body.calcite-mode-dark #import-csv-btn::part(text),
+body.calcite-mode-dark #import-csv-btn::part(icon),
+body.calcite-mode-dark #add-feature-layer-btn::part(text),
+body.calcite-mode-dark #add-feature-layer-btn::part(icon),
+body.calcite-mode-dark #menu-new-project-btn::part(text),
+body.calcite-mode-dark #menu-new-project-btn::part(icon),
+body.calcite-mode-dark #confirm-cancel::part(text),
+body.calcite-mode-dark #confirm-cancel::part(icon),
+body.calcite-mode-dark #confirm-accept::part(text),
+body.calcite-mode-dark #confirm-accept::part(icon),
+:root.calcite-mode-dark #import-geojson-btn::part(text),
+:root.calcite-mode-dark #import-geojson-btn::part(icon),
+:root.calcite-mode-dark #import-csv-btn::part(text),
+:root.calcite-mode-dark #import-csv-btn::part(icon),
+:root.calcite-mode-dark #add-feature-layer-btn::part(text),
+:root.calcite-mode-dark #add-feature-layer-btn::part(icon),
+:root.calcite-mode-dark #menu-new-project-btn::part(text),
+:root.calcite-mode-dark #menu-new-project-btn::part(icon),
+:root.calcite-mode-dark #confirm-cancel::part(text),
+:root.calcite-mode-dark #confirm-cancel::part(icon),
+:root.calcite-mode-dark #confirm-accept::part(text),
+:root.calcite-mode-dark #confirm-accept::part(icon) {
+  color: #ffffff;
+  fill: #ffffff;
+}
+
 .styled-hr {
   border: none;
   border-top: 1px solid var(--color-border);
@@ -2174,6 +2801,7 @@ body.is-mobile #ai-ask-modal {
 #layers-accordion calcite-accordion-item::part(actions-end) {
   margin-left: auto;
   flex: 0 0 auto;
+  padding: 0;
 }
 
 .layer-item-content {
@@ -2322,6 +2950,15 @@ calcite-accordion-item::part(toggle-icon) {
 .layer-action-delete::part(icon),
 .layer-action-delete::part(text) {
   color: #b33a2b;
+}
+
+.layer-action-delete::part(container) {
+  margin: 0;
+  padding: 0;
+  min-width: 24px;
+  min-height: 24px;
+  width: 24px;
+  height: 24px;
 }
 
 .layer-action-muted {
@@ -2886,6 +3523,50 @@ calcite-accordion-item::part(toggle-icon) {
   animation: preview-grow 1.6s ease-in-out infinite;
 }
 
+.animation-type-preview--dartHit {
+  width: 16px;
+  height: 16px;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  position: relative;
+  overflow: visible;
+  animation: preview-dart-hit 2s cubic-bezier(0.24, 0.82, 0.24, 1) infinite;
+}
+
+.animation-type-preview--dartHit::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 6px;
+  width: 14px;
+  height: 4px;
+  clip-path: polygon(0% 50%, 12% 20%, 34% 36%, 76% 36%, 100% 50%, 76% 64%, 34% 64%, 12% 80%);
+  background: linear-gradient(
+    90deg,
+    rgba(63, 75, 96, 0.98) 0%,
+    rgba(188, 200, 216, 0.98) 52%,
+    rgba(235, 224, 206, 0.98) 100%
+  );
+  box-shadow: 0 0 0 1px rgba(34, 43, 58, 0.28);
+  transform-origin: 72% 50%;
+}
+
+.animation-type-preview--dartHit::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 110, 138, 0.62);
+  background: rgba(240, 246, 255, 0.78);
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  animation: preview-dart-impact 2s ease-out infinite;
+}
+
 .animation-type-preview--polyline.animation-type-preview--neonTrail {
   background: linear-gradient(
     90deg,
@@ -3186,6 +3867,46 @@ calcite-accordion-item::part(toggle-icon) {
   }
   50% {
     transform: scale(1.4);
+  }
+}
+
+@keyframes preview-dart-hit {
+  0% {
+    transform: translate(-8px, 5px) rotate(-30deg) scale(1.45);
+    opacity: 0;
+  }
+  16% {
+    opacity: 1;
+  }
+  54% {
+    transform: translate(0.8px, -0.2px) rotate(-21deg) scale(1.05);
+    opacity: 1;
+  }
+  70% {
+    transform: translate(0, 0) rotate(-18deg) scale(0.97);
+  }
+  78% {
+    transform: translate(0.35px, 0.35px) rotate(-19.2deg) scale(0.99);
+  }
+  100% {
+    transform: translate(0.35px, 0.35px) rotate(-19.2deg) scale(0.99);
+    opacity: 0.93;
+  }
+}
+
+@keyframes preview-dart-impact {
+  0%,
+  55% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+  }
+  68% {
+    transform: translate(-50%, -50%) scale(0.95);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.75);
+    opacity: 0;
   }
 }
 
@@ -3643,7 +4364,7 @@ calcite-accordion-item::part(toggle-icon) {
   padding: 0 8px;
   border: 0;
   background: transparent;
-  color: #2a4d7a;
+  color: var(--color-text);
   font-size: 12px;
 }
 
@@ -3672,6 +4393,28 @@ calcite-accordion-item::part(toggle-icon) {
   background: transparent;
   border: 0;
   color: #a0392b;
+}
+
+body.theme-dark .menu-status-badge {
+  color: #d3e7f7;
+}
+
+body.theme-dark .menu-status-badge .project-status-icon {
+  background: #7bc6ff;
+  box-shadow: 0 0 0 2px rgba(123, 198, 255, 0.26);
+}
+
+body.theme-dark .menu-status-badge.project-status-dirty {
+  color: #ffb5a3;
+}
+
+body.theme-dark .menu-status-badge.project-status-dirty .project-status-icon {
+  background: #ff9f78;
+  box-shadow: 0 0 0 2px rgba(255, 159, 120, 0.26);
+}
+
+body.theme-dark .project-status-warning {
+  color: #ffd089;
 }
 
 .project-status-badge.project-status-dirty .project-status-icon {
@@ -3818,6 +4561,29 @@ calcite-select {
   gap: 4px;
 }
 
+body.theme-dark #timeline-controls calcite-button::part(button) {
+  background: #0a4c66;
+  color: #ffffff;
+}
+
+body.theme-dark #timeline-controls calcite-button,
+body.calcite-mode-dark #timeline-controls calcite-button,
+:root.calcite-mode-dark #timeline-controls calcite-button {
+  color: #ffffff !important;
+  --calcite-button-text-color: #ffffff !important;
+  --calcite-button-icon-color: #ffffff !important;
+}
+
+body.theme-dark #timeline-controls calcite-button::part(text),
+body.theme-dark #timeline-controls calcite-button::part(icon),
+body.calcite-mode-dark #timeline-controls calcite-button::part(text),
+body.calcite-mode-dark #timeline-controls calcite-button::part(icon),
+:root.calcite-mode-dark #timeline-controls calcite-button::part(text),
+:root.calcite-mode-dark #timeline-controls calcite-button::part(icon) {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
 #timeline-controls .timeline-icon-only::part(button) {
   padding: 6px;
   min-width: 28px;
@@ -3835,6 +4601,11 @@ calcite-select {
   color: var(--color-primary);
 }
 
+body.theme-dark #timeline-controls .timeline-toggle::part(button) {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #f3f7fb;
+}
+
 #timeline-controls .timeline-toggle[data-active="true"]::part(button) {
   background: rgba(122, 199, 176, 0.2);
   border-color: rgba(10, 76, 102, 0.35);
@@ -3845,6 +4616,11 @@ calcite-select {
   border: 1px solid rgba(10, 76, 102, 0.2);
   color: var(--color-primary);
   padding: 6px 8px;
+}
+
+body.theme-dark #timeline-controls .timeline-icon-btn::part(button) {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #f3f7fb;
 }
 
 #timeline-controls .timeline-icon-btn:hover::part(button) {
@@ -3858,6 +4634,11 @@ calcite-select {
 
 #timeline-delete-clip-btn::part(button) {
   background: #b42318;
+  color: #ffffff;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 #timeline-delete-clip-btn.show {
@@ -3881,6 +4662,15 @@ calcite-select {
   font-size: 12px;
   margin-left: 12px;
   white-space: nowrap;
+}
+
+body.theme-dark .timeline-duration {
+  color: #c3d0d9;
+}
+
+body.theme-dark #timeline-zoom-label {
+  color: #f3f7fb;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 #timeline-controls .timeline-duration-reset::part(button) {

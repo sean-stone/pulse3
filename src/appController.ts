@@ -53,6 +53,7 @@ import ffmpegCoreUrl from "@ffmpeg/core?url";
 import ffmpegWasmUrl from "@ffmpeg/core/wasm?url";
 let ffmpegClassWorkerUrl: string | null = null;
 let ffmpegCoreBaseUrl: string | null = null;
+const THUMBTACK_3D_STYLE = "thumbtack3d";
 
 const webglAnimationTypes = new Set([
   "neonTrail",
@@ -72,6 +73,7 @@ const webglAnimationTypes = new Set([
   "jitterSketch",
   "noiseDissolve",
   "ghostTrail",
+  "dartHit",
   "breathe",
   "pixelate",
   "timeGradient",
@@ -215,6 +217,7 @@ let isAddingFeatureLayer = false;
 
 let isRestoringProject = false;
 let projectSaveTimer: number | null = null;
+let thumbtackParallaxRafId: number | null = null;
 let pendingTextPlacement: { layerIndex: number } | null = null;
 let textPlacementHandle: { remove: () => void } | null = null;
 let activeTextLayerIndex: number | null = null;
@@ -449,7 +452,10 @@ const animationPlaybackConfig = {
   isPlaying: () => isPlaying,
   isScrubbingTimeline: () => timelineController.isScrubbingTimeline()
 };
-const applyAnimationsAtTime = (time: number) => applyAnimationsAtTimeFromState(animationPlaybackConfig, time);
+const applyAnimationsAtTime = (time: number) => {
+  applyAnimationsAtTimeFromState(animationPlaybackConfig, time);
+  scheduleThumbtackParallaxUpdate();
+};
 applyAnimationsAtTimeRef = applyAnimationsAtTime;
 const featureLayerState: FeatureLayerState = {
   getView: () => view,
@@ -843,6 +849,7 @@ async function applyProjectSnapshot(snapshot: unknown) {
     graphicsLayers.forEach((layerData) => {
       delete (layerData as any).__arrowLayer;
       delete (layerData as any).__barrageLayer;
+      delete (layerData as any).__dartLayer;
       delete (layerData as any).__weldSparkLayer;
       delete (layerData as any).__flightLayer;
       delete (layerData as any).__waypointLayer;
@@ -2452,6 +2459,7 @@ function getLayerOverlayLayers(layerData: LayerData) {
   return [
     (layerData as any).__arrowLayer,
     (layerData as any).__barrageLayer,
+    (layerData as any).__dartLayer,
     (layerData as any).__weldSparkLayer,
     (layerData as any).__flightLayer,
     (layerData as any).__waypointLayer
@@ -2466,6 +2474,7 @@ function clearLayerOverlayLayers(layerData: LayerData) {
   }
   delete (layerData as any).__arrowLayer;
   delete (layerData as any).__barrageLayer;
+  delete (layerData as any).__dartLayer;
   delete (layerData as any).__weldSparkLayer;
   delete (layerData as any).__flightLayer;
   delete (layerData as any).__waypointLayer;
@@ -2501,6 +2510,7 @@ async function resetProject() {
   graphicsLayers.forEach((layerData) => {
     delete (layerData as any).__arrowLayer;
     delete (layerData as any).__barrageLayer;
+    delete (layerData as any).__dartLayer;
     delete (layerData as any).__weldSparkLayer;
     delete (layerData as any).__flightLayer;
     delete (layerData as any).__waypointLayer;
@@ -2532,6 +2542,7 @@ async function resetProject() {
   isRestoringProject = false;
 }
 const pointPathStyles: Record<string, string> = {
+  "thumbtack3d": "M3 9.5 L8.4 12.3 L17.5 12.3 L22 14 L17.5 15.7 L8.4 15.7 L3 18.5 L5.1 14 Z",
   "home": "M12 3l9 8h-3v10h-5v-6h-2v6H6V11H3z",
   "map-pin": "M12 2c-3.3 0-6 2.7-6 6 0 4.5 6 12 6 12s6-7.5 6-12c0-3.3-2.7-6-6-6zm0 8.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 5.5 12 5.5s2.5 1.1 2.5 2.5S13.4 10.5 12 10.5z",
   "star": "M12 2l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17l-5.9 3.1 1.2-6.5L2.5 8.9 9.1 8z",
@@ -2820,6 +2831,30 @@ function toGeographicGeometry(geometry: any) {
   return geometry;
 }
 
+function toViewGeometry(geometry: any) {
+  if (!geometry || !view?.spatialReference) return geometry;
+  const spatialRef = geometry.spatialReference;
+  const viewSpatialRef = view.spatialReference;
+  if (!spatialRef) return geometry;
+  if (viewSpatialRef?.isWebMercator && (spatialRef.isGeographic || spatialRef.wkid === 4326)) {
+    return webMercatorUtils.geographicToWebMercator(geometry) ?? geometry;
+  }
+  if ((viewSpatialRef?.isGeographic || viewSpatialRef?.wkid === 4326) && spatialRef.isWebMercator) {
+    return webMercatorUtils.webMercatorToGeographic(geometry) ?? geometry;
+  }
+  return geometry;
+}
+
+function prepareLayerGeometryForSketch(layerData: LayerData) {
+  layerData.layer.graphics.forEach((graphic: any) => {
+    if (!graphic?.geometry) return;
+    const prepared = toViewGeometry(graphic.geometry);
+    if (prepared) {
+      graphic.geometry = prepared;
+    }
+  });
+}
+
 function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   if (!geometry) return null;
   if (geometry.type === "Point") {
@@ -2870,7 +2905,10 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     setProjectName(projectName, false);
   }
   if (view) {
-    reactiveUtils.watch(() => view.extent, () => scheduleProjectSave());
+    reactiveUtils.watch(() => view.extent, () => {
+      scheduleProjectSave();
+      scheduleThumbtackParallaxUpdate();
+    });
     setupCompassWatcher();
   }
   updateTimeline();
@@ -4177,12 +4215,22 @@ function selectLayer(index: number, focusGraphic = true) {
     sketchHasUpdateHandler = true;
   }
 
+  if (allowEditing) {
+    if (layerData.type === "polyline" || layerData.type === "polygon") {
+      restoreLayerGeometry(layerData);
+    }
+    prepareLayerGeometryForSketch(layerData);
+  }
+
   if (focusGraphic && !hasPathAnimation(layerData)) {
     const graphic =
       (layerData.layer.graphics as any).getItemAt?.(0) ??
       layerData.layer.graphics?.items?.[0];
     if (graphic && allowEditing) {
-      restoreLayerGeometry(layerData);
+      const prepared = toViewGeometry(graphic.geometry);
+      if (prepared) {
+        graphic.geometry = prepared;
+      }
       sketch.update(graphic);
     }
   }
@@ -4652,6 +4700,56 @@ function buildPointSymbol(style: PointStyle) {
   return symbol;
 }
 
+function applyThumbtackParallaxToLayer(layerData: LayerData) {
+  if (!view || layerData.type !== "point") return;
+  const style = layerData.pointStyle ?? defaultPointStyle;
+  if (style.style !== THUMBTACK_3D_STYLE) return;
+  const centerX = Number(view?.width) / 2;
+  const centerY = Number(view?.height) / 2;
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || centerX <= 0 || centerY <= 0) return;
+
+  const baseColor = parseColorToRgba(style.color);
+  const outlineColor = parseColorToRgba(style.outlineColor);
+
+  layerData.layer.graphics.forEach((graphic: any) => {
+    if (!graphic?.geometry || graphic.geometry.type !== "point") return;
+    if (!graphic?.symbol || graphic.symbol.type !== "simple-marker") return;
+    const screen = view.toScreen?.(graphic.geometry);
+    if (!screen || !Number.isFinite(screen.x) || !Number.isFinite(screen.y)) return;
+    const nx = Math.max(-1, Math.min(1, (screen.x - centerX) / centerX));
+    const ny = Math.max(-1, Math.min(1, (screen.y - centerY) / centerY));
+    const depth = 1 + (-ny) * 0.08;
+    const symbol = graphic.symbol.clone();
+    symbol.size = (style.size || defaultPointStyle.size) * depth;
+    symbol.angle = (style.angle ?? 0) + nx * 7;
+    symbol.xoffset = (style.xoffset ?? 0) + nx * 2.6;
+    symbol.yoffset = (style.yoffset ?? 0) + ny * 1.5;
+    symbol.color = [
+      Math.max(0, Math.min(255, Math.round(baseColor.r * (0.95 + nx * 0.06 - ny * 0.05)))),
+      Math.max(0, Math.min(255, Math.round(baseColor.g * (0.95 + nx * 0.06 - ny * 0.05)))),
+      Math.max(0, Math.min(255, Math.round(baseColor.b * (0.95 + nx * 0.06 - ny * 0.05)))),
+      Number.isFinite(baseColor.a) ? baseColor.a : 1
+    ];
+    symbol.outline = {
+      color: [outlineColor.r, outlineColor.g, outlineColor.b, Number.isFinite(outlineColor.a) ? outlineColor.a : 1],
+      width: Math.max(0, Number(style.outlineWidth) || 0)
+    };
+    graphic.symbol = symbol;
+  });
+}
+
+function scheduleThumbtackParallaxUpdate() {
+  if (thumbtackParallaxRafId !== null) {
+    return;
+  }
+  thumbtackParallaxRafId = requestAnimationFrame(() => {
+    thumbtackParallaxRafId = null;
+    graphicsLayers.forEach((layerData) => {
+      applyThumbtackParallaxToLayer(layerData);
+    });
+  });
+}
+
 function applyLayerStyle(layerData: LayerData) {
   layerData.layer.graphics.forEach((graphic: any) => {
     if (layerData.type === "point") {
@@ -4702,6 +4800,9 @@ function applyLayerStyle(layerData: LayerData) {
 
     graphic.symbol = symbol;
   });
+  if ((layerData.pointStyle?.style ?? defaultPointStyle.style) === THUMBTACK_3D_STYLE) {
+    scheduleThumbtackParallaxUpdate();
+  }
 }
 
 function ensureGeometryCache(layerData: LayerData, graphic: any) {
@@ -4993,12 +5094,15 @@ function updatePointAnimationPreview(color: string, outlineColor: string, style:
       container.querySelectorAll(".animation-type-preview--point")
     ) as HTMLElement[];
     previews.forEach((preview) => {
+      const usesPointStyle = !preview.classList.contains("animation-type-preview--dartHit");
       Array.from(preview.classList)
         .filter((cls) => cls.startsWith("point-style-"))
         .forEach((cls) => preview.classList.remove(cls));
-      preview.classList.add(`point-style-${style}`);
+      if (usesPointStyle) {
+        preview.classList.add(`point-style-${style}`);
+      }
       const path = pointPathStyles[style];
-      if (path) {
+      if (path && usesPointStyle) {
         const viewBox = style.startsWith("phosphor-") ? "0 0 1024 1024" : "0 0 24 24";
         preview.innerHTML = `<svg viewBox="${viewBox}" aria-hidden="true"><path d="${path}"></path></svg>`;
         preview.classList.add("animation-type-preview--icon");

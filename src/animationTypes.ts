@@ -5,6 +5,7 @@
     { value: "pulse", label: "Pulse" },
     { value: "bounce", label: "Bounce" },
     { value: "spin", label: "Spin" },
+    { value: "dartHit", label: "Over-Shoulder Dart Hit" },
     { value: "grow", label: "Grow" },
     { value: "glow", label: "Glow" },
     { value: "glowPulse", label: "Glow Pulse" },

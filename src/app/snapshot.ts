@@ -88,6 +88,36 @@ const explodeGeoJsonGeometry = (geometry: any) => {
   return [geometry];
 };
 
+const extractCoordinatePair = (coords: any): [number, number] | null => {
+  if (!Array.isArray(coords) || coords.length === 0) return null;
+  if (typeof coords[0] === "number") {
+    const x = Number(coords[0]);
+    const y = Number(coords[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return [x, y];
+  }
+  for (const value of coords) {
+    const nested = extractCoordinatePair(value);
+    if (nested) return nested;
+  }
+  return null;
+};
+
+const hasLikelyGeographicCoordinates = (features: ProjectSnapshot["features"] | undefined) => {
+  if (!Array.isArray(features) || !features.length) return false;
+  const sampleSize = Math.min(features.length, 50);
+  for (let index = 0; index < sampleSize; index += 1) {
+    const geometry = features[index]?.geometry;
+    const pair = extractCoordinatePair(geometry?.coordinates);
+    if (!pair) continue;
+    const [x, y] = pair;
+    if (Math.abs(x) <= 180 && Math.abs(y) <= 90) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | null => {
   if (!config.view) return null;
   const spatialReference = config.view?.spatialReference
@@ -286,9 +316,19 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
       });
     }
 
-    const spatialReference = meta.spatialReference?.wkid
-      ? { wkid: meta.spatialReference.wkid }
-      : config.view.spatialReference;
+    const storedWkid = Number(meta.spatialReference?.wkid);
+    const likelyGeographic = hasLikelyGeographicCoordinates(snapshot.features);
+    const shouldForceWgs84 =
+      likelyGeographic &&
+      Number.isFinite(storedWkid) &&
+      storedWkid !== 4326 &&
+      storedWkid !== 4269;
+
+    const spatialReference = shouldForceWgs84
+      ? { wkid: 4326 }
+      : Number.isFinite(storedWkid)
+        ? { wkid: storedWkid }
+        : config.view.spatialReference;
 
     const featuresByLayer = new Map<string, ProjectSnapshot["features"]>();
     (snapshot.features || []).forEach((feature) => {

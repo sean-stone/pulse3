@@ -11,6 +11,10 @@ function MapArea() {
           scale="s"
           appearance="solid"
           kind="danger"
+          style={{
+            "--calcite-button-text-color": "#ffffff",
+            "--calcite-button-icon-color": "#ffffff",
+          }}
         >
           Delete
         </calcite-button>
@@ -22,6 +26,10 @@ function MapArea() {
         scale="l"
         appearance="solid"
         kind="brand"
+        style={{
+          "--calcite-button-text-color": "#ffffff",
+          "--calcite-button-icon-color": "#ffffff",
+        }}
       >
         Play from start
       </calcite-button>

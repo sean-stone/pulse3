@@ -52,6 +52,12 @@ function Modals() {
                   <span className="point-style-swatch point-style-swatch--map-pin"></span>
                   Map pin
                 </button>
+                <button type="button" className="style-option-btn" data-value="thumbtack3d">
+                  <svg className="point-style-swatch-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 9.5 L8.4 12.3 L17.5 12.3 L22 14 L17.5 15.7 L8.4 15.7 L3 18.5 L5.1 14 Z"></path>
+                  </svg>
+                  Thumbtack 3D
+                </button>
                 <button type="button" className="style-option-btn" data-value="star">
                   <span className="point-style-swatch point-style-swatch--star"></span>
                   Star
@@ -1243,7 +1249,16 @@ function Modals() {
       >
         <div className="export-preview-header">
           <span></span>
-          <calcite-button id="export-cancel-btn" appearance="outline" scale="s" hidden>
+          <calcite-button
+            id="export-cancel-btn"
+            appearance="outline"
+            scale="s"
+            hidden
+            style={{
+              "--calcite-button-text-color": "#f3f7fb",
+              "--calcite-button-icon-color": "#f3f7fb",
+            }}
+          >
             Cancel render
           </calcite-button>
           <button type="button" id="export-preview-close">
@@ -1277,7 +1292,20 @@ function Modals() {
             Copy
           </button>
         </div>
-        <calcite-button id="gif-download-btn" icon-start="download" scale="m" width="full" disabled>
+        <calcite-button
+          id="gif-download-btn"
+          icon-start="download"
+          scale="m"
+          width="full"
+          disabled
+          style={{
+            "--calcite-button-text-color": "#ffffff",
+            "--calcite-button-icon-color": "#ffffff",
+            "--calcite-button-color": "#0a4c66",
+            "--calcite-button-color-hover": "#0a4c66",
+            "--calcite-button-color-press": "#0a4c66",
+          }}
+        >
           Download
         </calcite-button>
       </calcite-dialog>
@@ -1309,13 +1337,25 @@ function Modals() {
           <div id="ai-error" className="ai-error" role="status" aria-live="polite"></div>
         </div>
         <div slot="footer" className="dialog-footer">
-          <calcite-button id="ai-cancel-btn" appearance="outline">
+          <calcite-button
+            id="ai-cancel-btn"
+            appearance="outline"
+          >
             Cancel
           </calcite-button>
-          <calcite-button id="ai-clear-btn" appearance="outline">
+          <calcite-button
+            id="ai-clear-btn"
+            appearance="outline"
+          >
             Clear
           </calcite-button>
-          <calcite-button id="ai-generate-btn">
+          <calcite-button
+            id="ai-generate-btn"
+            style={{
+              "--calcite-button-text-color": "#ffffff",
+              "--calcite-button-icon-color": "#ffffff",
+            }}
+          >
             Generate
           </calcite-button>
         </div>

@@ -1,6 +1,21 @@
 import Modals from "./Modals";
 
-function SidePanel() {
+type SidePanelProps = {
+  themeMode: "light" | "dark";
+};
+
+function SidePanel({ themeMode }: SidePanelProps) {
+  const whereButtonStyle =
+    themeMode === "dark"
+      ? ({
+          "--calcite-button-text-color": "#ffffff",
+          "--calcite-button-icon-color": "#ffffff",
+        } as React.CSSProperties)
+      : ({
+          "--calcite-button-text-color": "#0a4c66",
+          "--calcite-button-icon-color": "#0a4c66",
+        } as React.CSSProperties);
+
   return (
     <div id="side-panel" data-testid="side-panel">
       <Modals />
@@ -22,7 +37,12 @@ function SidePanel() {
               Welcome to Pulse! To get started, draw onto the map the features you want to animate.
             </p>
             <div className="stepper-action-row">
-              <calcite-button id="onboarding-where-btn" scale="s" appearance="outline">
+              <calcite-button
+                id="onboarding-where-btn"
+                scale="s"
+                appearance="outline"
+                style={whereButtonStyle}
+              >
                 Where?
               </calcite-button>
             </div>
@@ -179,9 +199,18 @@ function SidePanel() {
                   Custom resolution overrides the current aspect ratio (examples: 1080 x 1080, 1920 x 1080).
                 </div>
               </div>
-              <calcite-button id="export-action-btn" icon-start="download" scale="m" width="full">
-                Export
-              </calcite-button>
+          <calcite-button
+            id="export-action-btn"
+            icon-start="download"
+            scale="m"
+            width="full"
+            style={{
+              "--calcite-button-text-color": themeMode === "dark" ? "#ffffff" : undefined,
+              "--calcite-button-icon-color": themeMode === "dark" ? "#ffffff" : undefined,
+            }}
+          >
+            Export
+          </calcite-button>
             </div>
           </calcite-stepper-item>
         </calcite-stepper>

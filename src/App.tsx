@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { bootApp } from "./appController";
 import { APP_VERSION } from "./app/constants";
@@ -7,9 +7,74 @@ import SidePanel from "./components/SidePanel";
 import Timeline from "./components/Timeline";
 
 export default function App() {
+  const [themeMode, setThemeMode] = useState<"light" | "dark">(() => {
+    if (typeof window === "undefined") return "light";
+    const saved = window.localStorage?.getItem("pulse-theme");
+    if (saved === "light" || saved === "dark") return saved;
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
   useEffect(() => {
     bootApp();
   }, []);
+
+  useEffect(() => {
+    const isDark = themeMode === "dark";
+    document.body.classList.toggle("theme-dark", isDark);
+    document.body.classList.toggle("calcite-mode-dark", isDark);
+    document.body.classList.toggle("calcite-mode-light", !isDark);
+    document.documentElement.classList.toggle("calcite-mode-dark", isDark);
+    document.documentElement.classList.toggle("calcite-mode-light", !isDark);
+    window.localStorage?.setItem("pulse-theme", themeMode);
+  }, [themeMode]);
+
+  const menuButtonStyle =
+    themeMode === "dark"
+      ? ({
+          "--calcite-color-text-1": "#f3f7fb",
+          "--calcite-color-text-2": "#c3d0d9",
+          "--calcite-button-text-color": "#f3f7fb",
+          "--calcite-button-icon-color": "#f3f7fb",
+        } as React.CSSProperties)
+      : ({
+          "--calcite-color-text-1": "#0a4c66",
+          "--calcite-color-text-2": "#0a4c66",
+          "--calcite-button-text-color": "#0a4c66",
+          "--calcite-button-icon-color": "#0a4c66",
+        } as React.CSSProperties);
+
+  const menuTextStyle =
+    themeMode === "dark"
+      ? ({ color: "#f3f7fb" } as React.CSSProperties)
+      : ({ color: "#0a4c66" } as React.CSSProperties);
+
+  const aiButtonStyle =
+    themeMode === "dark"
+      ? ({
+          "--calcite-button-text-color": "#ffffff",
+          "--calcite-button-icon-color": "#ffffff",
+        } as React.CSSProperties)
+      : undefined;
+
+  const rotateButtonStyle =
+    themeMode === "dark"
+      ? ({
+          "--calcite-button-text-color": "#ffffff",
+          "--calcite-button-icon-color": "#ffffff",
+        } as React.CSSProperties)
+      : undefined;
+
+  const darkOutlineButtonStyle =
+    themeMode === "dark"
+      ? ({
+          "--calcite-button-text-color": "#ffffff",
+          "--calcite-button-icon-color": "#ffffff",
+          "--calcite-button-border-color": "rgba(255, 255, 255, 0.56)",
+          "--calcite-button-background-color": "rgba(255, 255, 255, 0.12)",
+          "--calcite-button-background-color-hover": "rgba(255, 255, 255, 0.18)",
+          "--calcite-button-background-color-press": "rgba(255, 255, 255, 0.24)",
+        } as React.CSSProperties)
+      : undefined;
 
   return (
     <>
@@ -55,6 +120,7 @@ export default function App() {
                 scale="s"
                 appearance="transparent"
                 icon-start="file"
+                style={menuButtonStyle}
               >
                 New Project
               </calcite-button>
@@ -64,6 +130,7 @@ export default function App() {
                 scale="s"
                 appearance="transparent"
                 icon-start="folder-open"
+                style={menuButtonStyle}
               >
                 Open Project File
               </calcite-button>
@@ -73,6 +140,7 @@ export default function App() {
                 scale="s"
                 appearance="transparent"
                 icon-start="export"
+                style={menuButtonStyle}
               >
                 Export Project File
               </calcite-button>
@@ -82,6 +150,7 @@ export default function App() {
                 scale="s"
                 appearance="transparent"
                 icon-start="save"
+                style={menuButtonStyle}
               >
                 Auto Save
               </calcite-button>
@@ -92,6 +161,7 @@ export default function App() {
                 aria-live="polite"
                 aria-label="Saved"
                 title="Saved"
+                style={menuTextStyle}
               >
                 <span className="project-status-icon" aria-hidden="true"></span>
                 <span className="project-status-text" data-status-text>
@@ -115,11 +185,14 @@ export default function App() {
                 scale="s"
                 appearance="transparent"
                 icon-start="keyboard"
+                style={menuButtonStyle}
               >
                 Keyboard Shortcuts
               </calcite-button>
             </div>
-            <div className="menu-bar-title">Pulse {APP_VERSION}</div>
+            <div className="menu-bar-title" style={menuTextStyle}>
+              Pulse {APP_VERSION}
+            </div>
             <div className="menu-bar-right">
               <calcite-button
                 id="about-pulse-btn"
@@ -127,6 +200,7 @@ export default function App() {
                 scale="s"
                 appearance="transparent"
                 icon-start="information"
+                style={menuButtonStyle}
               >
                 About Pulse
               </calcite-button>
@@ -142,6 +216,17 @@ export default function App() {
                   <path d="M12 1.5c-5.8 0-10.5 4.7-10.5 10.5 0 4.6 3 8.5 7.1 9.9.5.1.7-.2.7-.5v-2.1c-2.9.6-3.5-1.2-3.5-1.2-.5-1.1-1.2-1.4-1.2-1.4-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 .1 1.6.7 1.9 1.2.1-.8.4-1.4.7-1.7-2.3-.2-4.6-1.1-4.6-5.1 0-1.1.4-2 1.1-2.8-.1-.2-.5-1.3.1-2.7 0 0 .9-.3 2.8 1.1.8-.2 1.7-.3 2.6-.3s1.8.1 2.6.3c1.9-1.4 2.8-1.1 2.8-1.1.6 1.4.2 2.5.1 2.7.7.7 1.1 1.7 1.1 2.8 0 4-2.3 4.9-4.6 5.1.4.3.8 1 .8 2v3c0 .3.2.6.7.5 4.2-1.4 7.1-5.3 7.1-9.9 0-5.8-4.7-10.5-10.5-10.5z" />
                 </svg>
               </a>
+              <calcite-button
+                id="theme-toggle-btn"
+                className="theme-toggle-btn menu-button"
+                appearance="transparent"
+                scale="s"
+                icon-start={themeMode === "dark" ? "brightness" : "moon"}
+                onClick={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
+                aria-label={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
+                title={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
+                style={menuButtonStyle}
+              ></calcite-button>
             </div>
           </div>
           <div id="toolbar-bar" role="toolbar" aria-label="Quick tools">
@@ -190,6 +275,7 @@ export default function App() {
                         scale="s"
                         appearance="outline"
                         width="full"
+                        style={darkOutlineButtonStyle}
                       >
                         GeoJSON
                       </calcite-button>
@@ -199,6 +285,7 @@ export default function App() {
                         scale="s"
                         appearance="outline"
                         width="full"
+                        style={darkOutlineButtonStyle}
                       >
                         CSV
                       </calcite-button>
@@ -217,7 +304,7 @@ export default function App() {
                       scale="s"
                       appearance="outline"
                       width="full"
-                      style={{ marginTop: 8 }}
+                      style={{ marginTop: 8, ...(darkOutlineButtonStyle ?? {}) }}
                     >
                       Add FeatureLayer
                     </calcite-button>
@@ -276,6 +363,7 @@ export default function App() {
                 appearance="outline"
                 aria-label="Rotate map"
                 title="Rotate map"
+                style={rotateButtonStyle}
               ></calcite-button>
               <calcite-button
                 id="ai-ask-btn"
@@ -283,6 +371,7 @@ export default function App() {
                 appearance="solid"
                 className="panel-ai-btn"
                 icon-start="automation"
+                style={aiButtonStyle}
               >
                 AI Animation Agent
               </calcite-button>
@@ -298,7 +387,7 @@ export default function App() {
             <div id="timeline-resizer" data-testid="timeline-resizer"></div>
             <Timeline />
           </div>
-          <SidePanel />
+          <SidePanel themeMode={themeMode} />
         </div>
       </div>
     </>

@@ -188,6 +188,11 @@ const arrowMarkerPath = "M12 2 L22 22 L12 17 L2 22 Z";
 const planeMarkerPath = "M12 1 L14.8 8.8 L22.5 11 L14.8 13.2 L12 23 L9.2 13.2 L1.5 11 L9.2 8.8 Z";
 const cartoonPlaneMarkerPath =
   "M2 12 L8 10 L9 6 L15 4 L21 7 L16 10 L23 12 L16 14 L21 17 L15 20 L9 18 L8 14 Z";
+const dartMarkerPath =
+  "M1.5 6.5 L7.8 9.8 L18.8 9.8 L24 12 L18.8 14.2 L7.8 14.2 L1.5 17.5 L3.7 12 Z";
+const dartCoreMarkerPath =
+  "M5.2 10.5 L19.6 10.5 L22.2 12 L19.6 13.5 L5.2 13.5 L4.1 12 Z";
+const dartFinMarkerPath = "M3 12 L20.5 5.6 L20.5 18.4 Z";
 
 const toRgbaArray = (color: string, alpha = 1) => {
   try {
@@ -338,6 +343,22 @@ const toViewPolyline = (geometry: Polyline, view: any) => {
   return workingGeometry;
 };
 
+const toViewPoint = (geometry: Point, view: any) => {
+  let workingGeometry = geometry;
+  if (
+    view?.spatialReference?.isWebMercator &&
+    geometry.spatialReference?.isGeographic
+  ) {
+    workingGeometry = webMercatorUtils.geographicToWebMercator(geometry) as Point;
+  } else if (
+    view?.spatialReference?.isGeographic &&
+    geometry.spatialReference?.isWebMercator
+  ) {
+    workingGeometry = webMercatorUtils.webMercatorToGeographic(geometry) as Point;
+  }
+  return workingGeometry;
+};
+
 const buildVertexStops = (geometry: Polyline) => {
   const stops: VertexStop[] = [];
   let total = 0;
@@ -402,6 +423,25 @@ const getBarrageLayer = (layerData: LayerData, view: any) => {
 
 const clearBarrageLayer = (layerData: LayerData) => {
   const layer = (layerData as any).__barrageLayer as GraphicsLayer | undefined;
+  if (!layer) return;
+  layer.removeAll();
+  layer.visible = false;
+};
+
+const getDartLayer = (layerData: LayerData, view: any) => {
+  const existing = (layerData as any).__dartLayer as GraphicsLayer | undefined;
+  if (existing) return existing;
+  const layer = new GraphicsLayer({
+    listMode: "hide",
+    opacity: 1
+  });
+  view?.map?.add(layer);
+  (layerData as any).__dartLayer = layer;
+  return layer;
+};
+
+const clearDartLayer = (layerData: LayerData) => {
+  const layer = (layerData as any).__dartLayer as GraphicsLayer | undefined;
   if (!layer) return;
   layer.removeAll();
   layer.visible = false;
@@ -517,6 +557,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       applyBaseLayerEffect(layerData);
       clearArrowLayer(layerData);
       clearBarrageLayer(layerData);
+      clearDartLayer(layerData);
       clearWeldSparkLayer(layerData);
       clearFlightLayer(layerData);
       clearWaypointLayer(layerData);
@@ -609,6 +650,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let hasFlightRouteCartoonAnimation = false;
     let hasWaypointRouteAnimation = false;
     let hasWaypointRouteCartoonAnimation = false;
+    let dartProgress: number | null = null;
     let arrowProgress: number | null = null;
     let barrageProgress: number | null = null;
     let jitterProgress: number | null = null;
@@ -746,6 +788,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           case "waypointRouteCartoon":
             waypointProgress = progress;
             waypointMode = "cartoon";
+            opacity = 1;
+            break;
+          case "dartHit":
+            dartProgress = progress;
             opacity = 1;
             break;
           case "arrowMarch":
@@ -921,13 +967,398 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     if (layerData.type === "point") {
       const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
       const baseAngle = layerData.pointStyle?.angle ?? 0;
+      const dartReveal = dartProgress !== null ? clamp((dartProgress - 0.78) / 0.22, 0, 1) : 1;
       layerData.layer.graphics.forEach((graphic: any) => {
         if (!graphic?.symbol || graphic.symbol.type !== "simple-marker") return;
         const symbol = graphic.symbol.clone();
-        symbol.size = baseSize * scale;
+        symbol.size = baseSize * scale * dartReveal;
         symbol.angle = activeSpinProgress !== null ? baseAngle + activeSpinProgress * 360 : baseAngle;
         graphic.symbol = symbol;
       });
+      if (dartProgress !== null) {
+        const view = config.getView?.();
+        if (view) {
+          const dartLayer = getDartLayer(layerData, view);
+          dartLayer.visible = true;
+          dartLayer.opacity = baseLayerOpacity;
+          const dartGraphics: Graphic[] = [];
+          const progress = clamp(dartProgress, 0, 1);
+          const flightWindow = 0.78;
+          const flightProgress = clamp(progress / flightWindow, 0, 1);
+          const impactProgress = clamp(
+            (progress - flightWindow) / Math.max(1 - flightWindow, 1e-6),
+            0,
+            1
+          );
+          const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
+          const viewCenterX = Number(view?.extent?.center?.x ?? view?.center?.x);
+          const hasViewCenterX = Number.isFinite(viewCenterX);
+          const markColor = toRgbaArray(
+            layerData.pointStyle?.color ?? config.defaultPointStyle.color,
+            1
+          );
+          const shaftColor: [number, number, number] = [186, 199, 215];
+          const finAColor: [number, number, number] = [201, 63, 63];
+          const finBColor: [number, number, number] = [58, 121, 201];
+          const tipColor: [number, number, number] = [235, 225, 207];
+          const shadowColor: [number, number, number] = [12, 16, 24];
+          const ghostColor: [number, number, number] = [228, 234, 242];
+
+          layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
+            const sourcePoint =
+              (graphic.__originalGeometry as Point | undefined) ??
+              (graphic.geometry as Point | undefined);
+            if (!sourcePoint || sourcePoint.type !== "point") return;
+            const targetPoint = toViewPoint(sourcePoint, view);
+            const targetX = targetPoint.x;
+            const targetY = targetPoint.y;
+            const randomA = noise1(layerSeed * 0.61 + graphicIndex * 17.3 + 0.71);
+            const randomB = noise1(layerSeed * 0.39 + graphicIndex * 11.7 + 2.14);
+            const shoulderSide = hasViewCenterX
+              ? targetX < viewCenterX ? -1 : 1
+              : (randomA > 0.35 ? -1 : 1);
+            const startOffsetX = (150 + baseSize * 5 + randomA * 60) * resolution;
+            const startOffsetY = (110 + baseSize * 4 + randomB * 55) * resolution;
+            const curveHeight = (16 + randomB * 24) * resolution;
+            const curveSide = (8 + randomA * 16) * resolution * shoulderSide;
+            const startX = targetX + shoulderSide * startOffsetX;
+            const startY = targetY - startOffsetY;
+            const vecX = targetX - startX;
+            const vecY = targetY - startY;
+            const vecLength = Math.max(Math.hypot(vecX, vecY), 1e-6);
+            const ux = vecX / vecLength;
+            const uy = vecY / vecLength;
+            const nx = -uy;
+            const ny = ux;
+            const dartBaseSize = clamp(baseSize * 2.5, 11, 32);
+
+            let dartX = targetX;
+            let dartY = targetY;
+            let heading = Math.atan2(vecY, vecX);
+            let dartSize = dartBaseSize;
+            let dartAlpha = 0.96;
+            let motionBlurAlpha = 0;
+            let impactRingAlpha = 0;
+            let impactCenterAlpha = 0;
+            let shadowSize = dartBaseSize * 1.1;
+            let shadowAlpha = 0.14;
+
+            if (progress <= flightWindow) {
+              const eased = 1 - Math.pow(1 - flightProgress, 2.8);
+              const arc = Math.sin(flightProgress * Math.PI);
+              dartX = startX + vecX * eased + nx * curveSide * arc * 0.35;
+              dartY = startY + vecY * eased + ny * curveSide * arc * 0.2 + arc * curveHeight;
+              heading = Math.atan2(targetY - dartY, targetX - dartX);
+              dartSize = dartBaseSize * (1.7 - eased * 0.72);
+              dartAlpha = clamp(0.5 + eased * 0.5, 0.5, 0.98);
+              motionBlurAlpha = clamp(0.06 + (1 - eased) * 0.24, 0.06, 0.3);
+              shadowSize = dartSize * (1.2 + (1 - eased) * 0.28);
+              shadowAlpha = clamp(0.08 + (1 - eased) * 0.12, 0.08, 0.2);
+            } else {
+              const settle = 1 - Math.pow(1 - impactProgress, 2.2);
+              const recoil =
+                Math.sin((1 - impactProgress) * Math.PI * 2.1) *
+                (1 - impactProgress) *
+                (6 + randomA * 4) *
+                resolution;
+              heading =
+                Math.atan2(vecY, vecX) +
+                (noise1(layerSeed + graphicIndex * 3.7) - 0.5) * 0.08 * (1 - settle);
+              const embed = dartBaseSize * (0.15 + (1 - settle) * 0.05) * resolution;
+              dartX = targetX - Math.cos(heading) * (embed + recoil);
+              dartY = targetY - Math.sin(heading) * (embed + recoil);
+              dartSize = dartBaseSize * (1.02 - settle * 0.04 + Math.sin((1 - impactProgress) * Math.PI) * 0.03);
+              dartAlpha = clamp(0.95 - settle * 0.08, 0.86, 0.96);
+              motionBlurAlpha = clamp((1 - settle) * 0.08, 0, 0.08);
+              impactRingAlpha = clamp(0.52 - impactProgress * 0.62, 0, 0.52);
+              impactCenterAlpha = clamp(0.44 - impactProgress * 0.55, 0, 0.44);
+              shadowSize = dartSize * (1.03 + (1 - settle) * 0.08);
+              shadowAlpha = clamp(0.15 - settle * 0.05, 0.09, 0.15);
+            }
+
+            const wobble =
+              Math.sin(timeSeed * (5.4 + randomA * 1.8) + graphicIndex) *
+              (progress <= flightWindow ? (1 - flightProgress) * 3.4 : (1 - impactProgress) * 1.1);
+            const angle = -heading * (180 / Math.PI) + wobble;
+            const shaftLength = dartSize * 0.72 * resolution;
+            const tailBaseX = dartX - Math.cos(heading) * (dartSize * 0.3 * resolution);
+            const tailBaseY = dartY - Math.sin(heading) * (dartSize * 0.3 * resolution);
+            const noseX = dartX + Math.cos(heading) * (dartSize * 0.39 * resolution);
+            const noseY = dartY + Math.sin(heading) * (dartSize * 0.39 * resolution);
+            const finBack = dartSize * 0.22 * resolution;
+            const finSpread = dartSize * 0.18 * resolution;
+            const finCenterX = tailBaseX - Math.cos(heading) * finBack;
+            const finCenterY = tailBaseY - Math.sin(heading) * finBack;
+            const finAX = finCenterX + nx * finSpread;
+            const finAY = finCenterY + ny * finSpread;
+            const finBX = finCenterX - nx * finSpread;
+            const finBY = finCenterY - ny * finSpread;
+            const shadowX =
+              dartX + nx * 2.6 * resolution - Math.cos(heading) * (progress <= flightWindow ? 3.6 : 1.4) * resolution;
+            const shadowY =
+              dartY + ny * 2.6 * resolution - Math.sin(heading) * (progress <= flightWindow ? 3.6 : 1.4) * resolution;
+
+            dartGraphics.push(
+              new Graphic({
+                geometry: new Point({
+                  x: shadowX,
+                  y: shadowY,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "circle",
+                  size: shadowSize,
+                  color: [shadowColor[0], shadowColor[1], shadowColor[2], shadowAlpha],
+                  outline: {
+                    color: [shadowColor[0], shadowColor[1], shadowColor[2], 0],
+                    width: 0
+                  }
+                }
+              })
+            );
+
+            if (motionBlurAlpha > 0.01) {
+              const ghostDistance = (
+                progress <= flightWindow
+                  ? 9 + (1 - flightProgress) * 9
+                  : 3 + (1 - impactProgress) * 3
+              ) * resolution;
+              const ghost1X = dartX - Math.cos(heading) * (ghostDistance * 0.45);
+              const ghost1Y = dartY - Math.sin(heading) * (ghostDistance * 0.45);
+              const ghost2X = dartX - Math.cos(heading) * ghostDistance;
+              const ghost2Y = dartY - Math.sin(heading) * ghostDistance;
+              dartGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: ghost2X,
+                    y: ghost2Y,
+                    spatialReference: targetPoint.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "path",
+                    path: dartCoreMarkerPath,
+                    size: dartSize * 0.86,
+                    color: [ghostColor[0], ghostColor[1], ghostColor[2], motionBlurAlpha * 0.22],
+                    angle,
+                    outline: {
+                      color: [ghostColor[0], ghostColor[1], ghostColor[2], 0],
+                      width: 0
+                    }
+                  }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: ghost1X,
+                    y: ghost1Y,
+                    spatialReference: targetPoint.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "path",
+                    path: dartCoreMarkerPath,
+                    size: dartSize * 0.9,
+                    color: [ghostColor[0], ghostColor[1], ghostColor[2], motionBlurAlpha * 0.34],
+                    angle,
+                    outline: {
+                      color: [ghostColor[0], ghostColor[1], ghostColor[2], 0],
+                      width: 0
+                    }
+                  }
+                })
+              );
+            }
+
+            dartGraphics.push(
+              new Graphic({
+                geometry: new Point({
+                  x: finAX,
+                  y: finAY,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "path",
+                  path: dartFinMarkerPath,
+                  size: dartSize * 0.35,
+                  color: [finAColor[0], finAColor[1], finAColor[2], dartAlpha * 0.88],
+                  angle,
+                  outline: {
+                    color: [39, 35, 43, dartAlpha * 0.35],
+                    width: Math.max(0.3, dartSize * 0.018)
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: finBX,
+                  y: finBY,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "path",
+                  path: dartFinMarkerPath,
+                  size: dartSize * 0.35,
+                  color: [finBColor[0], finBColor[1], finBColor[2], dartAlpha * 0.88],
+                  angle,
+                  outline: {
+                    color: [39, 35, 43, dartAlpha * 0.35],
+                    width: Math.max(0.3, dartSize * 0.018)
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: dartX + nx * 1.2 * resolution,
+                  y: dartY + ny * 1.2 * resolution,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "path",
+                  path: dartMarkerPath,
+                  size: dartSize * 1.02,
+                  color: [shadowColor[0], shadowColor[1], shadowColor[2], dartAlpha * 0.4],
+                  angle,
+                  outline: {
+                    color: [shadowColor[0], shadowColor[1], shadowColor[2], 0],
+                    width: 0
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: dartX,
+                  y: dartY,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "path",
+                  path: dartMarkerPath,
+                  size: dartSize,
+                  color: [68, 78, 96, dartAlpha],
+                  angle,
+                  outline: {
+                    color: [36, 43, 56, dartAlpha * 0.62],
+                    width: Math.max(0.55, dartSize * 0.04)
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: dartX,
+                  y: dartY,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "path",
+                  path: dartCoreMarkerPath,
+                  size: dartSize * 0.82,
+                  color: [shaftColor[0], shaftColor[1], shaftColor[2], dartAlpha * 0.94],
+                  angle,
+                  outline: {
+                    color: [214, 224, 236, dartAlpha * 0.6],
+                    width: Math.max(0.32, dartSize * 0.028)
+                  }
+                }
+              }),
+              new Graphic({
+                geometry: new Point({
+                  x: noseX,
+                  y: noseY,
+                  spatialReference: targetPoint.spatialReference
+                }),
+                symbol: {
+                  type: "simple-marker",
+                  style: "circle",
+                  size: clamp(dartSize * 0.2, 1.8, 6),
+                  color: [tipColor[0], tipColor[1], tipColor[2], dartAlpha * 0.96],
+                  outline: {
+                    color: [209, 192, 170, dartAlpha * 0.8],
+                    width: Math.max(0.45, dartSize * 0.022)
+                  }
+                }
+              })
+            );
+
+            if (impactRingAlpha > 0.01) {
+              const crossHalf = clamp(baseSize * 0.2 + (1 - impactProgress) * 1.8, 1, 3.5) * resolution;
+              const crossWidth = Math.max(0.6, baseSize * 0.08);
+              dartGraphics.push(
+                new Graphic({
+                  geometry: new Point({
+                    x: targetX,
+                    y: targetY,
+                    spatialReference: targetPoint.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    size: clamp(dartSize * (0.9 + impactProgress * 0.9), 8, 24),
+                    color: [markColor[0], markColor[1], markColor[2], impactRingAlpha * 0.1],
+                    outline: {
+                      color: [markColor[0], markColor[1], markColor[2], impactRingAlpha * 0.66],
+                      width: Math.max(0.6, baseSize * 0.1)
+                    }
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: targetPoint.spatialReference,
+                    paths: [[[targetX - crossHalf, targetY], [targetX + crossHalf, targetY]]]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "solid",
+                    width: crossWidth,
+                    color: [68, 78, 96, impactCenterAlpha * 0.8]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: targetPoint.spatialReference,
+                    paths: [[[targetX, targetY - crossHalf], [targetX, targetY + crossHalf]]]
+                  }),
+                  symbol: {
+                    type: "simple-line",
+                    style: "solid",
+                    width: crossWidth,
+                    color: [68, 78, 96, impactCenterAlpha * 0.8]
+                  }
+                }),
+                new Graphic({
+                  geometry: new Point({
+                    x: targetX,
+                    y: targetY,
+                    spatialReference: targetPoint.spatialReference
+                  }),
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    size: clamp(dartSize * 0.22, 2.2, 7),
+                    color: [56, 67, 86, impactCenterAlpha * 0.95],
+                    outline: {
+                      color: [230, 238, 248, impactCenterAlpha * 0.55],
+                      width: Math.max(0.5, baseSize * 0.07)
+                    }
+                  }
+                })
+              );
+            }
+          });
+
+          dartLayer.removeAll();
+          if (dartGraphics.length) {
+            dartLayer.addMany(dartGraphics);
+          }
+        }
+      } else {
+        clearDartLayer(layerData);
+      }
     }
     if (layerData.type === "text") {
       const baseText = layerData.textContent || "Text";
