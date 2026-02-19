@@ -44,12 +44,34 @@ function MapArea() {
       <div id="map-wrapper" className="no-shadow">
         <arcgis-map
           id="arcgisMap"
+          className="map-view-host"
           basemap="gray-vector"
           center="-0.1276, 51.5074"
           zoom="11"
         >
           <arcgis-compass id="map-compass" slot="top-left"></arcgis-compass>
         </arcgis-map>
+        <arcgis-scene
+          id="arcgisScene"
+          className="map-view-host"
+          basemap="gray-vector"
+          center="-0.1276, 51.5074"
+          zoom="11"
+          quality-profile="high"
+          hidden
+          aria-hidden="true"
+        >
+          <arcgis-compass id="scene-compass" slot="top-left"></arcgis-compass>
+          <arcgis-expand
+            id="scene-daylight-expand"
+            slot="top-right"
+            expand-icon="brightness"
+            expand-tooltip="Daylight"
+            collapse-tooltip="Hide daylight"
+          >
+            <arcgis-daylight id="scene-daylight"></arcgis-daylight>
+          </arcgis-expand>
+        </arcgis-scene>
       </div>
     </div>
   );

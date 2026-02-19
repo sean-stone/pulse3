@@ -146,13 +146,16 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
         layerData.layer.opacity = 1;
         return;
       }
+      const hideBasePointForFireworks =
+        layerData.type === "point" &&
+        layerData.animations.some((animation) => animation.type === "fireworks");
       layerData.layer.opacity = 1;
       layerData.layer.graphics.forEach((graphic: any) => {
         if (graphic.symbol) {
           const symbol = graphic.symbol.clone();
           if (symbol.size !== undefined) {
             const pointStyle = layerData.pointStyle ?? config.defaultPointStyle;
-            symbol.size = pointStyle.size;
+            symbol.size = hideBasePointForFireworks ? 0 : pointStyle.size;
           }
           graphic.symbol = symbol;
         }

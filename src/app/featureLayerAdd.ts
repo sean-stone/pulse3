@@ -26,6 +26,7 @@ type FeatureLayerConfig = {
   defaultPointStyle: PointStyle;
   defaultLineStyle: LineStyle;
   defaultPolygonStyle: PolygonStyle;
+  applyLayerModeProperties?: (layerData: LayerData) => void;
 };
 
 const handleAddFeatureLayer = async (state: FeatureLayerState, config: FeatureLayerConfig) => {
@@ -88,6 +89,7 @@ const handleAddFeatureLayer = async (state: FeatureLayerState, config: FeatureLa
       layerData.pointStyle = { ...config.defaultPointStyle };
     }
     layerData.layerEffectsEnabled = true;
+    config.applyLayerModeProperties?.(layerData);
 
     const layerIndex = state.addLayerData(layerData);
     input.value = "";

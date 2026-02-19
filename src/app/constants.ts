@@ -112,6 +112,7 @@ export type ProjectSnapshot = {
       projectName?: string;
       spatialReference?: { wkid?: number };
       app: {
+        mode?: "2d" | "3d";
         layout: "default" | "mobile" | "tablet" | "custom";
         customWidth: number | null;
         customHeight: number | null;
@@ -121,6 +122,16 @@ export type ProjectSnapshot = {
         basemapLabelsVisible?: boolean;
         backgroundColor?: string;
         backgroundTransparent?: boolean;
+        camera?: {
+          position: {
+            x: number;
+            y: number;
+            z: number;
+            spatialReference?: { wkid?: number; latestWkid?: number };
+          };
+          heading: number;
+          tilt: number;
+        };
         extent?: { xmin: number; ymin: number; xmax: number; ymax: number; wkid?: number };
       };
       timeline: {

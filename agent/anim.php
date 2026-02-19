@@ -417,6 +417,61 @@ $schema = [
                                 "isRotated" => ["type" => "boolean"],
                                 "basemap" => ["type" => "string"],
                                 "basemapVisible" => ["type" => "boolean"],
+                                "basemapLabelsVisible" => ["type" => ["boolean", "null"]],
+                                "backgroundColor" => ["type" => ["string", "null"]],
+                                "backgroundTransparent" => ["type" => ["boolean", "null"]],
+                                "mode" => [
+                                    "anyOf" => [
+                                        [
+                                            "type" => "string",
+                                            "enum" => ["2d", "3d"]
+                                        ],
+                                        [
+                                            "type" => "null"
+                                        ]
+                                    ]
+                                ],
+                                "camera" => [
+                                    "anyOf" => [
+                                        [
+                                            "type" => "object",
+                                            "additionalProperties" => false,
+                                            "properties" => [
+                                                "position" => [
+                                                    "type" => "object",
+                                                    "additionalProperties" => false,
+                                                    "properties" => [
+                                                        "x" => ["type" => "number"],
+                                                        "y" => ["type" => "number"],
+                                                        "z" => ["type" => "number"],
+                                                        "spatialReference" => [
+                                                            "anyOf" => [
+                                                                [
+                                                                    "type" => "object",
+                                                                    "additionalProperties" => false,
+                                                                    "properties" => [
+                                                                        "wkid" => ["type" => ["integer", "null"]],
+                                                                        "latestWkid" => ["type" => ["integer", "null"]]
+                                                                    ]
+                                                                ],
+                                                                [
+                                                                    "type" => "null"
+                                                                ]
+                                                            ]
+                                                        ]
+                                                    ],
+                                                    "required" => ["x", "y", "z"]
+                                                ],
+                                                "heading" => ["type" => "number"],
+                                                "tilt" => ["type" => "number"]
+                                            ],
+                                            "required" => ["position", "heading", "tilt"]
+                                        ],
+                                        [
+                                            "type" => "null"
+                                        ]
+                                    ]
+                                ],
                                 "extent" => [
                                     "anyOf" => [
                                         [
@@ -860,7 +915,8 @@ $instructions = trim(
     "For drop shadows, set layerEffectSettings.dropShadowOffsetX, dropShadowOffsetY, dropShadowBlur, dropShadowColor (hex or rgba). " .
     "Other effects in layerEffectSettings: brightness, contrast, grayscale, hueRotate, invert, opacity, saturate, sepia, blur. " .
     "Provide properties._pulse.app with layout, customWidth/customHeight (null unless layout is 'custom'), " .
-    "isRotated, basemap, basemapVisible, and optional extent. " .
+    "isRotated, basemap, basemapVisible, optional basemapLabelsVisible/backgroundColor/backgroundTransparent, mode (2d or 3d), " .
+    "optional camera for 3d (position x/y/z plus heading/tilt), and optional extent. " .
     "Provide properties._pulse.timeline.durationOverride (number or null). " .
     "Provide properties._pulse.layers[] with id, name, type, animations, and any needed style fields. " .
     "For each feature, set properties._pulse.layerId to a matching layer id."

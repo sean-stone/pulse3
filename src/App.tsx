@@ -357,6 +357,17 @@ export default function App() {
               </div>
             <div className="toolbar-right">
               <calcite-button
+                id="scene-mode-btn"
+                icon-start="globe"
+                scale="s"
+                appearance="outline"
+                aria-label="Switch to 3D mode"
+                title="Switch to 3D mode"
+                style={rotateButtonStyle}
+              >
+                3D Mode
+              </calcite-button>
+              <calcite-button
                 id="rotation-button"
                 icon-start="rotate"
                 scale="s"

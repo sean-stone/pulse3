@@ -205,6 +205,410 @@ const toRgbaArray = (color: string, alpha = 1) => {
   }
 };
 
+const parseColorToRgbaArray = (
+  color: string | undefined,
+  fallback: [number, number, number, number]
+): [number, number, number, number] => {
+  if (!color) return fallback;
+  try {
+    const rgba = new Color(color).toRgba() as number[];
+    return [
+      Number.isFinite(Number(rgba[0])) ? Number(rgba[0]) : fallback[0],
+      Number.isFinite(Number(rgba[1])) ? Number(rgba[1]) : fallback[1],
+      Number.isFinite(Number(rgba[2])) ? Number(rgba[2]) : fallback[2],
+      Number.isFinite(Number(rgba[3])) ? clamp(Number(rgba[3]), 0, 1) : fallback[3]
+    ];
+  } catch {
+    return fallback;
+  }
+};
+
+const toClampedColorArray = (
+  color: ArrayLike<number> | null | undefined,
+  fallback: [number, number, number, number]
+): [number, number, number, number] => {
+  const r = Number(color?.[0]);
+  const g = Number(color?.[1]);
+  const b = Number(color?.[2]);
+  const a = Number(color?.[3]);
+  return [
+    Number.isFinite(r) ? clamp(r, 0, 255) : fallback[0],
+    Number.isFinite(g) ? clamp(g, 0, 255) : fallback[1],
+    Number.isFinite(b) ? clamp(b, 0, 255) : fallback[2],
+    Number.isFinite(a) ? clamp(a, 0, 1) : fallback[3]
+  ];
+};
+
+const isSceneView3D = (view: any) => String((view as any)?.type || "") === "3d";
+
+const buildWeldLineSymbol = (
+  width: number,
+  color: ArrayLike<number> | null | undefined,
+  use3D: boolean
+) => {
+  const rgba = toClampedColorArray(color, [255, 255, 255, 1]);
+  if (use3D) {
+    return {
+      type: "line-3d",
+      symbolLayers: [
+        {
+          type: "line",
+          cap: "round",
+          join: "round",
+          size: Math.max(0.6, width),
+          material: {
+            color: rgba
+          }
+        }
+      ]
+    } as any;
+  }
+  return {
+    type: "simple-line",
+    style: "solid",
+    width,
+    color: rgba
+  } as any;
+};
+
+const buildWeldPointSymbol = (
+  size: number,
+  color: ArrayLike<number> | null | undefined,
+  outlineColor: ArrayLike<number> | null | undefined,
+  outlineWidth: number,
+  use3D: boolean
+) => {
+  const fillRgba = toClampedColorArray(color, [255, 255, 255, 1]);
+  const strokeRgba = toClampedColorArray(outlineColor, [0, 0, 0, 0]);
+  if (use3D) {
+    return {
+      type: "point-3d",
+      symbolLayers: [
+        {
+          type: "icon",
+          resource: { primitive: "circle" },
+          size: Math.max(1.4, size),
+          material: {
+            color: fillRgba
+          },
+          outline: {
+            color: strokeRgba,
+            size: Math.max(0, outlineWidth)
+          }
+        }
+      ]
+    } as any;
+  }
+  return {
+    type: "simple-marker",
+    style: "circle",
+    size,
+    color: fillRgba,
+    outline: {
+      color: strokeRgba,
+      width: Math.max(0, outlineWidth)
+    }
+  } as any;
+};
+
+const hueToRgb = (p: number, q: number, t: number) => {
+  let next = t;
+  if (next < 0) next += 1;
+  if (next > 1) next -= 1;
+  if (next < 1 / 6) return p + (q - p) * 6 * next;
+  if (next < 1 / 2) return q;
+  if (next < 2 / 3) return p + (q - p) * (2 / 3 - next) * 6;
+  return p;
+};
+
+const rotateHueRgba = (
+  rgba: [number, number, number, number],
+  degrees: number
+): [number, number, number, number] => {
+  const r = clamp(rgba[0], 0, 255) / 255;
+  const g = clamp(rgba[1], 0, 255) / 255;
+  const b = clamp(rgba[2], 0, 255) / 255;
+  const a = clamp(rgba[3], 0, 1);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      default:
+        h = (r - g) / d + 4;
+        break;
+    }
+    h /= 6;
+  }
+
+  h += degrees / 360;
+  h = ((h % 1) + 1) % 1;
+
+  if (s === 0) {
+    const gray = Math.round(l * 255);
+    return [gray, gray, gray, a];
+  }
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const nextR = Math.round(hueToRgb(p, q, h + 1 / 3) * 255);
+  const nextG = Math.round(hueToRgb(p, q, h) * 255);
+  const nextB = Math.round(hueToRgb(p, q, h - 1 / 3) * 255);
+  return [nextR, nextG, nextB, a];
+};
+
+const cloneSymbol = (symbol: any) => {
+  if (!symbol) return null;
+  if (typeof symbol.clone === "function") {
+    return symbol.clone();
+  }
+  return {
+    ...symbol,
+    outline: symbol?.outline ? { ...symbol.outline } : symbol?.outline,
+    font: symbol?.font ? { ...symbol.font } : symbol?.font,
+    symbolLayers: Array.isArray(symbol?.symbolLayers)
+      ? symbol.symbolLayers.map((layer: any) => ({
+          ...layer,
+          material: layer?.material ? { ...layer.material } : layer?.material,
+          outline: layer?.outline ? { ...layer.outline } : layer?.outline,
+          halo: layer?.halo ? { ...layer.halo } : layer?.halo,
+          font: layer?.font ? { ...layer.font } : layer?.font,
+          resource: layer?.resource ? { ...layer.resource } : layer?.resource
+        }))
+      : symbol?.symbolLayers
+  };
+};
+
+const getSymbolLayers = (symbol: any): any[] => {
+  const layers = symbol?.symbolLayers;
+  if (!layers) return [];
+  if (Array.isArray(layers)) return layers;
+  if (typeof layers.toArray === "function") return layers.toArray();
+  try {
+    return Array.from(layers as Iterable<any>);
+  } catch {
+    return [];
+  }
+};
+
+const setSymbolLayers = (symbol: any, nextLayers: any[]) => {
+  try {
+    symbol.symbolLayers = nextLayers;
+    return;
+  } catch {
+    // fallback for Collection-backed symbolLayers
+  }
+  const collection = symbol?.symbolLayers;
+  if (!collection) return;
+  if (typeof collection.removeAll === "function") {
+    collection.removeAll();
+  }
+  if (typeof collection.addMany === "function") {
+    collection.addMany(nextLayers);
+  }
+};
+
+const applyPointSymbolScaleAngle = (graphic: any, size: number, angle: number) => {
+  const symbol = cloneSymbol(graphic?.symbol);
+  if (!symbol) return false;
+  if (symbol.type === "simple-marker") {
+    symbol.size = size;
+    symbol.angle = angle;
+    graphic.symbol = symbol;
+    return true;
+  }
+  if (symbol.type === "point-3d") {
+    const symbolLayers = getSymbolLayers(symbol);
+    if (!symbolLayers.length) return false;
+    let changed = false;
+    const nextLayers = symbolLayers.map((layer: any) => {
+      if (layer?.type !== "icon") return layer;
+      changed = true;
+      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+      nextLayer.size = size;
+      nextLayer.angle = angle;
+      return nextLayer;
+    });
+    if (changed) {
+      setSymbolLayers(symbol, nextLayers);
+      graphic.symbol = symbol;
+      return true;
+    }
+  }
+  return false;
+};
+
+const applyLineSymbolWidth = (graphic: any, width: number) => {
+  const symbol = cloneSymbol(graphic?.symbol);
+  if (!symbol) return false;
+  if (symbol.type === "simple-line") {
+    symbol.width = width;
+    graphic.symbol = symbol;
+    return true;
+  }
+  if (symbol.type === "line-3d") {
+    const symbolLayers = getSymbolLayers(symbol);
+    if (!symbolLayers.length) return false;
+    let changed = false;
+    const nextLayers = symbolLayers.map((layer: any) => {
+      if (layer?.type !== "line") return layer;
+      changed = true;
+      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+      nextLayer.size = width;
+      return nextLayer;
+    });
+    if (changed) {
+      setSymbolLayers(symbol, nextLayers);
+      graphic.symbol = symbol;
+      return true;
+    }
+  }
+  return false;
+};
+
+const applyPolygonOutlineWidth = (graphic: any, width: number) => {
+  const symbol = cloneSymbol(graphic?.symbol);
+  if (!symbol) return false;
+  if (symbol.type === "simple-fill" && symbol.outline) {
+    symbol.outline = { ...symbol.outline, width };
+    graphic.symbol = symbol;
+    return true;
+  }
+  if (symbol.type === "polygon-3d") {
+    const symbolLayers = getSymbolLayers(symbol);
+    if (!symbolLayers.length) return false;
+    let changed = false;
+    const nextLayers = symbolLayers.map((layer: any) => {
+      if (layer?.type !== "fill") return layer;
+      changed = true;
+      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+      if (nextLayer?.outline) {
+        if (typeof nextLayer.outline.clone === "function") {
+          const nextOutline = nextLayer.outline.clone();
+          nextOutline.size = width;
+          nextLayer.outline = nextOutline;
+        } else {
+          nextLayer.outline = { ...(nextLayer.outline ?? {}), size: width };
+        }
+      } else {
+        nextLayer.outline = { size: width };
+      }
+      return nextLayer;
+    });
+    if (changed) {
+      setSymbolLayers(symbol, nextLayers);
+      graphic.symbol = symbol;
+      return true;
+    }
+  }
+  return false;
+};
+
+const applyTextSymbolState = (graphic: any, layerData: LayerData, text: string, size: number) => {
+  const symbol = cloneSymbol(graphic?.symbol);
+  if (!symbol) return false;
+  if (symbol.type === "text") {
+    symbol.text = text;
+    symbol.font = symbol.font || { size, family: "sans-serif" };
+    symbol.font.size = size;
+    symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
+    symbol.font.style = layerData.textItalic ? "italic" : "normal";
+    symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
+    graphic.symbol = symbol;
+    return true;
+  }
+  if (symbol.type === "point-3d") {
+    const symbolLayers = getSymbolLayers(symbol);
+    if (!symbolLayers.length) return false;
+    let changed = false;
+    const nextLayers = symbolLayers.map((layer: any) => {
+      if (layer?.type !== "text") return layer;
+      changed = true;
+      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+      const nextFont = { ...(nextLayer.font ?? {}) };
+      nextFont.family = layerData.textFontFamily || nextFont.family || "sans-serif";
+      nextFont.style = layerData.textItalic ? "italic" : "normal";
+      nextLayer.text = text;
+      nextLayer.size = size;
+      nextLayer.font = nextFont;
+      return nextLayer;
+    });
+    if (changed) {
+      setSymbolLayers(symbol, nextLayers);
+      graphic.symbol = symbol;
+      return true;
+    }
+  }
+  return false;
+};
+
+const applyPolygonTimeGradient3D = (layerData: LayerData, progress: number) => {
+  const hue = clamp(progress, 0, 1) * 360;
+  const baseFill = parseColorToRgbaArray(
+    layerData.polygonStyle?.color,
+    [10, 76, 102, 0.3]
+  );
+  const baseOutline = parseColorToRgbaArray(
+    layerData.polygonStyle?.outlineColor,
+    [34, 139, 196, 1]
+  );
+  const shiftedFill = rotateHueRgba(baseFill, hue);
+  const shiftedOutline = rotateHueRgba(baseOutline, hue);
+
+  layerData.layer.graphics.forEach((graphic: any) => {
+    const symbol = cloneSymbol(graphic?.symbol);
+    if (!symbol || symbol.type !== "polygon-3d") return;
+    const symbolLayers = getSymbolLayers(symbol);
+    if (!symbolLayers.length) return;
+
+    let changed = false;
+    const nextLayers = symbolLayers.map((layer: any) => {
+      if (layer?.type !== "fill") return layer;
+      changed = true;
+      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+
+      if (nextLayer?.material && typeof nextLayer.material.clone === "function") {
+        const nextMaterial = nextLayer.material.clone();
+        nextMaterial.color = shiftedFill;
+        nextLayer.material = nextMaterial;
+      } else {
+        nextLayer.material = {
+          ...(nextLayer?.material ?? {}),
+          color: shiftedFill
+        };
+      }
+
+      if (nextLayer?.outline && typeof nextLayer.outline.clone === "function") {
+        const nextOutline = nextLayer.outline.clone();
+        nextOutline.color = shiftedOutline;
+        nextLayer.outline = nextOutline;
+      } else {
+        nextLayer.outline = {
+          ...(nextLayer?.outline ?? {}),
+          color: shiftedOutline
+        };
+      }
+      return nextLayer;
+    });
+
+    if (changed) {
+      setSymbolLayers(symbol, nextLayers);
+      graphic.symbol = symbol;
+    }
+  });
+};
+
 const getGeometryExtentScale = (geometry: Polyline | Polygon) => {
   const extent = geometry.extent;
   if (!extent) return 1;
@@ -278,6 +682,10 @@ type MarchSegment = {
   y0: number;
   x1: number;
   y1: number;
+  z0?: number;
+  z1?: number;
+  dz?: number;
+  hasZ?: boolean;
   dx: number;
   dy: number;
   len: number;
@@ -297,13 +705,29 @@ const buildMarchSegments = (geometry: Polyline) => {
     for (let i = 1; i < path.length; i += 1) {
       const [x0, y0] = path[i - 1];
       const [x1, y1] = path[i];
+      const z0 = Number(path[i - 1][2]);
+      const z1 = Number(path[i][2]);
+      const hasZ = Number.isFinite(z0) && Number.isFinite(z1);
       const dx = x1 - x0;
       const dy = y1 - y0;
       const len = Math.hypot(dx, dy);
       if (!Number.isFinite(len) || len <= 0) {
         continue;
       }
-      segments.push({ x0, y0, x1, y1, dx, dy, len, accum: total });
+      segments.push({
+        x0,
+        y0,
+        x1,
+        y1,
+        z0: hasZ ? z0 : undefined,
+        z1: hasZ ? z1 : undefined,
+        dz: hasZ ? z1 - z0 : undefined,
+        hasZ,
+        dx,
+        dy,
+        len,
+        accum: total
+      });
       total += len;
     }
   });
@@ -317,15 +741,27 @@ const sampleMarchPoint = (segments: MarchSegment[], distance: number) => {
       const t = (distance - seg.accum) / seg.len;
       const x = seg.x0 + seg.dx * t;
       const y = seg.y0 + seg.dy * t;
+      const z = seg.hasZ ? (seg.z0 as number) + (seg.dz as number) * t : undefined;
       const heading = Math.atan2(seg.dy, seg.dx);
       const angle = 90 - heading * (180 / Math.PI);
       const ux = seg.dx / seg.len;
       const uy = seg.dy / seg.len;
-      return { x, y, angle, ux, uy, heading };
+      return { x, y, z, angle, ux, uy, heading };
     }
   }
   return null;
 };
+
+const toPathCoord = (x: number, y: number, z?: number) =>
+  Number.isFinite(Number(z)) ? [x, y, Number(z)] : [x, y];
+
+const buildPointGeometry = (x: number, y: number, spatialReference: any, z?: number) =>
+  new Point({
+    x,
+    y,
+    ...(Number.isFinite(Number(z)) ? { z: Number(z) } : {}),
+    spatialReference
+  });
 
 const toViewPolyline = (geometry: Polyline, view: any) => {
   let workingGeometry = geometry;
@@ -507,6 +943,26 @@ const clearWaypointLayer = (layerData: LayerData) => {
   layer.visible = false;
 };
 
+const getFireworksLayer = (layerData: LayerData, view: any) => {
+  const existing = (layerData as any).__fireworksLayer as GraphicsLayer | undefined;
+  if (existing) return existing;
+  const layer = new GraphicsLayer({
+    listMode: "hide",
+    opacity: 1,
+    blendMode: "screen"
+  });
+  view?.map?.add(layer);
+  (layerData as any).__fireworksLayer = layer;
+  return layer;
+};
+
+const clearFireworksLayer = (layerData: LayerData) => {
+  const layer = (layerData as any).__fireworksLayer as GraphicsLayer | undefined;
+  if (!layer) return;
+  layer.removeAll();
+  layer.visible = false;
+};
+
 const densifyPolyline = (polyline: Polyline) => {
   const isGeographic = Boolean((polyline.spatialReference as any)?.isGeographic);
   const totalLength = isGeographic
@@ -561,48 +1017,31 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       clearWeldSparkLayer(layerData);
       clearFlightLayer(layerData);
       clearWaypointLayer(layerData);
+      clearFireworksLayer(layerData);
       if (layerData.type === "point") {
         const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
         const baseAngle = layerData.pointStyle?.angle ?? 0;
         layerData.layer.graphics.forEach((graphic: any) => {
-          if (!graphic?.symbol || graphic.symbol.type !== "simple-marker") return;
-          const symbol = graphic.symbol.clone();
-          symbol.size = baseSize;
-          symbol.angle = baseAngle;
-          graphic.symbol = symbol;
+          applyPointSymbolScaleAngle(graphic, baseSize, baseAngle);
         });
       }
       if (layerData.type === "polyline") {
         const baseWidth = layerData.lineStyle?.width ?? defaultLineStyle.width;
         layerData.layer.graphics.forEach((graphic: any) => {
-          if (!graphic?.symbol || graphic.symbol.type !== "simple-line") return;
-          const symbol = graphic.symbol.clone();
-          symbol.width = baseWidth;
-          graphic.symbol = symbol;
+          applyLineSymbolWidth(graphic, baseWidth);
         });
       }
       if (layerData.type === "polygon") {
         const baseOutline = layerData.polygonStyle?.outlineWidth ?? defaultPolygonStyle.outlineWidth;
         layerData.layer.graphics.forEach((graphic: any) => {
-          if (!graphic?.symbol || graphic.symbol.type !== "simple-fill" || !graphic.symbol.outline) return;
-          const symbol = graphic.symbol.clone();
-          symbol.outline = { ...symbol.outline, width: baseOutline };
-          graphic.symbol = symbol;
+          applyPolygonOutlineWidth(graphic, baseOutline);
         });
       }
       if (layerData.type === "text") {
         const baseText = layerData.textContent || "Text";
         const baseSize = layerData.textSize ?? 14;
         layerData.layer.graphics.forEach((graphic: any) => {
-          if (!graphic?.symbol || graphic.symbol.type !== "text") return;
-          const symbol = graphic.symbol.clone();
-          symbol.text = baseText;
-          symbol.font = symbol.font || { size: baseSize, family: "sans-serif" };
-          symbol.font.size = baseSize;
-          symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
-          symbol.font.style = layerData.textItalic ? "italic" : "normal";
-          symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
-          graphic.symbol = symbol;
+          applyTextSymbolState(graphic, layerData, baseText, baseSize);
         });
       }
       if (config.hasPointKeyframes(layerData)) {
@@ -651,6 +1090,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let hasWaypointRouteAnimation = false;
     let hasWaypointRouteCartoonAnimation = false;
     let dartProgress: number | null = null;
+    let fireworksProgress: number | null = null;
     let arrowProgress: number | null = null;
     let barrageProgress: number | null = null;
     let jitterProgress: number | null = null;
@@ -658,6 +1098,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let ghostProgress: number | null = null;
     let breatheProgress: number | null = null;
     let pixelateProgress: number | null = null;
+    let hasFireworksAnimation = false;
+    let hasTimeGradientAnimation = false;
     const layerSeed = hashString(layerData.name || "layer");
 
     layerData.animations.forEach((anim: LayerAnimation) => {
@@ -710,6 +1152,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           const progress = (time - anim.start) / anim.duration;
           activeTypewriter = { anim, progress };
         }
+      }
+      if (anim.type === "timeGradient") {
+        hasTimeGradientAnimation = true;
+      }
+      if (anim.type === "fireworks") {
+        hasFireworksAnimation = true;
       }
 
       if (time >= anim.start && time <= animEnd) {
@@ -792,6 +1240,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             break;
           case "dartHit":
             dartProgress = progress;
+            opacity = 1;
+            break;
+          case "fireworks":
+            fireworksProgress = progress;
             opacity = 1;
             break;
           case "arrowMarch":
@@ -968,12 +1420,13 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
       const baseAngle = layerData.pointStyle?.angle ?? 0;
       const dartReveal = dartProgress !== null ? clamp((dartProgress - 0.78) / 0.22, 0, 1) : 1;
+      const hideBasePoint = hasFireworksAnimation;
       layerData.layer.graphics.forEach((graphic: any) => {
-        if (!graphic?.symbol || graphic.symbol.type !== "simple-marker") return;
-        const symbol = graphic.symbol.clone();
-        symbol.size = baseSize * scale * dartReveal;
-        symbol.angle = activeSpinProgress !== null ? baseAngle + activeSpinProgress * 360 : baseAngle;
-        graphic.symbol = symbol;
+        applyPointSymbolScaleAngle(
+          graphic,
+          hideBasePoint ? 0 : baseSize * scale * dartReveal,
+          activeSpinProgress !== null ? baseAngle + activeSpinProgress * 360 : baseAngle
+        );
       });
       if (dartProgress !== null) {
         const view = config.getView?.();
@@ -1359,29 +1812,323 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       } else {
         clearDartLayer(layerData);
       }
+
+      if (fireworksProgress !== null) {
+        const view = config.getView?.();
+        if (view) {
+          const fireworksLayer = getFireworksLayer(layerData, view);
+          const use3DSymbols = isSceneView3D(view);
+          fireworksLayer.visible = true;
+          fireworksLayer.opacity = Math.max(baseLayerOpacity, 0.9);
+          const fireworksGraphics: Graphic[] = [];
+          const progress = clamp(fireworksProgress, 0, 1);
+          const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
+          const launchCutoff = 0.44;
+          const styleSize = Math.max(2, layerData.pointStyle?.size ?? config.defaultPointStyle.size);
+          const baseFireworkColor = parseColorToRgbaArray(
+            layerData.pointStyle?.color ?? config.defaultPointStyle.color,
+            [255, 160, 96, 1]
+          );
+          const baseFireworkAlpha = clamp(baseFireworkColor[3], 0, 1);
+          const warmFireworkColor = rotateHueRgba(baseFireworkColor, 18);
+          const emberFireworkColor = rotateHueRgba(baseFireworkColor, -22);
+          const tintTowardWhite = (
+            rgba: [number, number, number, number],
+            amount: number
+          ): [number, number, number, number] => {
+            const t = clamp(amount, 0, 1);
+            return [
+              clamp(rgba[0] + (255 - rgba[0]) * t, 0, 255),
+              clamp(rgba[1] + (255 - rgba[1]) * t, 0, 255),
+              clamp(rgba[2] + (255 - rgba[2]) * t, 0, 255),
+              clamp(rgba[3], 0, 1)
+            ];
+          };
+          const withFireworkAlpha = (
+            rgba: [number, number, number, number],
+            alpha: number
+          ): [number, number, number, number] => [
+            rgba[0],
+            rgba[1],
+            rgba[2],
+            clamp(alpha * baseFireworkAlpha, 0, 1)
+          ];
+          const fireworksCoreColor = tintTowardWhite(baseFireworkColor, 0.78);
+          const fireworksSparkColor = tintTowardWhite(baseFireworkColor, 0.58);
+          const fireworksGlowColor = tintTowardWhite(warmFireworkColor, 0.34);
+          let fireworksUsesZ = false;
+
+          layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
+            const sourcePoint =
+              (graphic.__originalGeometry as Point | undefined) ??
+              (graphic.geometry as Point | undefined);
+            if (!sourcePoint || sourcePoint.type !== "point") return;
+
+            const targetPoint = toViewPoint(sourcePoint, view);
+            const centerX = targetPoint.x;
+            const centerY = targetPoint.y;
+            const rawZ = Number((targetPoint as any)?.z ?? (sourcePoint as any)?.z);
+            const centerZ = use3DSymbols ? (Number.isFinite(rawZ) ? rawZ : 0) : undefined;
+            fireworksUsesZ = fireworksUsesZ || (use3DSymbols && Number.isFinite(Number(centerZ)));
+
+            const launchHeight = clamp((86 + styleSize * 16) * resolution, 6, 2200);
+            const driftSeed = layerSeed * 0.37 + graphicIndex * 3.1;
+            const driftX = (noise1(driftSeed + 0.7) - 0.5) * resolution * 18;
+            const driftY = (noise1(driftSeed + 1.3) - 0.5) * resolution * 12;
+
+            if (use3DSymbols) {
+              const launchProgress = clamp(progress / launchCutoff, 0, 1);
+              if (launchProgress < 1) {
+                const easedLaunch = 1 - Math.pow(1 - launchProgress, 2.2);
+                const rocketX = centerX + driftX * (1 - easedLaunch);
+                const rocketY = centerY + driftY * (1 - easedLaunch);
+                const rocketZ = Number(centerZ ?? 0) + launchHeight * easedLaunch;
+                const tailZ = Number(centerZ ?? 0) + launchHeight * Math.max(0, easedLaunch - 0.2);
+                const plumeAlpha = clamp(0.2 + (1 - easedLaunch) * 0.48, 0.14, 0.64);
+                const coreAlpha = clamp(0.65 + easedLaunch * 0.3, 0.65, 0.95);
+                fireworksGraphics.push(
+                  new Graphic({
+                    geometry: new Polyline({
+                      spatialReference: targetPoint.spatialReference,
+                      paths: [[
+                        toPathCoord(rocketX, rocketY, tailZ),
+                        toPathCoord(rocketX, rocketY, rocketZ)
+                      ]]
+                    }),
+                    symbol: buildWeldLineSymbol(
+                      clamp(styleSize * 0.12, 0.6, 1.8),
+                      withFireworkAlpha(emberFireworkColor, plumeAlpha),
+                      true
+                    )
+                  }),
+                  new Graphic({
+                    geometry: buildPointGeometry(
+                      rocketX,
+                      rocketY,
+                      targetPoint.spatialReference,
+                      rocketZ
+                    ),
+                    symbol: buildWeldPointSymbol(
+                      clamp(styleSize * 1.1, 3.6, 10),
+                      withFireworkAlpha(fireworksCoreColor, coreAlpha),
+                      withFireworkAlpha(fireworksGlowColor, plumeAlpha),
+                      clamp(styleSize * 0.05, 0.35, 0.9),
+                      true
+                    )
+                  })
+                );
+              }
+            }
+
+            const burstProgress = use3DSymbols
+              ? clamp((progress - launchCutoff) / Math.max(1 - launchCutoff, 1e-6), 0, 1)
+              : progress;
+            const burstDelay = use3DSymbols ? 0.12 : 0.06;
+            const burstNormalized = clamp(
+              (burstProgress - burstDelay) / Math.max(1 - burstDelay, 1e-6),
+              0,
+              1
+            );
+            if (burstNormalized <= 0) {
+              return;
+            }
+
+            const spreadProgress = Math.pow(burstNormalized, 1.18);
+            const burstLife = clamp(1 - burstNormalized * 0.72, 0.18, 1);
+            const burstCenterZ = use3DSymbols
+              ? Number(centerZ ?? 0) + launchHeight
+              : undefined;
+            const sparkCount = use3DSymbols
+              ? clamp(Math.round(12 + styleSize * 0.8), 14, 28)
+              : clamp(Math.round(14 + styleSize * 1.05), 16, 32);
+            const burstRadiusMax = clamp(
+              (34 + styleSize * 6.2) * resolution,
+              3,
+              1800
+            );
+            const streakBase = clamp(
+              (9 + styleSize * 0.95) * resolution * (1 - burstNormalized * 0.42),
+              resolution * 1.2,
+              resolution * 46
+            );
+
+            for (let i = 0; i < sparkCount; i += 1) {
+              const seed = layerSeed * 0.53 + graphicIndex * 17.2 + i * 1.91;
+              const laneJitter = (noise1(seed + 0.4) - 0.5) * (TAU / sparkCount) * 1.25;
+              const angle = (i / sparkCount) * TAU + laneJitter;
+              const speedScale = 0.62 + noise1(seed + 1.3) * 0.58;
+              const tipRadius = burstRadiusMax * spreadProgress * speedScale;
+              const tailRadius = Math.max(0, tipRadius - streakBase * (0.85 + speedScale * 0.35));
+              const tipX = centerX + Math.cos(angle) * tipRadius;
+              const tipY = centerY + Math.sin(angle) * tipRadius;
+              const tailX = centerX + Math.cos(angle) * tailRadius;
+              const tailY = centerY + Math.sin(angle) * tailRadius;
+              const tipTravel = clamp(
+                tipRadius / Math.max(burstRadiusMax * speedScale, 1e-6),
+                0,
+                1
+              );
+              const tailTravel = clamp(
+                tailRadius / Math.max(burstRadiusMax * speedScale, 1e-6),
+                0,
+                1
+              );
+              const zArc = use3DSymbols
+                ? (noise1(seed + 2.1) * 2 - 0.62) * launchHeight * 0.46
+                : 0;
+              const tipZ = use3DSymbols
+                ? Number(burstCenterZ ?? 0) +
+                  zArc * tipTravel -
+                  launchHeight * 0.24 * burstNormalized * burstNormalized
+                : undefined;
+              const tailZ = use3DSymbols
+                ? Number(burstCenterZ ?? 0) +
+                  zArc * tailTravel -
+                  launchHeight * 0.24 * Math.max(0, burstNormalized - 0.12) * Math.max(0, burstNormalized - 0.12)
+                : undefined;
+              const twinkle =
+                0.78 +
+                0.22 *
+                  Math.sin(
+                    timeSeed * (6 + noise1(seed + 8.2) * 4) + i * 0.8 + graphicIndex * 0.4
+                  );
+              const alpha = clamp(
+                (0.46 + noise1(seed + 3.7) * 0.4) * burstLife * twinkle,
+                0.06,
+                0.88
+              );
+              const strokeWidth = clamp(
+                styleSize * (0.055 + noise1(seed + 4.6) * 0.08),
+                0.45,
+                2.2
+              );
+
+              fireworksGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: targetPoint.spatialReference,
+                    paths: [[
+                      toPathCoord(tailX, tailY, tailZ),
+                      toPathCoord(tipX, tipY, tipZ)
+                    ]]
+                  }),
+                  symbol: buildWeldLineSymbol(
+                    Math.max(strokeWidth * 1.3, 0.65),
+                    withFireworkAlpha(warmFireworkColor, alpha * 0.22),
+                    use3DSymbols
+                  )
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: targetPoint.spatialReference,
+                    paths: [[
+                      toPathCoord(tailX, tailY, tailZ),
+                      toPathCoord(tipX, tipY, tipZ)
+                    ]]
+                  }),
+                  symbol: buildWeldLineSymbol(
+                    strokeWidth,
+                    withFireworkAlpha(fireworksSparkColor, alpha),
+                    use3DSymbols
+                  )
+                })
+              );
+
+              if (i % 3 === 0) {
+                fireworksGraphics.push(
+                  new Graphic({
+                    geometry: buildPointGeometry(tipX, tipY, targetPoint.spatialReference, tipZ),
+                    symbol: buildWeldPointSymbol(
+                      clamp(1.9 + styleSize * 0.4 + noise1(seed + 6.9) * 2.4, 2.1, 8.4),
+                      withFireworkAlpha(fireworksCoreColor, alpha),
+                      withFireworkAlpha(fireworksGlowColor, alpha * 0.45),
+                      clamp(styleSize * 0.04, 0.22, 0.6),
+                      use3DSymbols
+                    )
+                  })
+                );
+              }
+            }
+
+            const ringAlpha = clamp((1 - burstNormalized) * 0.3, 0, 0.3);
+            if (ringAlpha > 0.01) {
+              fireworksGraphics.push(
+                new Graphic({
+                  geometry: buildPointGeometry(
+                    centerX,
+                    centerY,
+                    targetPoint.spatialReference,
+                    burstCenterZ
+                  ),
+                  symbol: buildWeldPointSymbol(
+                    clamp(styleSize * (2.4 + spreadProgress * 6.8), 5, 34),
+                    withFireworkAlpha(warmFireworkColor, ringAlpha * 0.14),
+                    withFireworkAlpha(fireworksGlowColor, ringAlpha),
+                    clamp(styleSize * 0.05, 0.25, 0.8),
+                    use3DSymbols
+                  )
+                })
+              );
+            }
+
+            fireworksGraphics.push(
+              new Graphic({
+                geometry: buildPointGeometry(
+                  centerX,
+                  centerY,
+                  targetPoint.spatialReference,
+                  burstCenterZ
+                ),
+                symbol: buildWeldPointSymbol(
+                  clamp(styleSize * (0.8 + (1 - burstNormalized) * 1.2), 2.8, 11.5),
+                  withFireworkAlpha(
+                    fireworksCoreColor,
+                    clamp(0.22 + burstLife * 0.72, 0.22, 0.92)
+                  ),
+                  withFireworkAlpha(
+                    warmFireworkColor,
+                    clamp(0.15 + burstLife * 0.45, 0.15, 0.74)
+                  ),
+                  clamp(styleSize * 0.045, 0.22, 0.65),
+                  use3DSymbols
+                )
+              })
+            );
+          });
+
+          if (use3DSymbols) {
+            (fireworksLayer as any).elevationInfo = fireworksUsesZ
+              ? { mode: "absolute-height" }
+              : { mode: "relative-to-ground", offset: 0.3 };
+          } else if ((fireworksLayer as any).elevationInfo) {
+            (fireworksLayer as any).elevationInfo = null;
+          }
+
+          fireworksLayer.removeAll();
+          if (fireworksGraphics.length) {
+            fireworksLayer.addMany(fireworksGraphics);
+          }
+        }
+      } else {
+        clearFireworksLayer(layerData);
+      }
     }
     if (layerData.type === "text") {
       const baseText = layerData.textContent || "Text";
       const baseSize = layerData.textSize ?? 14;
       layerData.layer.graphics.forEach((graphic: any) => {
-        if (!graphic?.symbol || graphic.symbol.type !== "text") return;
-        const symbol = graphic.symbol.clone();
-        symbol.font = symbol.font || { size: baseSize, family: "sans-serif" };
-        symbol.font.size = baseSize * scale;
-        symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
-        symbol.font.style = layerData.textItalic ? "italic" : "normal";
-        symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
+        let text = baseText;
         if (hasTypewriterAnimation) {
           if (activeTypewriter) {
             const length = Math.max(0, Math.floor(baseText.length * activeTypewriter.progress));
-            symbol.text = baseText.slice(0, length);
+            text = baseText.slice(0, length);
           } else if (time < minTypewriterStart) {
-            symbol.text = "";
+            text = "";
           } else if (time > maxTypewriterEnd) {
-            symbol.text = baseText;
+            text = baseText;
           }
         }
-        graphic.symbol = symbol;
+        applyTextSymbolState(graphic, layerData, text, baseSize * scale);
       });
     }
 
@@ -1407,10 +2154,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
       const baseWidth = layerData.lineStyle?.width ?? defaultLineStyle.width;
       layerData.layer.graphics.forEach((graphic: any) => {
-        if (!graphic?.symbol || graphic.symbol.type !== "simple-line") return;
-        const symbol = graphic.symbol.clone();
-        symbol.width = baseWidth * lineWidthScale;
-        graphic.symbol = symbol;
+        applyLineSymbolWidth(graphic, baseWidth * lineWidthScale);
       });
 
       if (arrowProgress !== null) {
@@ -1476,11 +2220,13 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const weldLayer = getWeldSparkLayer(layerData, view);
+          const use3DSymbols = isSceneView3D(view);
           weldLayer.visible = true;
           weldLayer.opacity = Math.max(baseLayerOpacity, 0.92);
           const sparkGraphics: Graphic[] = [];
           const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
           const frameStep = Math.floor(timeSeed * 45);
+          let weldUsesZ = false;
 
           layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
             if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
@@ -1506,6 +2252,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
             const { segments, total } = buildMarchSegments(workingGeometry);
             if (!segments.length || total <= 0) return;
+            weldUsesZ = weldUsesZ || segments.some((segment) => segment.hasZ);
 
             const head = sampleMarchPoint(segments, total);
             if (!head) return;
@@ -1513,16 +2260,25 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const ny = head.ux;
             const headX = head.x;
             const headY = head.y;
+            const headZ = Number.isFinite(Number(head.z))
+              ? Number(head.z)
+              : (use3DSymbols ? 0 : undefined);
 
             const trailLength = clamp(baseWidth * 36, 26, 170) * resolution;
             const trailStart = Math.max(0, total - trailLength);
             const trailSteps = clamp(Math.round((trailLength / Math.max(resolution, 1e-6)) / 6), 12, 28);
-            const trailPoints: Array<{ x: number; y: number }> = [];
+            const trailPoints: Array<{ x: number; y: number; z?: number }> = [];
             for (let step = 0; step <= trailSteps; step += 1) {
               const dist = trailStart + (total - trailStart) * (step / trailSteps);
               const sample = sampleMarchPoint(segments, dist);
               if (!sample) continue;
-              trailPoints.push({ x: sample.x, y: sample.y });
+              trailPoints.push({
+                x: sample.x,
+                y: sample.y,
+                z: Number.isFinite(Number(sample.z))
+                  ? Number(sample.z)
+                  : (use3DSymbols ? 0 : undefined)
+              });
             }
             for (let i = 1; i < trailPoints.length; i += 1) {
               const nearHead = i / Math.max(trailPoints.length - 1, 1);
@@ -1538,100 +2294,71 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 new Graphic({
                   geometry: new Polyline({
                     spatialReference: workingGeometry.spatialReference,
-                    paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                    paths: [[toPathCoord(prev.x, prev.y, prev.z), toPathCoord(curr.x, curr.y, curr.z)]]
                   }),
-                  symbol: {
-                    type: "simple-line",
-                    style: "solid",
-                    width: Math.max(baseWidth * 2.9, 2.2),
-                    color: [214, 102, 48, glowAlpha]
-                  }
+                  symbol: buildWeldLineSymbol(
+                    Math.max(baseWidth * 2.9, 2.2),
+                    [214, 102, 48, glowAlpha],
+                    use3DSymbols
+                  )
                 }),
                 new Graphic({
                   geometry: new Polyline({
                     spatialReference: workingGeometry.spatialReference,
-                    paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                    paths: [[toPathCoord(prev.x, prev.y, prev.z), toPathCoord(curr.x, curr.y, curr.z)]]
                   }),
-                  symbol: {
-                    type: "simple-line",
-                    style: "solid",
-                    width: Math.max(baseWidth * 1.55, 1.2),
-                    color: [238, 182, 112, coreAlpha]
-                  }
+                  symbol: buildWeldLineSymbol(
+                    Math.max(baseWidth * 1.55, 1.2),
+                    [238, 182, 112, coreAlpha],
+                    use3DSymbols
+                  )
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: curr.x,
-                    y: curr.y,
-                    spatialReference: workingGeometry.spatialReference
-                  }),
-                  symbol: {
-                    type: "simple-marker",
-                    style: "circle",
-                    size: dotGlowSize,
-                    color: [198, 88, 39, dotAlpha * 0.3],
-                    outline: {
-                      color: [198, 88, 39, 0],
-                      width: 0
-                    }
-                  }
+                  geometry: buildPointGeometry(curr.x, curr.y, workingGeometry.spatialReference, curr.z),
+                  symbol: buildWeldPointSymbol(
+                    dotGlowSize,
+                    [198, 88, 39, dotAlpha * 0.3],
+                    [198, 88, 39, 0],
+                    0,
+                    use3DSymbols
+                  )
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: curr.x,
-                    y: curr.y,
-                    spatialReference: workingGeometry.spatialReference
-                  }),
-                  symbol: {
-                    type: "simple-marker",
-                    style: "circle",
-                    size: dotSize,
-                    color: [238, 182, 112, dotAlpha],
-                    outline: {
-                      color: [255, 223, 171, dotAlpha * 0.35],
-                      width: Math.max(0.4, dotSize * 0.08)
-                    }
-                  }
+                  geometry: buildPointGeometry(curr.x, curr.y, workingGeometry.spatialReference, curr.z),
+                  symbol: buildWeldPointSymbol(
+                    dotSize,
+                    [238, 182, 112, dotAlpha],
+                    [255, 223, 171, dotAlpha * 0.35],
+                    Math.max(0.4, dotSize * 0.08),
+                    use3DSymbols
+                  )
                 })
               );
             }
 
             const sparkCount = clamp(Math.round(11 + baseWidth * 2.1), 10, 24);
+            const sparkZScale = use3DSymbols ? clamp(resolution * 2.2, 0.2, 6) : 0;
 
             sparkGraphics.push(
               new Graphic({
-                geometry: new Point({
-                  x: headX,
-                  y: headY,
-                  spatialReference: workingGeometry.spatialReference
-                }),
-                symbol: {
-                  type: "simple-marker",
-                  style: "circle",
-                  size: clamp(baseWidth * 6.2, 9, 22),
-                  color: [255, 162, 78, 0.42],
-                  outline: {
-                    color: [255, 199, 134, 0],
-                    width: 0
-                  }
-                }
+                geometry: buildPointGeometry(headX, headY, workingGeometry.spatialReference, headZ),
+                symbol: buildWeldPointSymbol(
+                  clamp(baseWidth * 6.2, 9, 22),
+                  [255, 162, 78, 0.42],
+                  [255, 199, 134, 0],
+                  0,
+                  use3DSymbols
+                )
               }),
               new Graphic({
-                geometry: new Point({
-                  x: headX,
-                  y: headY,
-                  spatialReference: workingGeometry.spatialReference
-                }),
-                symbol: {
-                  type: "simple-marker",
-                  style: "circle",
-                  size: clamp(baseWidth * 3.4, 5, 13),
-                  color: [255, 247, 222, 0.98],
-                  outline: {
-                    color: [255, 186, 110, 0.8],
-                    width: Math.max(0.8, baseWidth * 0.22)
-                  }
-                }
+                geometry: buildPointGeometry(headX, headY, workingGeometry.spatialReference, headZ),
+                symbol: buildWeldPointSymbol(
+                  clamp(baseWidth * 3.4, 5, 13),
+                  [255, 247, 222, 0.98],
+                  [255, 186, 110, 0.8],
+                  Math.max(0.8, baseWidth * 0.22),
+                  use3DSymbols
+                )
               })
             );
 
@@ -1652,8 +2379,17 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const startY = headY + ny * lateral * 0.35;
               const endX = startX + ux * travel + nx * lateral;
               const endY = startY + uy * travel + ny * lateral;
+              const baseZ = Number.isFinite(Number(headZ)) ? Number(headZ) : 0;
+              const zLift = use3DSymbols
+                ? (0.8 + noise1(seed + 7.2) * 3.4) * sparkZScale
+                : 0;
+              const zDrift = use3DSymbols
+                ? (noise1(seed + 7.8) - 0.35) * sparkZScale * 0.75
+                : 0;
+              const endZ = use3DSymbols ? baseZ + zLift : headZ;
               const tailX = endX - ux * trail;
               const tailY = endY - uy * trail;
+              const tailZ = use3DSymbols ? baseZ + zDrift : endZ;
               const alpha = clamp(0.5 + noise1(seed + 5.9) * 0.5, 0.42, 1);
               const width = Math.max(1.05, baseWidth * (0.24 + noise1(seed + 6.3) * 0.35));
 
@@ -1661,52 +2397,46 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 new Graphic({
                   geometry: new Polyline({
                     spatialReference: workingGeometry.spatialReference,
-                    paths: [[[tailX, tailY], [endX, endY]]]
+                    paths: [[toPathCoord(tailX, tailY, tailZ), toPathCoord(endX, endY, endZ)]]
                   }),
-                  symbol: {
-                    type: "simple-line",
-                    style: "solid",
-                    width: Math.max(width * 1.8, 1.4),
-                    color: [255, 139, 66, alpha * 0.34]
-                  }
+                  symbol: buildWeldLineSymbol(
+                    Math.max(width * 1.8, 1.4),
+                    [255, 139, 66, alpha * 0.34],
+                    use3DSymbols
+                  )
                 }),
                 new Graphic({
                   geometry: new Polyline({
                     spatialReference: workingGeometry.spatialReference,
-                    paths: [[[tailX, tailY], [endX, endY]]]
+                    paths: [[toPathCoord(tailX, tailY, tailZ), toPathCoord(endX, endY, endZ)]]
                   }),
-                  symbol: {
-                    type: "simple-line",
-                    style: "solid",
-                    width,
-                    color: [255, 230, 168, alpha]
-                  }
+                  symbol: buildWeldLineSymbol(width, [255, 230, 168, alpha], use3DSymbols)
                 })
               );
 
               if (i % 2 === 0) {
                 sparkGraphics.push(
                   new Graphic({
-                    geometry: new Point({
-                      x: endX,
-                      y: endY,
-                      spatialReference: workingGeometry.spatialReference
-                    }),
-                    symbol: {
-                      type: "simple-marker",
-                      style: "circle",
-                      size: clamp(2.8 + baseWidth * 0.85 + noise1(seed + 8.1) * 3.2, 3, 11),
-                      color: [255, 247, 210, alpha],
-                      outline: {
-                        color: [255, 199, 134, 0],
-                        width: 0
-                      }
-                    }
+                    geometry: buildPointGeometry(endX, endY, workingGeometry.spatialReference, endZ),
+                    symbol: buildWeldPointSymbol(
+                      clamp(2.8 + baseWidth * 0.85 + noise1(seed + 8.1) * 3.2, 3, 11),
+                      [255, 247, 210, alpha],
+                      [255, 199, 134, 0],
+                      0,
+                      use3DSymbols
+                    )
                   })
                 );
               }
             }
           });
+          if (use3DSymbols) {
+            (weldLayer as any).elevationInfo = weldUsesZ
+              ? { mode: "absolute-height" }
+              : { mode: "relative-to-ground", offset: 0.25 };
+          } else if ((weldLayer as any).elevationInfo) {
+            (weldLayer as any).elevationInfo = null;
+          }
 
           weldLayer.removeAll();
           if (sparkGraphics.length) {
@@ -2677,11 +3407,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
       const baseOutline = layerData.polygonStyle?.outlineWidth ?? defaultPolygonStyle.outlineWidth;
       layerData.layer.graphics.forEach((graphic: any) => {
-        if (!graphic?.symbol || graphic.symbol.type !== "simple-fill" || !graphic.symbol.outline) return;
-        const symbol = graphic.symbol.clone();
-        symbol.outline = { ...symbol.outline, width: baseOutline * outlineWidthScale };
-        graphic.symbol = symbol;
+        applyPolygonOutlineWidth(graphic, baseOutline * outlineWidthScale);
       });
+      if (hasTimeGradientAnimation) {
+        applyPolygonTimeGradient3D(layerData, gradientProgress ?? 0);
+      }
     }
 
     const baseEffect = buildBaseLayerEffect(layerData);

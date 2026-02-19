@@ -120,6 +120,7 @@ const hasLikelyGeographicCoordinates = (features: ProjectSnapshot["features"] | 
 
 const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | null => {
   if (!config.view) return null;
+  const isSceneView = String((config.view as any)?.type || "") === "3d";
   const spatialReference = config.view?.spatialReference
     ? {
         wkid: config.view.spatialReference.isWebMercator
@@ -197,6 +198,29 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   const backgroundColor = basemapBackgroundInput?.value || "#ffffff";
   const backgroundTransparent = Boolean(basemapBackgroundTransparentInput?.checked);
   const basemapLabelsVisible = basemapLabelsToggle ? Boolean(basemapLabelsToggle.checked) : true;
+  const camera = (config.view as any)?.camera;
+  const cameraPosition = camera?.position;
+  const cameraSnapshot =
+    isSceneView &&
+    Number.isFinite(Number(cameraPosition?.x)) &&
+    Number.isFinite(Number(cameraPosition?.y)) &&
+    Number.isFinite(Number(cameraPosition?.z))
+      ? {
+          position: {
+            x: Number(cameraPosition.x),
+            y: Number(cameraPosition.y),
+            z: Number(cameraPosition.z),
+            spatialReference: cameraPosition?.spatialReference
+              ? {
+                  wkid: Number(cameraPosition.spatialReference?.wkid) || undefined,
+                  latestWkid: Number(cameraPosition.spatialReference?.latestWkid) || undefined
+                }
+              : undefined
+          },
+          heading: Number(camera?.heading ?? 0),
+          tilt: Number(camera?.tilt ?? 0)
+        }
+      : undefined;
 
   return {
     type: "FeatureCollection",
@@ -217,6 +241,8 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           basemapLabelsVisible,
           backgroundColor,
           backgroundTransparent,
+          mode: isSceneView ? "3d" : "2d",
+          camera: cameraSnapshot,
           extent: config.view.extent
             ? {
                 xmin: config.view.extent.xmin,
@@ -242,6 +268,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
   if (!meta) return;
   const layersToAwait: any[] = [];
   let targetExtent: Extent | null = null;
+  let targetCamera: any = null;
 
   config.setIsRestoringProject(true);
   config.setProjectError(null);
@@ -314,6 +341,27 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         ymax: extent.ymax,
         spatialReference: extent.wkid ? { wkid: extent.wkid } : config.view.spatialReference
       });
+    }
+    if (meta.app?.camera?.position) {
+      const pos = meta.app.camera.position;
+      if (
+        Number.isFinite(Number(pos.x)) &&
+        Number.isFinite(Number(pos.y)) &&
+        Number.isFinite(Number(pos.z))
+      ) {
+        targetCamera = {
+          position: {
+            x: Number(pos.x),
+            y: Number(pos.y),
+            z: Number(pos.z),
+            spatialReference: pos.spatialReference?.wkid
+              ? { wkid: Number(pos.spatialReference.wkid) }
+              : config.view.spatialReference
+          },
+          heading: Number(meta.app.camera.heading ?? 0),
+          tilt: Number(meta.app.camera.tilt ?? 0)
+        };
+      }
     }
 
     const storedWkid = Number(meta.spatialReference?.wkid);
@@ -500,7 +548,15 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     config.updateLayersList();
     config.updateTimeline();
     config.updateAnimationOptions();
-    if (targetExtent) {
+    if (targetCamera && String((config.view as any)?.type || "") === "3d") {
+      await config.view.when?.();
+      if (typeof config.view.whenLayerView === "function" && layersToAwait.length) {
+        await Promise.all(
+          layersToAwait.map((layer) => config.view.whenLayerView(layer).catch(() => undefined))
+        );
+      }
+      await config.view.goTo(targetCamera, { animate: false }).catch(() => undefined);
+    } else if (targetExtent) {
       await config.view.when?.();
       if (typeof config.view.whenLayerView === "function" && layersToAwait.length) {
         await Promise.all(

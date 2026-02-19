@@ -74,6 +74,7 @@ const webglAnimationTypes = new Set([
   "noiseDissolve",
   "ghostTrail",
   "dartHit",
+  "fireworks",
   "breathe",
   "pixelate",
   "timeGradient",
@@ -202,8 +203,14 @@ type ExportState = {
   isExporting: boolean;
 };
 
+type ViewMode = "2d" | "3d";
+
 let hasBooted = false;
 let view: any = null;
+let currentViewMode: ViewMode = "2d";
+let isSwitchingViewMode = false;
+let map2DHostEl: any = null;
+let scene3DHostEl: any = null;
 let graphicsLayers: LayerData[] = [];
 let selectedLayerIndex = -1;
 let animationSettingsHighlightTimeout: number | null = null;
@@ -255,9 +262,16 @@ let mapContextMenuEl: HTMLElement | null = null;
 let mapContextMenuItemsEl: HTMLElement | null = null;
 let mapContextMenuTitleEl: HTMLElement | null = null;
 let mapContextMenuInitialized = false;
+let mapContextMenuContainerEl: HTMLElement | null = null;
+let mapContextMenuDragHandle: { remove: () => void } | null = null;
+let mapContextMenuWheelHandle: { remove: () => void } | null = null;
+let mapContextMenuGlobalHandlersBound = false;
 let mapContextMenuScreenPoint: { x: number; y: number } | null = null;
 let mapContextMenuMapPoint: Point | null = null;
 let mapContextMenuLayerIndex: number | null = null;
+let viewExtentWatchHandle: { remove: () => void } | null = null;
+let viewClickHandle: { remove: () => void } | null = null;
+let viewDoubleClickHandle: { remove: () => void } | null = null;
 let isStorageQuotaWarningActive = false;
 let worldCountriesLayer: FeatureLayer | null = null;
 let worldCountriesLayerPromise: Promise<FeatureLayer> | null = null;
@@ -484,7 +498,8 @@ const featureLayerConfig: FeatureLayerConfig = {
   scheduleProjectSave: () => scheduleProjectSaveRef(),
   defaultPointStyle,
   defaultLineStyle,
-  defaultPolygonStyle
+  defaultPolygonStyle,
+  applyLayerModeProperties
 };
 const handleAddFeatureLayer = () => handleAddFeatureLayerFromState(featureLayerState, featureLayerConfig);
 const aspectRatioState: AspectRatioState = {
@@ -523,15 +538,92 @@ function setSketchUpdateOnGraphicClick(value: boolean) {
   }
 }
 
+function syncSketchModeOptions() {
+  if (!sketch) return;
+  const sketchAny = sketch as any;
+  const enableZ = currentViewMode === "3d";
+  const defaultUpdateOptions = sketchAny.defaultUpdateOptions ?? {};
+  sketchAny.defaultUpdateOptions = {
+    ...defaultUpdateOptions,
+    enableZ
+  };
+  const defaultCreateOptions = sketchAny.defaultCreateOptions ?? {};
+  sketchAny.defaultCreateOptions = {
+    ...defaultCreateOptions,
+    hasZ: enableZ
+  };
+}
+
 function setDrawInfoBoxVisible(visible: boolean) {
   const infoBox = document.getElementById("draw-info-box");
   if (!infoBox) return;
   infoBox.classList.toggle("is-active", visible);
 }
 
+function getMapHostElement(mode: ViewMode): any {
+  return mode === "3d" ? scene3DHostEl : map2DHostEl;
+}
+
+function setMapHostVisibility(mode: ViewMode) {
+  const map2D = getMapHostElement("2d") as HTMLElement | null;
+  const scene3D = getMapHostElement("3d") as HTMLElement | null;
+  const show2D = mode === "2d";
+  if (map2D) {
+    map2D.toggleAttribute("hidden", !show2D);
+    map2D.setAttribute("aria-hidden", show2D ? "false" : "true");
+  }
+  if (scene3D) {
+    scene3D.toggleAttribute("hidden", show2D);
+    scene3D.setAttribute("aria-hidden", show2D ? "true" : "false");
+  }
+}
+
+function setSceneModeButtonLabel() {
+  const button = document.getElementById("scene-mode-btn") as any;
+  if (!button) return;
+  const to3D = currentViewMode === "2d";
+  button.textContent = to3D ? "3D Mode" : "2D Mode";
+  button.setAttribute("icon-start", to3D ? "globe" : "map");
+  button.setAttribute("aria-label", to3D ? "Switch to 3D mode" : "Switch to 2D mode");
+  button.setAttribute("title", to3D ? "Switch to 3D mode" : "Switch to 2D mode");
+  button.classList.add("show");
+}
+
+function ensureWorldElevationGround(map: any) {
+  if (!map) return;
+  const groundAny = map.ground as any;
+  const hasGroundLayers =
+    Boolean(groundAny) &&
+    Number(groundAny?.layers?.length ?? groundAny?.layers?.items?.length ?? 0) > 0;
+  if (!groundAny || !hasGroundLayers) {
+    map.ground = "world-elevation";
+  }
+}
+
+async function waitForHostView(mode: ViewMode) {
+  const host = getMapHostElement(mode);
+  if (!host) return null;
+  if (host.view) return host.view;
+  return await new Promise<any>((resolve) => {
+    const timeoutId = window.setTimeout(() => resolve(host.view ?? null), 8000);
+    const onReady = (event: any) => {
+      window.clearTimeout(timeoutId);
+      host.removeEventListener("arcgisViewReadyChange", onReady);
+      resolve(event?.target?.view ?? host.view ?? null);
+    };
+    host.addEventListener("arcgisViewReadyChange", onReady);
+  });
+}
+
 function ensureCompassElement() {
-  if (compassElement) return;
-  compassElement = document.getElementById("map-compass");
+  const nextCompass =
+    (document.getElementById(currentViewMode === "3d" ? "scene-compass" : "map-compass") as HTMLElement | null) ??
+    null;
+  if (compassElement && compassElement !== nextCompass) {
+    compassElement.setAttribute("hidden", "");
+    compassElement.setAttribute("aria-hidden", "true");
+  }
+  compassElement = nextCompass;
   if (compassElement) {
     if (view) {
       (compassElement as any).view = view;
@@ -566,8 +658,13 @@ function scheduleCompassVisibility(rotation: number) {
   }, 150);
 }
 
-function setupCompassWatcher() {
-  if (!view || compassRotationHandle) return;
+function setupCompassWatcher(force = false) {
+  if (!view) return;
+  if (force && compassRotationHandle) {
+    compassRotationHandle.remove();
+    compassRotationHandle = null;
+  }
+  if (compassRotationHandle) return;
   ensureCompassElement();
   if (compassElement && (compassElement as any).view !== view) {
     (compassElement as any).view = view;
@@ -787,27 +884,42 @@ async function handleMapContextMenu(event: MouseEvent) {
 }
 
 function initMapContextMenu() {
-  if (mapContextMenuInitialized) return;
-  mapContextMenuInitialized = true;
-  mapContextMenuEl = document.getElementById("map-context-menu");
-  mapContextMenuItemsEl = document.getElementById("map-context-menu-items");
-  mapContextMenuTitleEl = document.getElementById("map-context-menu-title");
+  if (!mapContextMenuInitialized) {
+    mapContextMenuInitialized = true;
+    mapContextMenuEl = document.getElementById("map-context-menu");
+    mapContextMenuItemsEl = document.getElementById("map-context-menu-items");
+    mapContextMenuTitleEl = document.getElementById("map-context-menu-title");
+  }
   if (!mapContextMenuEl || !mapContextMenuItemsEl || !mapContextMenuTitleEl || !view) return;
-
-  view.container.addEventListener("contextmenu", handleMapContextMenu);
-  document.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (event.button === 2) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest?.("#map-context-menu")) return;
-      closeMapContextMenu();
-    },
-    true
-  );
-  window.addEventListener("blur", closeMapContextMenu);
-  view.on("drag", closeMapContextMenu);
-  view.on("mouse-wheel", closeMapContextMenu);
+  if (!mapContextMenuGlobalHandlersBound) {
+    mapContextMenuGlobalHandlersBound = true;
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.button === 2) return;
+        const target = event.target as HTMLElement | null;
+        if (target?.closest?.("#map-context-menu")) return;
+        closeMapContextMenu();
+      },
+      true
+    );
+    window.addEventListener("blur", closeMapContextMenu);
+  }
+  if (mapContextMenuContainerEl) {
+    mapContextMenuContainerEl.removeEventListener("contextmenu", handleMapContextMenu);
+  }
+  mapContextMenuContainerEl = view.container as HTMLElement | null;
+  mapContextMenuContainerEl?.addEventListener("contextmenu", handleMapContextMenu);
+  if (mapContextMenuDragHandle) {
+    mapContextMenuDragHandle.remove();
+    mapContextMenuDragHandle = null;
+  }
+  if (mapContextMenuWheelHandle) {
+    mapContextMenuWheelHandle.remove();
+    mapContextMenuWheelHandle = null;
+  }
+  mapContextMenuDragHandle = view.on("drag", closeMapContextMenu);
+  mapContextMenuWheelHandle = view.on("mouse-wheel", closeMapContextMenu);
 }
 
 function updateSnappingOptions() {
@@ -823,6 +935,146 @@ function updateSnappingOptions() {
     sketchAny.snappingOptions.enabled = true;
     sketchAny.snappingOptions.featureSources = sources;
   }
+}
+
+function resetSketchForCurrentView() {
+  if (!sketch) return;
+  try {
+    sketch.cancel();
+  } catch {
+    // ignore
+  }
+  sketch.destroy?.();
+  sketch = null;
+  sketchHasUpdateHandler = false;
+  isVertexEditing = false;
+}
+
+function bindActiveViewHandlers() {
+  if (!view) return;
+  if (viewExtentWatchHandle) {
+    viewExtentWatchHandle.remove();
+    viewExtentWatchHandle = null;
+  }
+  viewExtentWatchHandle = reactiveUtils.watch(() => view.extent, () => {
+    scheduleProjectSave();
+    scheduleThumbtackParallaxUpdate();
+  });
+  if (viewClickHandle) {
+    viewClickHandle.remove();
+    viewClickHandle = null;
+  }
+  if (viewDoubleClickHandle) {
+    viewDoubleClickHandle.remove();
+    viewDoubleClickHandle = null;
+  }
+  viewClickHandle = view.on("click", handleMapClick);
+  viewDoubleClickHandle = view.on("double-click", handleMapDoubleClick);
+  setupCompassWatcher(true);
+  initMapContextMenu();
+  updateSnappingOptions();
+  updateExportResolutionLabel(view as any);
+}
+
+function applyLayerModeProperties(layerData: LayerData) {
+  if (!layerData?.layer) return;
+  if (currentViewMode !== "3d") {
+    if ((layerData.layer as any).elevationInfo) {
+      (layerData.layer as any).elevationInfo = null;
+    }
+    return;
+  }
+  const layerAny = layerData.layer as any;
+  const geometryType = layerData.type === "feature" ? String(layerAny.geometryType || "") : layerData.type;
+  if (geometryType === "polygon") {
+    layerAny.elevationInfo = { mode: "on-the-ground" };
+    return;
+  }
+  if (geometryType === "polyline") {
+    layerAny.elevationInfo =
+      layerData.type === "polyline"
+        ? { mode: "relative-to-ground", offset: 1 }
+        : { mode: "on-the-ground" };
+    return;
+  }
+  layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0.5 };
+}
+
+function applyViewModeToAllLayers() {
+  graphicsLayers.forEach((layerData) => {
+    applyLayerModeProperties(layerData);
+    if (layerData.type === "feature") {
+      layerData.featureLastValue = undefined;
+      applyFeatureLayerAnimation(layerData, currentTime);
+      applyLayerEffects(layerData);
+      return;
+    }
+    if (layerData.type === "text") {
+      applyTextSymbols(layerData);
+      applyLayerEffects(layerData);
+      return;
+    }
+    applyLayerStyle(layerData);
+    applyLayerEffects(layerData);
+  });
+}
+
+async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; preserveViewpoint?: boolean }) {
+  if (isSwitchingViewMode) return;
+  if (mode === currentViewMode && view) {
+    setSceneModeButtonLabel();
+    return;
+  }
+  const targetHost = getMapHostElement(mode);
+  if (!targetHost) return;
+  isSwitchingViewMode = true;
+  try {
+    closeMapContextMenu();
+    const previousViewpoint =
+      options?.preserveViewpoint === false ? null : view?.viewpoint?.clone?.() ?? null;
+    const sharedMap = view?.map ?? map2DHostEl?.map ?? scene3DHostEl?.map ?? null;
+    if (sharedMap) {
+      if (mode === "3d") {
+        ensureWorldElevationGround(sharedMap);
+      }
+      if (map2DHostEl) {
+        map2DHostEl.map = sharedMap;
+      }
+      if (scene3DHostEl) {
+        scene3DHostEl.map = sharedMap;
+      }
+    }
+    setMapHostVisibility(mode);
+    const targetView = await waitForHostView(mode);
+    if (!targetView) return;
+    if (sharedMap && targetView.map !== sharedMap) {
+      targetView.map = sharedMap;
+    }
+    if (previousViewpoint && typeof targetView.goTo === "function") {
+      await targetView.goTo(previousViewpoint, { animate: false }).catch(() => undefined);
+    }
+    view = targetView;
+    currentViewMode = mode;
+    setSceneModeButtonLabel();
+    resetSketchForCurrentView();
+    bindActiveViewHandlers();
+    applyViewModeToAllLayers();
+    if (selectedLayerIndex >= 0) {
+      selectLayer(selectedLayerIndex, false);
+    }
+    updateBasemapBackgroundControls();
+    scheduleBasemapLabelsVisibility();
+    if (!options?.skipSave) {
+      scheduleProjectSave();
+    }
+  } finally {
+    isSwitchingViewMode = false;
+  }
+}
+
+async function toggleViewMode() {
+  const nextMode: ViewMode = currentViewMode === "2d" ? "3d" : "2d";
+  await setViewMode(nextMode);
 }
 
 const buildProjectSnapshot = () => {
@@ -841,6 +1093,10 @@ const buildProjectSnapshot = () => {
 buildProjectSnapshotRef = buildProjectSnapshot;
 
 async function applyProjectSnapshot(snapshot: unknown) {
+  const snapshotMode = (snapshot as any)?.properties?._pulse?.app?.mode;
+  if (snapshotMode === "2d" || snapshotMode === "3d") {
+    await setViewMode(snapshotMode, { skipSave: true, preserveViewpoint: false });
+  }
   if (view) {
     const overlayLayers = graphicsLayers.flatMap((layerData) => getLayerOverlayLayers(layerData));
     if (overlayLayers.length) {
@@ -853,6 +1109,7 @@ async function applyProjectSnapshot(snapshot: unknown) {
       delete (layerData as any).__weldSparkLayer;
       delete (layerData as any).__flightLayer;
       delete (layerData as any).__waypointLayer;
+      delete (layerData as any).__fireworksLayer;
     });
   }
   await applyProjectSnapshotFromState(
@@ -919,6 +1176,8 @@ async function applyProjectSnapshot(snapshot: unknown) {
     },
     snapshot as ProjectSnapshot
   );
+  applyViewModeToAllLayers();
+  setSceneModeButtonLabel();
 }
 
 const storageConfig = {
@@ -1445,19 +1704,19 @@ function applyBasemapBackgroundColor(color: string) {
     mapWrapper.style.background = color;
     mapWrapper.style.setProperty("background-color", color, "important");
   }
-  const mapEl = document.getElementById("arcgisMap");
-  if (mapEl) {
-    (mapEl as HTMLElement).style.background = color;
-    (mapEl as HTMLElement).style.setProperty("background-color", color, "important");
-    const surface = findInShadow(mapEl, ".esri-view-surface");
+  const hosts = [document.getElementById("arcgisMap"), document.getElementById("arcgisScene")].filter(Boolean);
+  hosts.forEach((host) => {
+    (host as HTMLElement).style.background = color;
+    (host as HTMLElement).style.setProperty("background-color", color, "important");
+    const surface = findInShadow(host as HTMLElement, ".esri-view-surface");
     if (surface) {
       surface.style.background = color;
     }
-    const root = findInShadow(mapEl, ".esri-view-root");
+    const root = findInShadow(host as HTMLElement, ".esri-view-root");
     if (root) {
       root.style.background = color;
     }
-  }
+  });
   const container = viewAny?.container as HTMLElement | null;
   if (container) {
     container.style.background = color;
@@ -1471,19 +1730,19 @@ function resetBasemapBackgroundColor() {
     mapWrapper.style.background = "";
     mapWrapper.style.removeProperty("background-color");
   }
-  const mapEl = document.getElementById("arcgisMap");
-  if (mapEl) {
-    (mapEl as HTMLElement).style.background = "";
-    (mapEl as HTMLElement).style.removeProperty("background-color");
-    const surface = findInShadow(mapEl, ".esri-view-surface");
+  const hosts = [document.getElementById("arcgisMap"), document.getElementById("arcgisScene")].filter(Boolean);
+  hosts.forEach((host) => {
+    (host as HTMLElement).style.background = "";
+    (host as HTMLElement).style.removeProperty("background-color");
+    const surface = findInShadow(host as HTMLElement, ".esri-view-surface");
     if (surface) {
       surface.style.background = "";
     }
-    const root = findInShadow(mapEl, ".esri-view-root");
+    const root = findInShadow(host as HTMLElement, ".esri-view-root");
     if (root) {
       root.style.background = "";
     }
-  }
+  });
   const container = (view as any)?.container as HTMLElement | null;
   if (container) {
     container.style.background = "";
@@ -1690,15 +1949,17 @@ function findMapAttributionText() {
   const direct = document.querySelector(".esri-attribution__sources") as HTMLElement | null;
   const directText = direct?.innerText?.trim();
 
-  const mapEl = document.getElementById("arcgisMap") as HTMLElement | null;
-  const fromShadow = mapEl ? findInShadow(mapEl, ".esri-attribution__sources") : null;
-  const shadowText = fromShadow?.innerText?.trim();
+  const hostTexts = [document.getElementById("arcgisMap"), document.getElementById("arcgisScene")]
+    .filter(Boolean)
+    .map((host) => findInShadow(host as HTMLElement, ".esri-attribution__sources")?.innerText?.trim())
+    .filter(Boolean)
+    .join("; ");
 
   const fromDocument = findInShadow(document.documentElement, ".esri-attribution__sources");
   const documentText = fromDocument?.innerText?.trim();
 
   const fromLayers = collectMapAttributions();
-  return mergeAttributionStrings(directText, shadowText, documentText, fromLayers);
+  return mergeAttributionStrings(directText, hostTexts, documentText, fromLayers);
 }
 
 function collectMapAttributions() {
@@ -2462,7 +2723,8 @@ function getLayerOverlayLayers(layerData: LayerData) {
     (layerData as any).__dartLayer,
     (layerData as any).__weldSparkLayer,
     (layerData as any).__flightLayer,
-    (layerData as any).__waypointLayer
+    (layerData as any).__waypointLayer,
+    (layerData as any).__fireworksLayer
   ].filter(Boolean);
 }
 
@@ -2478,6 +2740,7 @@ function clearLayerOverlayLayers(layerData: LayerData) {
   delete (layerData as any).__weldSparkLayer;
   delete (layerData as any).__flightLayer;
   delete (layerData as any).__waypointLayer;
+  delete (layerData as any).__fireworksLayer;
 }
 
 async function resetProject() {
@@ -2514,6 +2777,7 @@ async function resetProject() {
     delete (layerData as any).__weldSparkLayer;
     delete (layerData as any).__flightLayer;
     delete (layerData as any).__waypointLayer;
+    delete (layerData as any).__fireworksLayer;
   });
   graphicsLayers = [];
   selectedLayerIndex = -1;
@@ -2771,19 +3035,38 @@ export function bootApp() {
   hasBooted = true;
   loadingOverlay.showLoadingOverlay();
 
-  const mapEl = document.querySelector("#arcgisMap") as any;
-  if (!mapEl) return;
+  map2DHostEl = document.querySelector("#arcgisMap") as any;
+  scene3DHostEl = document.querySelector("#arcgisScene") as any;
+  if (!map2DHostEl) return;
 
-  if (mapEl.view) {
-    view = mapEl.view;
-    initializeApp();
-    loadingOverlay.finishLoadingOverlay();
+  setMapHostVisibility(currentViewMode);
+  setSceneModeButtonLabel();
+
+  const maybeActivateReadyView = (nextView: any, mode: ViewMode) => {
+    if (!nextView) return;
+    if (!view || currentViewMode === mode) {
+      view = nextView;
+      if (!hasInitialized) {
+        initializeApp();
+        loadingOverlay.finishLoadingOverlay();
+      } else if (currentViewMode === mode) {
+        bindActiveViewHandlers();
+      }
+    }
+  };
+
+  if (map2DHostEl.view && currentViewMode === "2d") {
+    maybeActivateReadyView(map2DHostEl.view, "2d");
+  }
+  if (scene3DHostEl?.view && currentViewMode === "3d") {
+    maybeActivateReadyView(scene3DHostEl.view, "3d");
   }
 
-  mapEl.addEventListener("arcgisViewReadyChange", (event: any) => {
-    view = event.target.view;
-    initializeApp();
-    loadingOverlay.finishLoadingOverlay();
+  map2DHostEl.addEventListener("arcgisViewReadyChange", (event: any) => {
+    maybeActivateReadyView(event?.target?.view, "2d");
+  });
+  scene3DHostEl?.addEventListener("arcgisViewReadyChange", (event: any) => {
+    maybeActivateReadyView(event?.target?.view, "3d");
   });
 }
 
@@ -2845,10 +3128,32 @@ function toViewGeometry(geometry: any) {
   return geometry;
 }
 
+function ensurePolylineGeometryHasZ(geometry: any) {
+  if (!geometry || geometry.type !== "polyline") return geometry;
+  const paths = (geometry.paths ?? []).map((path: any[]) =>
+    path.map((coord: any) => {
+      if (!Array.isArray(coord) || coord.length < 2) return coord;
+      const x = Number(coord[0]);
+      const y = Number(coord[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return coord;
+      const z = Number(coord[2]);
+      return [x, y, Number.isFinite(z) ? z : 0];
+    })
+  );
+  return new Polyline({
+    paths,
+    spatialReference: geometry.spatialReference,
+    hasZ: true
+  });
+}
+
 function prepareLayerGeometryForSketch(layerData: LayerData) {
   layerData.layer.graphics.forEach((graphic: any) => {
     if (!graphic?.geometry) return;
-    const prepared = toViewGeometry(graphic.geometry);
+    let prepared = toViewGeometry(graphic.geometry);
+    if (currentViewMode === "3d" && layerData.type === "polyline") {
+      prepared = ensurePolylineGeometryHasZ(prepared);
+    }
     if (prepared) {
       graphic.geometry = prepared;
     }
@@ -2905,11 +3210,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     setProjectName(projectName, false);
   }
   if (view) {
-    reactiveUtils.watch(() => view.extent, () => {
-      scheduleProjectSave();
-      scheduleThumbtackParallaxUpdate();
-    });
-    setupCompassWatcher();
+    bindActiveViewHandlers();
   }
   updateTimeline();
   updateAnimationOptions();
@@ -3217,6 +3518,9 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   getEl("text-underline-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
 
   getEl("play-button").addEventListener("click", handlePlayFromStart);
+  getEl("scene-mode-btn").addEventListener("click", () => {
+    void toggleViewMode();
+  });
   getEl("rotation-button").addEventListener("click", rotateMap);
   getEl("menu-new-project-btn").addEventListener("click", resetProject);
   getEl("delete-layer-btn").addEventListener("click", () => {
@@ -3385,12 +3689,6 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     }
     updateExportResolutionLabel(view as any);
   });
-
-  if (view) {
-    view.on("click", handleMapClick);
-    view.on("double-click", handleMapDoubleClick);
-    initMapContextMenu();
-  }
 
   document.addEventListener("keydown", (event) => {
     if (isAiModalOpen()) return;
@@ -3647,37 +3945,22 @@ function buildFeatureBaseSymbol(layerData: LayerData, visualType: string) {
   const geometryType = (layerData.layer as FeatureLayer).geometryType;
   if (geometryType === "point" || geometryType === "multipoint") {
     const style = layerData.pointStyle ?? defaultPointStyle;
-    return buildPointSymbol(style);
+    return buildPointSymbolForCurrentView(style);
   }
   if (geometryType === "polyline") {
     const style = layerData.lineStyle ?? defaultLineStyle;
-    const base = buildLineSymbol(style);
-    if (visualType === "opacity") {
-      base.color = style.color;
-    }
-    return base;
+    void visualType;
+    return buildLineSymbolForCurrentView(style);
   }
   if (geometryType === "polygon") {
     const style = layerData.polygonStyle ?? defaultPolygonStyle;
-    const fillColor = parseColorToRgba(style.color);
-    const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
-    const outlineColor = parseColorToRgba(style.outlineColor);
-    const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
-    return {
-      type: "simple-fill",
-      style: style.style as any,
-      color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha],
-      outline: {
-        color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
-        width: style.outlineWidth,
-        style: normalizeLineStyle(style.outlineStyle ?? "solid") as any
-      }
-    };
+    return buildPolygonSymbolForCurrentView(style);
   }
-  return buildPointSymbol(defaultPointStyle);
+  return buildPointSymbolForCurrentView(defaultPointStyle);
 }
 
 function applyFeatureLayerRenderer(layerData: LayerData, value: number) {
+  applyLayerModeProperties(layerData);
   const field = layerData.featureField;
   const stats = layerData.featureFieldStats;
   if (!field || !stats) return;
@@ -3738,13 +4021,30 @@ function applyFeatureLayerRenderer(layerData: LayerData, value: number) {
   }
 }
 
+function applyFeatureLayerStaticRenderer(layerData: LayerData) {
+  applyLayerModeProperties(layerData);
+  const layer = layerData.layer as FeatureLayer;
+  const visualType = layerData.featureVisualVariable ?? "opacity";
+  layer.renderer = {
+    type: "simple",
+    symbol: buildFeatureBaseSymbol(layerData, visualType)
+  } as any;
+  layerData.featureLastValue = undefined;
+}
+
 function applyFeatureLayerAnimation(layerData: LayerData, time: number) {
   const anim = layerData.animations.find((entry) => entry.type === "field");
   const stats = layerData.featureFieldStats;
-  if (!anim || !stats) return;
+  if (!anim || !stats || !layerData.featureField) {
+    applyFeatureLayerStaticRenderer(layerData);
+    return;
+  }
 
   const span = anim.duration || 0;
-  if (span <= 0) return;
+  if (span <= 0) {
+    applyFeatureLayerStaticRenderer(layerData);
+    return;
+  }
 
   const t = Math.min(1, Math.max(0, (time - anim.start) / span));
   const value = stats.min + (stats.max - stats.min) * t;
@@ -3848,6 +4148,14 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.layerEffectsEnabled = true;
   }
 
+  applyLayerModeProperties(layerData);
+  if (type === "text") {
+    applyTextSymbols(layerData);
+  } else {
+    applyLayerStyle(layerData);
+  }
+  applyLayerEffects(layerData);
+
   graphicsLayers.push(layerData);
   updateSnappingOptions();
   selectLayer(graphicsLayers.length - 1);
@@ -3863,24 +4171,11 @@ function createGraphicForType(
   const graphic = new Graphic({ geometry, attributes });
   if (type === "point") {
     const style = defaultPointStyle;
-    graphic.symbol = buildPointSymbol(style);
+    graphic.symbol = buildPointSymbolForCurrentView(style);
   } else if (type === "polyline") {
-    graphic.symbol = buildLineSymbol(defaultLineStyle);
+    graphic.symbol = buildLineSymbolForCurrentView(defaultLineStyle);
   } else if (type === "polygon") {
-    const fillColor = parseColorToRgba(defaultPolygonStyle.color);
-    const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
-    const outlineColor = parseColorToRgba(defaultPolygonStyle.outlineColor);
-    const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
-    graphic.symbol = {
-      type: "simple-fill",
-      style: defaultPolygonStyle.style as any,
-      color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha],
-      outline: {
-        color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
-        width: defaultPolygonStyle.outlineWidth,
-        style: normalizeLineStyle(defaultPolygonStyle.outlineStyle ?? "solid") as any
-      }
-    };
+    graphic.symbol = buildPolygonSymbolForCurrentView(defaultPolygonStyle);
   }
   return graphic;
 }
@@ -3902,17 +4197,7 @@ function beginTextPlacement(layerIndex: number) {
   textPlacementHandle = view.on("click", (event: any) => {
     const graphic = new Graphic({
       geometry: toGeographicGeometry(event.mapPoint),
-      symbol: {
-        type: "text",
-        text: layerData.textContent || "Text",
-        color: layerData.textColor || "#22323a",
-        font: {
-          size: layerData.textSize || 14,
-          family: layerData.textFontFamily || "sans-serif",
-          style: layerData.textItalic ? "italic" : "normal",
-          decoration: layerData.textUnderline ? "underline" : "none"
-        }
-      }
+      symbol: buildTextSymbolForCurrentView(layerData)
     });
 
     layerData.layer.add(graphic);
@@ -3975,6 +4260,7 @@ async function startDrawing(type: LayerType) {
     layerData.layerEffectsEnabled = true;
   }
 
+  applyLayerModeProperties(layerData);
   graphicsLayers.push(layerData);
 
   if (!sketch) {
@@ -3989,6 +4275,7 @@ async function startDrawing(type: LayerType) {
     sketch.layer = newLayer;
     updateSnappingOptions();
   }
+  syncSketchModeOptions();
   if (sketch && !sketchHasUpdateHandler) {
     sketch.on("update", handleSketchUpdate);
     sketchHasUpdateHandler = true;
@@ -4024,26 +4311,13 @@ async function startDrawing(type: LayerType) {
         graphic.geometry = toGeographicGeometry(graphic.geometry);
             if (type === "point") {
               const style = layerData.pointStyle ?? defaultPointStyle;
-              graphic.symbol = buildPointSymbol(style);
+              graphic.symbol = buildPointSymbolForCurrentView(style);
             } else if (type === "polyline") {
               const style = layerData.lineStyle ?? defaultLineStyle;
-              graphic.symbol = buildLineSymbol(style);
+              graphic.symbol = buildLineSymbolForCurrentView(style);
             } else if (type === "polygon") {
               const style = layerData.polygonStyle ?? defaultPolygonStyle;
-              const fillColor = parseColorToRgba(style.color);
-              const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
-              const outlineColor = parseColorToRgba(style.outlineColor);
-              const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
-              graphic.symbol = {
-                type: "simple-fill",
-                style: style.style,
-                color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha],
-                outline: {
-                  color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
-                  width: style.outlineWidth,
-                  style: normalizeLineStyle(style.outlineStyle ?? "solid") as any
-                }
-              };
+              graphic.symbol = buildPolygonSymbolForCurrentView(style);
             }
 
         ensureGeometryCache(layerData, graphic);
@@ -4205,6 +4479,7 @@ function selectLayer(index: number, focusGraphic = true) {
   if (!sketch) return;
   sketch.layer = layerData.layer;
   updateSnappingOptions();
+  syncSketchModeOptions();
   const allowEditing = !isPlaying;
   setSketchUpdateOnGraphicClick(allowEditing);
   if (!allowEditing) {
@@ -4700,8 +4975,143 @@ function buildPointSymbol(style: PointStyle) {
   return symbol;
 }
 
+function buildPointSymbol3D(style: PointStyle) {
+  const fillColor = parseColorToRgba(style.color);
+  const outlineColor = parseColorToRgba(style.outlineColor);
+  const primitiveByStyle: Record<string, string> = {
+    circle: "circle",
+    square: "square",
+    diamond: "diamond",
+    triangle: "triangle",
+    cross: "cross",
+    x: "x"
+  };
+  const primitive = primitiveByStyle[style.style] ?? "circle";
+  return {
+    type: "point-3d",
+    symbolLayers: [
+      {
+        type: "icon",
+        resource: { primitive },
+        size: Math.max(2, Number(style.size) || defaultPointStyle.size),
+        material: {
+          color: [fillColor.r, fillColor.g, fillColor.b, Number.isFinite(fillColor.a) ? fillColor.a : 1]
+        },
+        outline: {
+          color: [
+            outlineColor.r,
+            outlineColor.g,
+            outlineColor.b,
+            Number.isFinite(outlineColor.a) ? outlineColor.a : 1
+          ],
+          size: Math.max(0.5, Number(style.outlineWidth) || 0)
+        }
+      }
+    ]
+  } as any;
+}
+
+function buildPointSymbolForCurrentView(style: PointStyle) {
+  return currentViewMode === "3d" ? buildPointSymbol3D(style) : buildPointSymbol(style);
+}
+
+function buildPolygonSymbol2D(style: any) {
+  const fillColor = parseColorToRgba(style.color);
+  const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
+  const outlineColor = parseColorToRgba(style.outlineColor);
+  const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
+  return {
+    type: "simple-fill",
+    style: style.style as any,
+    color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha],
+    outline: {
+      color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
+      width: style.outlineWidth,
+      style: normalizeLineStyle(style.outlineStyle ?? "solid") as any
+    }
+  } as any;
+}
+
+function buildPolygonSymbol3D(style: any) {
+  const fillColor = parseColorToRgba(style.color);
+  const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
+  const outlineColor = parseColorToRgba(style.outlineColor);
+  const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
+  return {
+    type: "polygon-3d",
+    symbolLayers: [
+      {
+        type: "fill",
+        material: {
+          color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha]
+        },
+        outline: {
+          color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
+          size: Math.max(0.5, Number(style.outlineWidth) || 0)
+        }
+      }
+    ]
+  } as any;
+}
+
+function buildPolygonSymbolForCurrentView(style: any) {
+  return currentViewMode === "3d" ? buildPolygonSymbol3D(style) : buildPolygonSymbol2D(style);
+}
+
+function buildTextSymbol2D(layerData: LayerData) {
+  return {
+    type: "text",
+    text: layerData.textContent || "Text",
+    color: layerData.textColor || "#22323a",
+    font: {
+      size: layerData.textSize || 14,
+      family: layerData.textFontFamily || "sans-serif",
+      style: layerData.textItalic ? "italic" : "normal",
+      decoration: layerData.textUnderline ? "underline" : "none"
+    }
+  } as any;
+}
+
+function buildTextSymbol3D(layerData: LayerData) {
+  const color = parseColorToRgba(layerData.textColor || "#22323a");
+  return {
+    type: "point-3d",
+    symbolLayers: [
+      {
+        type: "text",
+        text: layerData.textContent || "Text",
+        material: {
+          color: [color.r, color.g, color.b, Number.isFinite(color.a) ? color.a : 1]
+        },
+        halo: {
+          color: [255, 255, 255, 0.9],
+          size: 1
+        },
+        size: Math.max(10, Number(layerData.textSize) || 14),
+        font: {
+          family: layerData.textFontFamily || "sans-serif",
+          style: layerData.textItalic ? "italic" : "normal",
+          weight: "normal"
+        }
+      }
+    ]
+  } as any;
+}
+
+function buildTextSymbolForCurrentView(layerData: LayerData) {
+  return currentViewMode === "3d" ? buildTextSymbol3D(layerData) : buildTextSymbol2D(layerData);
+}
+
+function applyTextSymbols(layerData: LayerData) {
+  if (layerData.type !== "text") return;
+  applyLayerModeProperties(layerData);
+  layerData.layer.graphics.forEach((graphic: any) => {
+    graphic.symbol = buildTextSymbolForCurrentView(layerData);
+  });
+}
+
 function applyThumbtackParallaxToLayer(layerData: LayerData) {
-  if (!view || layerData.type !== "point") return;
+  if (!view || layerData.type !== "point" || currentViewMode === "3d") return;
   const style = layerData.pointStyle ?? defaultPointStyle;
   if (style.style !== THUMBTACK_3D_STYLE) return;
   const centerX = Number(view?.width) / 2;
@@ -4751,56 +5161,31 @@ function scheduleThumbtackParallaxUpdate() {
 }
 
 function applyLayerStyle(layerData: LayerData) {
+  applyLayerModeProperties(layerData);
+  if (layerData.type === "text") {
+    applyTextSymbols(layerData);
+    return;
+  }
   layerData.layer.graphics.forEach((graphic: any) => {
     if (layerData.type === "point") {
       const style = layerData.pointStyle ?? defaultPointStyle;
-      graphic.symbol = buildPointSymbol(style);
+      graphic.symbol = buildPointSymbolForCurrentView(style);
       return;
     }
-    const symbol = graphic.symbol?.clone?.();
-    if (!symbol) {
-      if (layerData.type === "polyline") {
-        const style = layerData.lineStyle ?? defaultLineStyle;
-        graphic.symbol = buildLineSymbol(style);
-      } else if (layerData.type === "polygon") {
-        const style = layerData.polygonStyle ?? defaultPolygonStyle;
-        const fillColor = parseColorToRgba(style.color);
-        const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
-        const outlineColor = parseColorToRgba(style.outlineColor);
-        const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
-        graphic.symbol = {
-          type: "simple-fill",
-          style: style.style,
-          color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha],
-          outline: {
-            color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
-            width: style.outlineWidth,
-            style: normalizeLineStyle(style.outlineStyle ?? "solid") as any
-          }
-        };
-      }
-      return;
-    }
-
-    if (layerData.type === "polyline" && symbol.type === "simple-line") {
+    if (layerData.type === "polyline") {
       const style = layerData.lineStyle ?? defaultLineStyle;
-      applyLineStyle(symbol, style);
-    } else if (layerData.type === "polygon" && symbol.type === "simple-fill") {
-      const style = layerData.polygonStyle ?? defaultPolygonStyle;
-      const fillColor = parseColorToRgba(style.color);
-      const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
-      const outlineColor = parseColorToRgba(style.outlineColor);
-      const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
-      symbol.style = style.style;
-      symbol.color = [fillColor.r, fillColor.g, fillColor.b, fillAlpha];
-      symbol.outline.color = [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha];
-      symbol.outline.width = style.outlineWidth;
-      symbol.outline.style = normalizeLineStyle(style.outlineStyle ?? "solid") as any;
+      graphic.symbol = buildLineSymbolForCurrentView(style);
+      return;
     }
-
-    graphic.symbol = symbol;
+    if (layerData.type === "polygon") {
+      const style = layerData.polygonStyle ?? defaultPolygonStyle;
+      graphic.symbol = buildPolygonSymbolForCurrentView(style);
+    }
   });
-  if ((layerData.pointStyle?.style ?? defaultPointStyle.style) === THUMBTACK_3D_STYLE) {
+  if (
+    currentViewMode !== "3d" &&
+    (layerData.pointStyle?.style ?? defaultPointStyle.style) === THUMBTACK_3D_STYLE
+  ) {
     scheduleThumbtackParallaxUpdate();
   }
 }
@@ -4836,6 +5221,17 @@ function handleSketchUpdate(event: any) {
   const tool = String(event?.tool || "");
   if (state === "start" || state === "active") {
     isVertexEditing = tool === "reshape" || tool === "vertex" || tool === "vertex-edit";
+    if (currentViewMode === "3d" && isVertexEditing) {
+      const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
+      graphics.forEach((graphic: any) => {
+        const layerData = graphicsLayers.find((entry) => entry.layer === graphic?.layer);
+        if (!layerData || layerData.type !== "polyline") return;
+        const layerAny = layerData.layer as any;
+        if (String(layerAny?.elevationInfo?.mode || "") === "on-the-ground") {
+          layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0 };
+        }
+      });
+    }
     return;
   }
   if (state === "complete" || state === "cancel") {
@@ -4852,6 +5248,7 @@ function handleSketchUpdate(event: any) {
     touchedLayers.add(layerData);
   });
   touchedLayers.forEach((layerData) => {
+    applyLayerModeProperties(layerData);
     clearLayerOverlayLayers(layerData);
   });
   graphicsLayers.forEach((layerData) => {
@@ -5094,7 +5491,9 @@ function updatePointAnimationPreview(color: string, outlineColor: string, style:
       container.querySelectorAll(".animation-type-preview--point")
     ) as HTMLElement[];
     previews.forEach((preview) => {
-      const usesPointStyle = !preview.classList.contains("animation-type-preview--dartHit");
+      const usesPointStyle =
+        !preview.classList.contains("animation-type-preview--dartHit") &&
+        !preview.classList.contains("animation-type-preview--fireworks");
       Array.from(preview.classList)
         .filter((cls) => cls.startsWith("point-style-"))
         .forEach((cls) => preview.classList.remove(cls));
@@ -5165,6 +5564,26 @@ function buildLineSymbol(style: LineStyle) {
   const marker = buildLineMarker(style.style, style.color);
   symbol.marker = marker ?? null;
   return symbol;
+}
+
+function buildLineSymbol3D(style: LineStyle) {
+  const color = parseColorToRgba(style.color);
+  return {
+    type: "line-3d",
+    symbolLayers: [
+      {
+        type: "line",
+        size: Math.max(1, Number(style.width) || defaultLineStyle.width),
+        material: {
+          color: [color.r, color.g, color.b, Number.isFinite(color.a) ? color.a : 1]
+        }
+      }
+    ]
+  } as any;
+}
+
+function buildLineSymbolForCurrentView(style: LineStyle) {
+  return currentViewMode === "3d" ? buildLineSymbol3D(style) : buildLineSymbol(style);
 }
 
 function applyLineStyle(symbol: any, style: LineStyle) {
@@ -5380,27 +5799,7 @@ function applyTextSettings(
   layerData.textItalic = isItalic;
   layerData.textUnderline = isUnderline;
 
-  layerData.layer.graphics.forEach((graphic: any) => {
-    const symbol = graphic.symbol?.clone?.() ?? graphic.symbol;
-    if (!symbol) return;
-    if (symbol.type !== "text" && symbol.text === undefined) return;
-    symbol.text = content;
-    if (symbol.font) {
-      symbol.font.size = layerData.textSize ?? 14;
-      symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
-      symbol.font.style = layerData.textItalic ? "italic" : "normal";
-      symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
-    } else {
-      symbol.font = {
-        size: layerData.textSize ?? 14,
-        family: layerData.textFontFamily || "sans-serif",
-        style: layerData.textItalic ? "italic" : "normal",
-        decoration: layerData.textUnderline ? "underline" : "none"
-      };
-    }
-    symbol.color = color;
-    graphic.symbol = symbol;
-  });
+  applyTextSymbols(layerData);
 
   scheduleProjectSave();
 
