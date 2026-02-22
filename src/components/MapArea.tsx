@@ -63,8 +63,113 @@ function MapArea() {
         >
           <arcgis-compass id="scene-compass" slot="top-left"></arcgis-compass>
           <arcgis-expand
+            id="scene-camera-studio-expand"
+            slot="top-left"
+            expand-icon="camera"
+            expand-tooltip="3D Camera Studio"
+            collapse-tooltip="Hide 3D Camera Studio"
+          >
+            <div id="scene-camera-studio-panel" className="scene-camera-studio-panel">
+              <div className="scene-camera-studio-heading">3D Camera Studio</div>
+              <calcite-label className="scene-camera-studio-control">
+                Camera field of view
+                <calcite-slider
+                  id="scene-camera-fov"
+                  min="20"
+                  max="120"
+                  step="1"
+                  value="55"
+                  min-label="20deg"
+                  max-label="120deg"
+                ></calcite-slider>
+                <span id="scene-camera-fov-value" className="scene-camera-studio-readout">
+                  55deg
+                </span>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-toggle">
+                Cinematic FX
+                <calcite-switch id="scene-camera-fx-enabled" scale="s"></calcite-switch>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                Noise
+                <calcite-slider
+                  id="scene-camera-fx-noise"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="42"
+                  min-label="0%"
+                  max-label="100%"
+                ></calcite-slider>
+                <span id="scene-camera-fx-noise-value" className="scene-camera-studio-readout">
+                  42%
+                </span>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                Scanlines
+                <calcite-slider
+                  id="scene-camera-fx-scanline"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="38"
+                  min-label="0%"
+                  max-label="100%"
+                ></calcite-slider>
+                <span id="scene-camera-fx-scanline-value" className="scene-camera-studio-readout">
+                  38%
+                </span>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                Vignette
+                <calcite-slider
+                  id="scene-camera-fx-vignette"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="44"
+                  min-label="0%"
+                  max-label="100%"
+                ></calcite-slider>
+                <span id="scene-camera-fx-vignette-value" className="scene-camera-studio-readout">
+                  44%
+                </span>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                Jitter
+                <calcite-slider
+                  id="scene-camera-fx-jitter"
+                  min="0"
+                  max="12"
+                  step="0.1"
+                  value="2.5"
+                  min-label="0px"
+                  max-label="12px"
+                ></calcite-slider>
+                <span id="scene-camera-fx-jitter-value" className="scene-camera-studio-readout">
+                  2.5 px
+                </span>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                Chromatic shift
+                <calcite-slider
+                  id="scene-camera-fx-chromatic"
+                  min="0"
+                  max="12"
+                  step="0.1"
+                  value="2.2"
+                  min-label="0px"
+                  max-label="12px"
+                ></calcite-slider>
+                <span id="scene-camera-fx-chromatic-value" className="scene-camera-studio-readout">
+                  2.2 px
+                </span>
+              </calcite-label>
+            </div>
+          </arcgis-expand>
+          <arcgis-expand
             id="scene-daylight-expand"
-            slot="top-right"
+            slot="top-left"
             expand-icon="brightness"
             expand-tooltip="Daylight"
             collapse-tooltip="Hide daylight"

@@ -695,6 +695,7 @@ type MarchSegment = {
 type VertexStop = {
   x: number;
   y: number;
+  z?: number;
   accum: number;
 };
 
@@ -806,14 +807,39 @@ const buildVertexStops = (geometry: Polyline) => {
         const prev = path[i - 1];
         total += Math.hypot(point[0] - prev[0], point[1] - prev[1]);
       }
+      const z = Number(point[2]);
+      const stopZ = Number.isFinite(z) ? z : undefined;
       const prevStop = stops[stops.length - 1];
-      if (prevStop && prevStop.x === point[0] && prevStop.y === point[1]) {
+      if (prevStop && prevStop.x === point[0] && prevStop.y === point[1] && prevStop.z === stopZ) {
         continue;
       }
-      stops.push({ x: point[0], y: point[1], accum: total });
+      stops.push({ x: point[0], y: point[1], z: stopZ, accum: total });
     }
   });
   return { stops, total };
+};
+
+const syncOverlayLayerElevation = (
+  overlayLayer: GraphicsLayer,
+  sourceLayer: any,
+  view: any,
+  fallbackOffset = 0
+) => {
+  const overlayAny = overlayLayer as any;
+  if (!isSceneView3D(view)) {
+    if (overlayAny.elevationInfo) {
+      overlayAny.elevationInfo = null;
+    }
+    return;
+  }
+
+  const sourceElevationInfo = sourceLayer?.elevationInfo;
+  if (sourceElevationInfo && typeof sourceElevationInfo === "object") {
+    overlayAny.elevationInfo = { ...sourceElevationInfo };
+    return;
+  }
+
+  overlayAny.elevationInfo = { mode: "relative-to-ground", offset: fallbackOffset };
 };
 
 const toWaypointLabel = (index: number) => {
@@ -1091,6 +1117,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let hasWaypointRouteCartoonAnimation = false;
     let dartProgress: number | null = null;
     let fireworksProgress: number | null = null;
+    let fireworksVariant: "fireworks" | "crossetteShell" | "mineShellCombo" = "fireworks";
     let arrowProgress: number | null = null;
     let barrageProgress: number | null = null;
     let jitterProgress: number | null = null;
@@ -1156,7 +1183,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       if (anim.type === "timeGradient") {
         hasTimeGradientAnimation = true;
       }
-      if (anim.type === "fireworks") {
+      if (
+        anim.type === "fireworks" ||
+        anim.type === "crossetteShell" ||
+        anim.type === "mineShellCombo"
+      ) {
         hasFireworksAnimation = true;
       }
 
@@ -1244,6 +1275,17 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             break;
           case "fireworks":
             fireworksProgress = progress;
+            fireworksVariant = "fireworks";
+            opacity = 1;
+            break;
+          case "crossetteShell":
+            fireworksProgress = progress;
+            fireworksVariant = "crossetteShell";
+            opacity = 1;
+            break;
+          case "mineShellCombo":
+            fireworksProgress = progress;
+            fireworksVariant = "mineShellCombo";
             opacity = 1;
             break;
           case "arrowMarch":
@@ -1823,15 +1865,18 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           const fireworksGraphics: Graphic[] = [];
           const progress = clamp(fireworksProgress, 0, 1);
           const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
-          const launchCutoff = 0.44;
+          const activeFireworksVariant = fireworksVariant as
+            | "fireworks"
+            | "crossetteShell"
+            | "mineShellCombo";
+          const isCrossetteShell = activeFireworksVariant === "crossetteShell";
+          const isMineShellCombo = activeFireworksVariant === "mineShellCombo";
           const styleSize = Math.max(2, layerData.pointStyle?.size ?? config.defaultPointStyle.size);
           const baseFireworkColor = parseColorToRgbaArray(
             layerData.pointStyle?.color ?? config.defaultPointStyle.color,
             [255, 160, 96, 1]
           );
           const baseFireworkAlpha = clamp(baseFireworkColor[3], 0, 1);
-          const warmFireworkColor = rotateHueRgba(baseFireworkColor, 18);
-          const emberFireworkColor = rotateHueRgba(baseFireworkColor, -22);
           const tintTowardWhite = (
             rgba: [number, number, number, number],
             amount: number
@@ -1853,11 +1898,6 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             rgba[2],
             clamp(alpha * baseFireworkAlpha, 0, 1)
           ];
-          const fireworksCoreColor = tintTowardWhite(baseFireworkColor, 0.78);
-          const fireworksSparkColor = tintTowardWhite(baseFireworkColor, 0.58);
-          const fireworksGlowColor = tintTowardWhite(warmFireworkColor, 0.34);
-          let fireworksUsesZ = false;
-
           layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
             const sourcePoint =
               (graphic.__originalGeometry as Point | undefined) ??
@@ -1869,138 +1909,413 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const centerY = targetPoint.y;
             const rawZ = Number((targetPoint as any)?.z ?? (sourcePoint as any)?.z);
             const centerZ = use3DSymbols ? (Number.isFinite(rawZ) ? rawZ : 0) : undefined;
-            fireworksUsesZ = fireworksUsesZ || (use3DSymbols && Number.isFinite(Number(centerZ)));
 
-            const launchHeight = clamp((86 + styleSize * 16) * resolution, 6, 2200);
-            const driftSeed = layerSeed * 0.37 + graphicIndex * 3.1;
-            const driftX = (noise1(driftSeed + 0.7) - 0.5) * resolution * 18;
-            const driftY = (noise1(driftSeed + 1.3) - 0.5) * resolution * 12;
+            const shellSeed = layerSeed * 0.71 + graphicIndex * 17.93;
+            const shellRandom = (offset: number) => noise1(shellSeed + offset);
+            const shellTypeRoll = shellRandom(0.4);
+            let shellType: "ring" | "peony" | "chrysanthemum" | "willow" | "palm" =
+              shellTypeRoll < 0.18
+                ? "ring"
+                : shellTypeRoll < 0.44
+                  ? "peony"
+                  : shellTypeRoll < 0.7
+                    ? "chrysanthemum"
+                    : shellTypeRoll < 0.88
+                      ? "willow"
+                      : "palm";
+            if (isCrossetteShell) {
+              shellType = shellTypeRoll < 0.5 ? "peony" : "chrysanthemum";
+            }
+            if (isMineShellCombo) {
+              shellType = shellTypeRoll < 0.62 ? "peony" : "palm";
+            }
+            const launchCutoff = isMineShellCombo
+              ? 0.45 + shellRandom(0.9) * 0.15
+              : 0.3 + shellRandom(0.9) * 0.18;
+            const fuseDelay = isMineShellCombo
+              ? 0.05 + shellRandom(1.3) * 0.08
+              : 0.03 + shellRandom(1.3) * 0.11;
+            const burstStart = Math.min(0.94, launchCutoff + fuseDelay);
+            const sceneScaleBoost = use3DSymbols
+              ? clamp(1 + Math.log2(resolution + 1) * 0.22, 1, 2.2)
+              : 1;
+            const launchHeight = use3DSymbols
+              ? clamp((92 + styleSize * 8 + shellRandom(1.7) * 150) * sceneScaleBoost, 70, 640)
+              : 0;
+            const lateralSpan = use3DSymbols
+              ? clamp(launchHeight * (0.08 + shellRandom(2.3) * 0.18), 6, 130)
+              : clamp(
+                  (2 + styleSize * 0.35 + shellRandom(2.6) * 5) * resolution,
+                  resolution * 0.5,
+                  resolution * 18
+                );
+            const driftTheta = shellRandom(2.9) * TAU;
+            const driftX = Math.cos(driftTheta) * lateralSpan;
+            const driftY = Math.sin(driftTheta) * lateralSpan;
+            const apexX = centerX + driftX;
+            const apexY = centerY + driftY;
+            const apexZ = use3DSymbols ? Number(centerZ ?? 0) + launchHeight : undefined;
+            const shellHueShift = (shellRandom(3.4) - 0.5) * 46;
+            const shellBaseColor = rotateHueRgba(baseFireworkColor, shellHueShift);
+            const shellWarmColor = rotateHueRgba(shellBaseColor, 14 + shellRandom(3.9) * 20);
+            const shellCoolColor = rotateHueRgba(shellBaseColor, -(10 + shellRandom(4.2) * 22));
+            const fireworksSparkColor = tintTowardWhite(shellBaseColor, 0.58);
+            const fireworksCoreColor = tintTowardWhite(shellBaseColor, 0.8);
+            const fireworksGlowColor = tintTowardWhite(shellWarmColor, 0.34);
+            const emberFireworkColor = tintTowardWhite(shellCoolColor, 0.22);
 
-            if (use3DSymbols) {
-              const launchProgress = clamp(progress / launchCutoff, 0, 1);
-              if (launchProgress < 1) {
-                const easedLaunch = 1 - Math.pow(1 - launchProgress, 2.2);
-                const rocketX = centerX + driftX * (1 - easedLaunch);
-                const rocketY = centerY + driftY * (1 - easedLaunch);
-                const rocketZ = Number(centerZ ?? 0) + launchHeight * easedLaunch;
-                const tailZ = Number(centerZ ?? 0) + launchHeight * Math.max(0, easedLaunch - 0.2);
-                const plumeAlpha = clamp(0.2 + (1 - easedLaunch) * 0.48, 0.14, 0.64);
-                const coreAlpha = clamp(0.65 + easedLaunch * 0.3, 0.65, 0.95);
+            if (isMineShellCombo) {
+              const mineWindow = Math.max(launchCutoff * 0.72, 1e-6);
+              const mineProgress = clamp(progress / mineWindow, 0, 1);
+              if (mineProgress < 1) {
+                const mineRise = Math.pow(mineProgress, 0.78);
+                const mineFade = clamp(1 - mineProgress * 0.9, 0.05, 1);
+                const mineCenterZ = use3DSymbols ? Number(centerZ ?? 0) + 0.8 : undefined;
+                const mineRingRadius = use3DSymbols
+                  ? clamp((7 + styleSize * 0.9 + shellRandom(4.8) * 14) * mineRise, 3, 80)
+                  : clamp(
+                      (10 + styleSize * 1.3 + shellRandom(4.8) * 16) * resolution * mineRise,
+                      resolution * 0.5,
+                      resolution * 42
+                    );
+                const mineFlashAlpha = clamp(0.52 * mineFade, 0, 0.52);
                 fireworksGraphics.push(
                   new Graphic({
-                    geometry: new Polyline({
-                      spatialReference: targetPoint.spatialReference,
-                      paths: [[
-                        toPathCoord(rocketX, rocketY, tailZ),
-                        toPathCoord(rocketX, rocketY, rocketZ)
-                      ]]
-                    }),
-                    symbol: buildWeldLineSymbol(
-                      clamp(styleSize * 0.12, 0.6, 1.8),
-                      withFireworkAlpha(emberFireworkColor, plumeAlpha),
-                      true
+                    geometry: buildPointGeometry(
+                      centerX,
+                      centerY,
+                      targetPoint.spatialReference,
+                      mineCenterZ
+                    ),
+                    symbol: buildWeldPointSymbol(
+                      clamp(styleSize * (1.8 + mineRise * 2.8), 4, 18),
+                      withFireworkAlpha(fireworksCoreColor, mineFlashAlpha),
+                      withFireworkAlpha(fireworksGlowColor, mineFlashAlpha * 0.72),
+                      clamp(styleSize * 0.05, 0.2, 0.8),
+                      use3DSymbols
                     )
                   }),
                   new Graphic({
                     geometry: buildPointGeometry(
-                      rocketX,
-                      rocketY,
+                      centerX,
+                      centerY,
                       targetPoint.spatialReference,
-                      rocketZ
+                      mineCenterZ
                     ),
                     symbol: buildWeldPointSymbol(
-                      clamp(styleSize * 1.1, 3.6, 10),
-                      withFireworkAlpha(fireworksCoreColor, coreAlpha),
-                      withFireworkAlpha(fireworksGlowColor, plumeAlpha),
-                      clamp(styleSize * 0.05, 0.35, 0.9),
-                      true
+                      clamp(styleSize * 1.4 + mineRingRadius * (use3DSymbols ? 0.1 : 0.08), 5, 28),
+                      withFireworkAlpha(shellWarmColor, mineFlashAlpha * 0.08),
+                      withFireworkAlpha(fireworksGlowColor, mineFlashAlpha * 0.62),
+                      clamp(styleSize * 0.045, 0.18, 0.7),
+                      use3DSymbols
+                    )
+                  })
+                );
+
+                const mineSparkCount = Math.round(clamp(14 + styleSize * 1.1, 14, 30));
+                for (let mineIndex = 0; mineIndex < mineSparkCount; mineIndex += 1) {
+                  const mineSeed = shellSeed + mineIndex * 2.07;
+                  const mineAngle = (mineIndex / mineSparkCount) * TAU + (noise1(mineSeed + 0.6) - 0.5) * 0.48;
+                  const mineRadius = mineRingRadius * (0.45 + noise1(mineSeed + 1.2) * 0.7);
+                  const mineLift = use3DSymbols
+                    ? launchHeight * (0.04 + noise1(mineSeed + 1.7) * 0.12) * mineRise
+                    : 0;
+                  const mineTipX = centerX + Math.cos(mineAngle) * mineRadius;
+                  const mineTipY = centerY + Math.sin(mineAngle) * mineRadius;
+                  const mineTipZ = use3DSymbols ? Number(centerZ ?? 0) + mineLift : undefined;
+                  const mineCoreAlpha = clamp((0.24 + noise1(mineSeed + 2.2) * 0.5) * mineFade, 0.04, 0.62);
+                  fireworksGraphics.push(
+                    new Graphic({
+                      geometry: new Polyline({
+                        spatialReference: targetPoint.spatialReference,
+                        paths: [[
+                          toPathCoord(centerX, centerY, mineCenterZ),
+                          toPathCoord(mineTipX, mineTipY, mineTipZ)
+                        ]]
+                      }),
+                      symbol: buildWeldLineSymbol(
+                        clamp(styleSize * (0.06 + noise1(mineSeed + 2.8) * 0.05), 0.5, 1.8),
+                        withFireworkAlpha(fireworksSparkColor, mineCoreAlpha),
+                        use3DSymbols
+                      )
+                    }),
+                    new Graphic({
+                      geometry: buildPointGeometry(
+                        mineTipX,
+                        mineTipY,
+                        targetPoint.spatialReference,
+                        mineTipZ
+                      ),
+                      symbol: buildWeldPointSymbol(
+                        clamp(styleSize * (0.38 + noise1(mineSeed + 3.4) * 0.34), 1.8, 5.4),
+                        withFireworkAlpha(shellWarmColor, mineCoreAlpha),
+                        withFireworkAlpha(fireworksGlowColor, mineCoreAlpha * 0.3),
+                        clamp(styleSize * 0.03, 0.1, 0.34),
+                        use3DSymbols
+                      )
+                    })
+                  );
+                }
+              }
+            }
+
+            const launchProgress = clamp(progress / Math.max(launchCutoff, 1e-6), 0, 1);
+            if (launchProgress < 1) {
+              const easedLaunch = 1 - Math.pow(1 - launchProgress, 2.45);
+              const arcProgress = Math.pow(launchProgress, 1.35);
+              const rocketX = centerX + (apexX - centerX) * arcProgress;
+              const rocketY = centerY + (apexY - centerY) * arcProgress;
+              const rocketZ = use3DSymbols
+                ? Number(centerZ ?? 0) + launchHeight * easedLaunch
+                : undefined;
+              const tailProgress = Math.max(0, launchProgress - 0.1);
+              const tailEase = 1 - Math.pow(1 - tailProgress, 2.45);
+              const tailArcProgress = Math.pow(tailProgress, 1.35);
+              const tailX = centerX + (apexX - centerX) * tailArcProgress;
+              const tailY = centerY + (apexY - centerY) * tailArcProgress;
+              const tailZ = use3DSymbols
+                ? Number(centerZ ?? 0) + launchHeight * tailEase
+                : undefined;
+              const plumeAlpha = clamp(0.18 + (1 - launchProgress) * 0.4, 0.14, 0.58);
+              const coreAlpha = clamp(0.68 + launchProgress * 0.26, 0.68, 0.96);
+              const rocketWidth = clamp(styleSize * (0.09 + shellRandom(5.1) * 0.06), 0.55, 2.3);
+              fireworksGraphics.push(
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: targetPoint.spatialReference,
+                    paths: [[
+                      toPathCoord(tailX, tailY, tailZ),
+                      toPathCoord(rocketX, rocketY, rocketZ)
+                    ]]
+                  }),
+                  symbol: buildWeldLineSymbol(
+                    Math.max(rocketWidth * 1.45, 0.66),
+                    withFireworkAlpha(emberFireworkColor, plumeAlpha * 0.48),
+                    use3DSymbols
+                  )
+                }),
+                new Graphic({
+                  geometry: new Polyline({
+                    spatialReference: targetPoint.spatialReference,
+                    paths: [[
+                      toPathCoord(tailX, tailY, tailZ),
+                      toPathCoord(rocketX, rocketY, rocketZ)
+                    ]]
+                  }),
+                  symbol: buildWeldLineSymbol(
+                    rocketWidth,
+                    withFireworkAlpha(fireworksSparkColor, plumeAlpha),
+                    use3DSymbols
+                  )
+                }),
+                new Graphic({
+                  geometry: buildPointGeometry(
+                    rocketX,
+                    rocketY,
+                    targetPoint.spatialReference,
+                    rocketZ
+                  ),
+                  symbol: buildWeldPointSymbol(
+                    clamp(styleSize * (0.85 + shellRandom(5.5) * 0.55), 2.8, 9.6),
+                    withFireworkAlpha(fireworksCoreColor, coreAlpha),
+                    withFireworkAlpha(fireworksGlowColor, plumeAlpha),
+                    clamp(styleSize * 0.045, 0.22, 0.72),
+                    use3DSymbols
+                  )
+                })
+              );
+            }
+
+            const burstProgress = use3DSymbols
+              ? clamp((progress - burstStart) / Math.max(1 - burstStart, 1e-6), 0, 1)
+              : clamp((progress - burstStart * 0.55) / Math.max(1 - burstStart * 0.55, 1e-6), 0, 1);
+            if (burstProgress <= 0) {
+              if (launchProgress >= 0.96) {
+                fireworksGraphics.push(
+                  new Graphic({
+                    geometry: buildPointGeometry(apexX, apexY, targetPoint.spatialReference, apexZ),
+                    symbol: buildWeldPointSymbol(
+                      clamp(styleSize * 0.6, 2, 6.2),
+                      withFireworkAlpha(fireworksCoreColor, 0.74),
+                      withFireworkAlpha(fireworksGlowColor, 0.42),
+                      clamp(styleSize * 0.035, 0.12, 0.52),
+                      use3DSymbols
                     )
                   })
                 );
               }
-            }
-
-            const burstProgress = use3DSymbols
-              ? clamp((progress - launchCutoff) / Math.max(1 - launchCutoff, 1e-6), 0, 1)
-              : progress;
-            const burstDelay = use3DSymbols ? 0.12 : 0.06;
-            const burstNormalized = clamp(
-              (burstProgress - burstDelay) / Math.max(1 - burstDelay, 1e-6),
-              0,
-              1
-            );
-            if (burstNormalized <= 0) {
               return;
             }
 
-            const spreadProgress = Math.pow(burstNormalized, 1.18);
-            const burstLife = clamp(1 - burstNormalized * 0.72, 0.18, 1);
-            const burstCenterZ = use3DSymbols
-              ? Number(centerZ ?? 0) + launchHeight
-              : undefined;
-            const sparkCount = use3DSymbols
-              ? clamp(Math.round(12 + styleSize * 0.8), 14, 28)
-              : clamp(Math.round(14 + styleSize * 1.05), 16, 32);
-            const burstRadiusMax = clamp(
-              (34 + styleSize * 6.2) * resolution,
-              3,
-              1800
+            const spreadProgress = Math.pow(
+              burstProgress,
+              shellType === "palm" ? 0.58 : shellType === "ring" ? 0.66 : 0.74
             );
-            const streakBase = clamp(
-              (9 + styleSize * 0.95) * resolution * (1 - burstNormalized * 0.42),
-              resolution * 1.2,
-              resolution * 46
+            const burstLife = clamp(
+              1 - burstProgress * (shellType === "willow" ? 0.52 : shellType === "palm" ? 0.66 : 0.74),
+              0.1,
+              1
             );
+            const burstCenterX = apexX + (shellRandom(5.8) - 0.5) * lateralSpan * burstProgress * 0.24;
+            const burstCenterY = apexY + (shellRandom(6.1) - 0.5) * lateralSpan * burstProgress * 0.24;
+            const burstCenterZ = use3DSymbols ? apexZ : undefined;
+            const sparkCount = Math.max(
+              12,
+              Math.round(
+                use3DSymbols
+                  ? clamp(
+                      (isCrossetteShell ? 12 : 18) +
+                        styleSize * (isCrossetteShell ? 0.65 : 0.95) +
+                        (shellType === "willow" ? 10 : shellType === "chrysanthemum" ? 6 : 2),
+                      isCrossetteShell ? 12 : 18,
+                      isCrossetteShell ? 28 : 46
+                    )
+                  : clamp(
+                      (isCrossetteShell ? 14 : 16) + styleSize * 0.85 + (shellType === "ring" ? 6 : 0),
+                      12,
+                      isCrossetteShell ? 26 : 36
+                    )
+              )
+            );
+            const burstRadiusMax = use3DSymbols
+              ? clamp(
+                  launchHeight *
+                    (shellType === "ring"
+                      ? 0.34
+                      : shellType === "willow"
+                        ? 0.48
+                        : shellType === "palm"
+                          ? 0.36
+                          : 0.42) *
+                    (isCrossetteShell ? 0.82 : 1),
+                  28,
+                  320
+                )
+              : clamp(
+                  (32 + styleSize * 6.7 + shellRandom(6.4) * 24) * resolution * (isCrossetteShell ? 0.82 : 1),
+                  4,
+                  2200
+                );
+            const streakBase = use3DSymbols
+              ? clamp(
+                  burstRadiusMax *
+                    (shellType === "willow" ? 0.28 : shellType === "palm" ? 0.24 : 0.2) *
+                    (isCrossetteShell ? 0.86 : 1),
+                  6,
+                  96
+                )
+              : clamp(
+                  (10 + styleSize * 1.2) * resolution * (1 - burstProgress * 0.35),
+                  resolution * 1.2,
+                  resolution * 48
+                );
+            const gravityDrop = use3DSymbols
+              ? launchHeight *
+                (shellType === "willow" ? 0.58 : shellType === "palm" ? 0.46 : 0.38) *
+                (isCrossetteShell ? 0.82 : 1)
+              : 0;
+            const dragFactor =
+              (shellType === "willow" ? 0.62 : shellType === "palm" ? 0.46 : 0.36) +
+              (isCrossetteShell ? 0.04 : 0);
+            const windX = (shellRandom(6.7) - 0.5) * burstRadiusMax * (use3DSymbols ? 0.26 : 0.2);
+            const windY = (shellRandom(7.1) - 0.5) * burstRadiusMax * (use3DSymbols ? 0.2 : 0.16);
+            const hasCrackle = isCrossetteShell ? shellRandom(7.4) > 0.72 : shellRandom(7.4) > 0.56;
+            const hasComets = isCrossetteShell ? shellRandom(7.8) > 0.8 : shellRandom(7.8) > 0.64;
+            const flashAlpha = clamp(
+              (1 - burstProgress * 2.5) * (0.42 + shellRandom(8.2) * 0.28),
+              0,
+              0.68
+            );
+            if (flashAlpha > 0.02) {
+              fireworksGraphics.push(
+                new Graphic({
+                  geometry: buildPointGeometry(
+                    burstCenterX,
+                    burstCenterY,
+                    targetPoint.spatialReference,
+                    burstCenterZ
+                  ),
+                  symbol: buildWeldPointSymbol(
+                    clamp(styleSize * (2.4 + (1 - burstProgress) * 4.8), 5.2, 34),
+                    withFireworkAlpha(fireworksCoreColor, flashAlpha),
+                    withFireworkAlpha(fireworksGlowColor, flashAlpha * 0.62),
+                    clamp(styleSize * 0.05, 0.24, 0.82),
+                    use3DSymbols
+                  )
+                })
+              );
+            }
 
             for (let i = 0; i < sparkCount; i += 1) {
               const seed = layerSeed * 0.53 + graphicIndex * 17.2 + i * 1.91;
-              const laneJitter = (noise1(seed + 0.4) - 0.5) * (TAU / sparkCount) * 1.25;
+              const sparkRandom = (offset: number) => noise1(seed + offset);
+              const laneJitter = (sparkRandom(0.4) - 0.5) * (TAU / sparkCount) * 1.35;
               const angle = (i / sparkCount) * TAU + laneJitter;
-              const speedScale = 0.62 + noise1(seed + 1.3) * 0.58;
-              const tipRadius = burstRadiusMax * spreadProgress * speedScale;
-              const tailRadius = Math.max(0, tipRadius - streakBase * (0.85 + speedScale * 0.35));
-              const tipX = centerX + Math.cos(angle) * tipRadius;
-              const tipY = centerY + Math.sin(angle) * tipRadius;
-              const tailX = centerX + Math.cos(angle) * tailRadius;
-              const tailY = centerY + Math.sin(angle) * tailRadius;
-              const tipTravel = clamp(
-                tipRadius / Math.max(burstRadiusMax * speedScale, 1e-6),
-                0,
-                1
-              );
-              const tailTravel = clamp(
-                tailRadius / Math.max(burstRadiusMax * speedScale, 1e-6),
-                0,
-                1
-              );
-              const zArc = use3DSymbols
-                ? (noise1(seed + 2.1) * 2 - 0.62) * launchHeight * 0.46
-                : 0;
+              let elevation = -0.1 + sparkRandom(0.9) * 0.95;
+              if (shellType === "ring") {
+                elevation = (sparkRandom(1.1) - 0.5) * 0.18;
+              } else if (shellType === "willow") {
+                elevation = 0.04 + sparkRandom(1.2) * 0.58;
+              } else if (shellType === "palm") {
+                elevation = 0.18 + sparkRandom(1.3) * 0.72;
+              } else if (shellType === "chrysanthemum") {
+                elevation = -0.16 + sparkRandom(1.4) * 1.08;
+              }
+              const cosElevation = Math.cos(elevation);
+              const dirX = Math.cos(angle) * cosElevation;
+              const dirY = Math.sin(angle) * cosElevation;
+              const dirZ = use3DSymbols ? Math.sin(elevation) : 0;
+              const speedScale = 0.6 + sparkRandom(1.7) * 0.75;
+              // Approximate ballistic spark motion: expanding velocity with drag and gravity-driven falloff.
+              const travelDistance =
+                burstRadiusMax *
+                spreadProgress *
+                speedScale *
+                (1 - dragFactor * burstProgress * 0.35);
+              const dropAmount = use3DSymbols ? gravityDrop * burstProgress * burstProgress : 0;
+              const tipX = burstCenterX + dirX * travelDistance + windX * burstProgress * burstProgress;
+              const tipY = burstCenterY + dirY * travelDistance + windY * burstProgress * burstProgress;
               const tipZ = use3DSymbols
-                ? Number(burstCenterZ ?? 0) +
-                  zArc * tipTravel -
-                  launchHeight * 0.24 * burstNormalized * burstNormalized
+                ? Number(burstCenterZ ?? 0) + dirZ * travelDistance - dropAmount
                 : undefined;
+              const trailDistance = Math.max(
+                0,
+                travelDistance - streakBase * (0.78 + speedScale * 0.34)
+              );
+              const trailProgress = Math.max(0, burstProgress - 0.08);
+              const trailDrop = use3DSymbols ? gravityDrop * trailProgress * trailProgress : 0;
+              const tailX = burstCenterX + dirX * trailDistance + windX * trailProgress * trailProgress;
+              const tailY = burstCenterY + dirY * trailDistance + windY * trailProgress * trailProgress;
               const tailZ = use3DSymbols
-                ? Number(burstCenterZ ?? 0) +
-                  zArc * tailTravel -
-                  launchHeight * 0.24 * Math.max(0, burstNormalized - 0.12) * Math.max(0, burstNormalized - 0.12)
+                ? Number(burstCenterZ ?? 0) + dirZ * trailDistance - trailDrop
                 : undefined;
               const twinkle =
-                0.78 +
-                0.22 *
+                0.76 +
+                0.24 *
                   Math.sin(
-                    timeSeed * (6 + noise1(seed + 8.2) * 4) + i * 0.8 + graphicIndex * 0.4
+                    timeSeed * (5.8 + sparkRandom(2.9) * 5.2) + i * 0.73 + graphicIndex * 0.41
                   );
-              const alpha = clamp(
-                (0.46 + noise1(seed + 3.7) * 0.4) * burstLife * twinkle,
-                0.06,
-                0.88
+              const sparkAlpha = clamp(
+                (0.4 + sparkRandom(3.3) * 0.52) * burstLife * twinkle,
+                0.04,
+                0.95
               );
               const strokeWidth = clamp(
-                styleSize * (0.055 + noise1(seed + 4.6) * 0.08),
-                0.45,
-                2.2
+                styleSize * (0.05 + sparkRandom(3.9) * 0.09),
+                0.42,
+                2.5
+              );
+              const colorPick = sparkRandom(4.4);
+              const sparkColorBase =
+                colorPick < 0.2
+                  ? shellWarmColor
+                  : colorPick > 0.78
+                    ? shellCoolColor
+                    : shellBaseColor;
+              const sparkColor = tintTowardWhite(sparkColorBase, 0.52 + sparkRandom(5.2) * 0.22);
+              const sparkGlowColor = tintTowardWhite(
+                sparkColorBase,
+                0.24 + sparkRandom(5.8) * 0.18
               );
 
               fireworksGraphics.push(
@@ -2013,8 +2328,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                     ]]
                   }),
                   symbol: buildWeldLineSymbol(
-                    Math.max(strokeWidth * 1.3, 0.65),
-                    withFireworkAlpha(warmFireworkColor, alpha * 0.22),
+                    Math.max(strokeWidth * 1.4, 0.62),
+                    withFireworkAlpha(sparkGlowColor, sparkAlpha * 0.28),
                     use3DSymbols
                   )
                 }),
@@ -2028,43 +2343,160 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   }),
                   symbol: buildWeldLineSymbol(
                     strokeWidth,
-                    withFireworkAlpha(fireworksSparkColor, alpha),
+                    withFireworkAlpha(sparkColor, sparkAlpha),
                     use3DSymbols
                   )
                 })
               );
 
-              if (i % 3 === 0) {
+              if (i % 3 === 0 || shellType === "palm") {
                 fireworksGraphics.push(
                   new Graphic({
                     geometry: buildPointGeometry(tipX, tipY, targetPoint.spatialReference, tipZ),
                     symbol: buildWeldPointSymbol(
-                      clamp(1.9 + styleSize * 0.4 + noise1(seed + 6.9) * 2.4, 2.1, 8.4),
-                      withFireworkAlpha(fireworksCoreColor, alpha),
-                      withFireworkAlpha(fireworksGlowColor, alpha * 0.45),
-                      clamp(styleSize * 0.04, 0.22, 0.6),
+                      clamp(1.8 + styleSize * 0.35 + sparkRandom(6.2) * 2.7, 2, hasComets ? 10.4 : 8.8),
+                      withFireworkAlpha(fireworksCoreColor, sparkAlpha),
+                      withFireworkAlpha(fireworksGlowColor, sparkAlpha * 0.44),
+                      clamp(styleSize * 0.038, 0.18, 0.58),
                       use3DSymbols
                     )
                   })
                 );
               }
+
+              if (hasComets && i % 5 === 0) {
+                fireworksGraphics.push(
+                  new Graphic({
+                    geometry: buildPointGeometry(tipX, tipY, targetPoint.spatialReference, tipZ),
+                    symbol: buildWeldPointSymbol(
+                      clamp(styleSize * (0.94 + sparkRandom(6.7) * 0.42), 3.1, 11.8),
+                      withFireworkAlpha(shellWarmColor, sparkAlpha * 0.6),
+                      withFireworkAlpha(fireworksGlowColor, sparkAlpha * 0.34),
+                      clamp(styleSize * 0.042, 0.18, 0.62),
+                      use3DSymbols
+                    )
+                  })
+                );
+              }
+
+              if (isCrossetteShell && burstProgress > 0.34 && burstProgress < 0.92 && i % 4 === 0) {
+                const splitProgress = clamp((burstProgress - 0.34) / 0.58, 0, 1);
+                const splitFade = clamp(1 - splitProgress * 0.84, 0.08, 1);
+                const splitRadius =
+                  streakBase * (0.14 + splitProgress * 0.42) * (0.72 + sparkRandom(7.05) * 0.62);
+                const splitSize = clamp(
+                  1.2 + styleSize * 0.2 + sparkRandom(7.2) * 1.3,
+                  1.4,
+                  5
+                );
+                for (let splitIndex = 0; splitIndex < 4; splitIndex += 1) {
+                  const splitAngle = splitIndex * (TAU / 4) + sparkRandom(7.4 + splitIndex * 0.31) * 0.2;
+                  const splitX = tipX + Math.cos(splitAngle) * splitRadius;
+                  const splitY = tipY + Math.sin(splitAngle) * splitRadius;
+                  const splitZ = use3DSymbols
+                    ? Number(tipZ ?? burstCenterZ ?? 0) +
+                      (sparkRandom(7.8 + splitIndex * 0.27) - 0.5) * splitRadius * 0.36
+                    : undefined;
+                  const splitAlpha = clamp(
+                    sparkAlpha * splitFade * (0.48 + sparkRandom(8.1 + splitIndex * 0.19) * 0.34),
+                    0.04,
+                    0.52
+                  );
+                  fireworksGraphics.push(
+                    new Graphic({
+                      geometry: new Polyline({
+                        spatialReference: targetPoint.spatialReference,
+                        paths: [[
+                          toPathCoord(tipX, tipY, tipZ),
+                          toPathCoord(splitX, splitY, splitZ)
+                        ]]
+                      }),
+                      symbol: buildWeldLineSymbol(
+                        Math.max(strokeWidth * 0.85, 0.45),
+                        withFireworkAlpha(shellWarmColor, splitAlpha),
+                        use3DSymbols
+                      )
+                    }),
+                    new Graphic({
+                      geometry: buildPointGeometry(
+                        splitX,
+                        splitY,
+                        targetPoint.spatialReference,
+                        splitZ
+                      ),
+                      symbol: buildWeldPointSymbol(
+                        splitSize,
+                        withFireworkAlpha(fireworksCoreColor, splitAlpha),
+                        withFireworkAlpha(fireworksGlowColor, splitAlpha * 0.34),
+                        clamp(styleSize * 0.025, 0.08, 0.22),
+                        use3DSymbols
+                      )
+                    })
+                  );
+                }
+              }
+
+              if (hasCrackle && burstProgress > 0.34 && i % 6 === 0) {
+                const crackleCount = Math.round(clamp(2 + sparkRandom(7.1) * 3, 2, 5));
+                for (let crackleIndex = 0; crackleIndex < crackleCount; crackleIndex += 1) {
+                  const crackleAngle = sparkRandom(7.6 + crackleIndex * 0.31) * TAU;
+                  const crackleRadius =
+                    streakBase *
+                    (0.08 + sparkRandom(8.2 + crackleIndex * 0.37) * 0.22) *
+                    burstProgress;
+                  const crackleX = tipX + Math.cos(crackleAngle) * crackleRadius;
+                  const crackleY = tipY + Math.sin(crackleAngle) * crackleRadius;
+                  const crackleZ = use3DSymbols
+                    ? Number(tipZ ?? burstCenterZ ?? 0) +
+                      (sparkRandom(8.8 + crackleIndex * 0.44) - 0.5) * crackleRadius * 0.55
+                    : undefined;
+                  const crackleAlpha = clamp(
+                    (0.2 + sparkRandom(9.4 + crackleIndex * 0.23) * 0.55) *
+                      burstLife *
+                      (1 - burstProgress * 0.6),
+                    0.03,
+                    0.52
+                  );
+                  fireworksGraphics.push(
+                    new Graphic({
+                      geometry: buildPointGeometry(
+                        crackleX,
+                        crackleY,
+                        targetPoint.spatialReference,
+                        crackleZ
+                      ),
+                      symbol: buildWeldPointSymbol(
+                        clamp(styleSize * (0.2 + sparkRandom(9.9) * 0.22), 1.2, 3.4),
+                        withFireworkAlpha(shellWarmColor, crackleAlpha),
+                        withFireworkAlpha(fireworksGlowColor, crackleAlpha * 0.22),
+                        clamp(styleSize * 0.028, 0.08, 0.26),
+                        use3DSymbols
+                      )
+                    })
+                  );
+                }
+              }
             }
 
-            const ringAlpha = clamp((1 - burstNormalized) * 0.3, 0, 0.3);
+            const ringAlpha = clamp(
+              (1 - burstProgress) * (shellType === "ring" ? 0.42 : 0.28),
+              0,
+              0.38
+            );
             if (ringAlpha > 0.01) {
               fireworksGraphics.push(
                 new Graphic({
                   geometry: buildPointGeometry(
-                    centerX,
-                    centerY,
+                    burstCenterX,
+                    burstCenterY,
                     targetPoint.spatialReference,
                     burstCenterZ
                   ),
                   symbol: buildWeldPointSymbol(
-                    clamp(styleSize * (2.4 + spreadProgress * 6.8), 5, 34),
-                    withFireworkAlpha(warmFireworkColor, ringAlpha * 0.14),
+                    clamp(styleSize * (3.2 + spreadProgress * 8.5), 6, 40),
+                    withFireworkAlpha(shellWarmColor, ringAlpha * 0.11),
                     withFireworkAlpha(fireworksGlowColor, ringAlpha),
-                    clamp(styleSize * 0.05, 0.25, 0.8),
+                    clamp(styleSize * 0.048, 0.2, 0.82),
                     use3DSymbols
                   )
                 })
@@ -2074,22 +2506,22 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             fireworksGraphics.push(
               new Graphic({
                 geometry: buildPointGeometry(
-                  centerX,
-                  centerY,
+                  burstCenterX,
+                  burstCenterY,
                   targetPoint.spatialReference,
                   burstCenterZ
                 ),
                 symbol: buildWeldPointSymbol(
-                  clamp(styleSize * (0.8 + (1 - burstNormalized) * 1.2), 2.8, 11.5),
+                  clamp(styleSize * (0.88 + (1 - burstProgress) * 1.36), 2.8, 12.2),
                   withFireworkAlpha(
                     fireworksCoreColor,
-                    clamp(0.22 + burstLife * 0.72, 0.22, 0.92)
+                    clamp(0.2 + burstLife * 0.72, 0.2, 0.92)
                   ),
                   withFireworkAlpha(
-                    warmFireworkColor,
-                    clamp(0.15 + burstLife * 0.45, 0.15, 0.74)
+                    shellWarmColor,
+                    clamp(0.14 + burstLife * 0.46, 0.14, 0.74)
                   ),
-                  clamp(styleSize * 0.045, 0.22, 0.65),
+                  clamp(styleSize * 0.042, 0.2, 0.66),
                   use3DSymbols
                 )
               })
@@ -2097,9 +2529,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           if (use3DSymbols) {
-            (fireworksLayer as any).elevationInfo = fireworksUsesZ
-              ? { mode: "absolute-height" }
-              : { mode: "relative-to-ground", offset: 0.3 };
+            (fireworksLayer as any).elevationInfo = { mode: "relative-to-ground", offset: 0.3 };
           } else if ((fireworksLayer as any).elevationInfo) {
             (fireworksLayer as any).elevationInfo = null;
           }
@@ -2161,6 +2591,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const arrowLayer = getArrowLayer(layerData, view);
+          syncOverlayLayerElevation(arrowLayer, layerData.layer, view, 0.25);
           arrowLayer.visible = true;
           arrowLayer.opacity = layerData.layer.opacity ?? 1;
           const arrowColor = layerData.lineStyle?.color ?? defaultLineStyle.color;
@@ -2185,11 +2616,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const sample = sampleMarchPoint(segments, dist);
               if (!sample) continue;
               const arrowGraphic = new Graphic({
-                geometry: new Point({
-                  x: sample.x,
-                  y: sample.y,
-                  spatialReference: marchGeometry.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  sample.x,
+                  sample.y,
+                  marchGeometry.spatialReference,
+                  sample.z
+                ),
                 symbol: {
                   type: "simple-marker",
                   style: "path",
@@ -2451,6 +2883,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const flightLayer = getFlightLayer(layerData, view);
+          syncOverlayLayerElevation(flightLayer, layerData.layer, view, 0.25);
           flightLayer.visible = true;
           flightLayer.opacity = Math.max(baseLayerOpacity, 0.9);
           const flightGraphics: Graphic[] = [];
@@ -2502,15 +2935,19 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const trailLength = clamp(baseWidth * 52, 30, 220) * resolution;
             const trailStart = Math.max(0, total - trailLength);
             const trailSteps = clamp(Math.round((trailLength / Math.max(resolution, 1e-6)) / 8), 8, 30);
-            const trailPoints: Array<{ x: number; y: number }> = [];
+            const trailPoints: Array<{ x: number; y: number; z?: number }> = [];
             for (let step = 0; step <= trailSteps; step += 1) {
               const dist = trailStart + (total - trailStart) * (step / trailSteps);
               const sample = sampleMarchPoint(segments, dist);
               if (!sample) continue;
-              trailPoints.push({ x: sample.x, y: sample.y });
+              trailPoints.push({
+                x: sample.x,
+                y: sample.y,
+                z: Number.isFinite(Number(sample.z)) ? Number(sample.z) : undefined
+              });
             }
             if (cartoon && trailPoints.length > 1) {
-              const trailPath = trailPoints.map((point) => [point.x, point.y]);
+              const trailPath = trailPoints.map((point) => toPathCoord(point.x, point.y, point.z));
               flightGraphics.push(
                 new Graphic({
                   geometry: new Polyline({
@@ -2556,11 +2993,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
                 flightGraphics.push(
                   new Graphic({
-                    geometry: new Point({
-                      x: puffX,
-                      y: puffY,
-                      spatialReference: displayedWorking.spatialReference
-                    }),
+                    geometry: buildPointGeometry(
+                      puffX,
+                      puffY,
+                      displayedWorking.spatialReference,
+                      curr.z
+                    ),
                     symbol: {
                       type: "simple-marker",
                       style: "circle",
@@ -2573,11 +3011,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                     }
                   }),
                   new Graphic({
-                    geometry: new Point({
-                      x: puffX,
-                      y: puffY,
-                      spatialReference: displayedWorking.spatialReference
-                    }),
+                    geometry: buildPointGeometry(
+                      puffX,
+                      puffY,
+                      displayedWorking.spatialReference,
+                      curr.z
+                    ),
                     symbol: {
                       type: "simple-marker",
                       style: "circle",
@@ -2601,7 +3040,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   new Graphic({
                     geometry: new Polyline({
                       spatialReference: displayedWorking.spatialReference,
-                      paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                      paths: [[
+                        toPathCoord(prev.x, prev.y, prev.z),
+                        toPathCoord(curr.x, curr.y, curr.z)
+                      ]]
                     }),
                     symbol: {
                       type: "simple-line",
@@ -2613,7 +3055,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   new Graphic({
                     geometry: new Polyline({
                       spatialReference: displayedWorking.spatialReference,
-                      paths: [[[prev.x, prev.y], [curr.x, curr.y]]]
+                      paths: [[
+                        toPathCoord(prev.x, prev.y, prev.z),
+                        toPathCoord(curr.x, curr.y, curr.z)
+                      ]]
                     }),
                     symbol: {
                       type: "simple-line",
@@ -2640,13 +3085,15 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const noseOffset = cartoon ? planeSize * 0.32 * resolution : 0;
             const noseX = planeX + Math.cos(head.heading) * noseOffset;
             const noseY = planeY + Math.sin(head.heading) * noseOffset;
+            const planeZ = Number.isFinite(Number(head.z)) ? Number(head.z) : undefined;
             flightGraphics.push(
               new Graphic({
-                geometry: new Point({
-                  x: planeX,
-                  y: planeY,
-                  spatialReference: displayedWorking.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  planeX,
+                  planeY,
+                  displayedWorking.spatialReference,
+                  planeZ
+                ),
                 symbol: {
                   type: "simple-marker",
                   style: "circle",
@@ -2659,11 +3106,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 }
               }),
               new Graphic({
-                geometry: new Point({
-                  x: planeX,
-                  y: planeY,
-                  spatialReference: displayedWorking.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  planeX,
+                  planeY,
+                  displayedWorking.spatialReference,
+                  planeZ
+                ),
                 symbol: {
                   type: "simple-marker",
                   style: "path",
@@ -2681,11 +3129,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             if (cartoon) {
               flightGraphics.push(
                 new Graphic({
-                  geometry: new Point({
-                    x: noseX,
-                    y: noseY,
-                    spatialReference: displayedWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    noseX,
+                    noseY,
+                    displayedWorking.spatialReference,
+                    planeZ
+                  ),
                   symbol: {
                     type: "simple-marker",
                     style: "circle",
@@ -2707,11 +3156,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const baseMarkerSize = Math.max(6, baseWidth * 2.2);
               flightGraphics.push(
                 new Graphic({
-                  geometry: new Point({
-                    x: start.x,
-                    y: start.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    start.x,
+                    start.y,
+                    fullRouteWorking.spatialReference,
+                    start.z
+                  ),
                     symbol: {
                       type: "simple-marker",
                       style: cartoon ? "diamond" : "circle",
@@ -2724,11 +3174,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                     }
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: end.x,
-                    y: end.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    end.x,
+                    end.y,
+                    fullRouteWorking.spatialReference,
+                    end.z
+                  ),
                     symbol: {
                       type: "simple-marker",
                       style: cartoon ? "diamond" : "circle",
@@ -2741,11 +3192,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                     }
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: start.x,
-                    y: start.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    start.x,
+                    start.y,
+                    fullRouteWorking.spatialReference,
+                    start.z
+                  ),
                     symbol: {
                       type: "text",
                       text: "A",
@@ -2760,11 +3212,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                     }
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: end.x,
-                    y: end.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    end.x,
+                    end.y,
+                    fullRouteWorking.spatialReference,
+                    end.z
+                  ),
                     symbol: {
                       type: "text",
                       text: "B",
@@ -2784,11 +3237,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               if (takeoffPulse > 0) {
                 flightGraphics.push(
                   new Graphic({
-                    geometry: new Point({
-                      x: start.x,
-                      y: start.y,
-                      spatialReference: fullRouteWorking.spatialReference
-                    }),
+                    geometry: buildPointGeometry(
+                      start.x,
+                      start.y,
+                      fullRouteWorking.spatialReference,
+                      start.z
+                    ),
                       symbol: {
                         type: "simple-marker",
                         style: "circle",
@@ -2809,11 +3263,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               if (landingPulse > 0) {
                 flightGraphics.push(
                   new Graphic({
-                    geometry: new Point({
-                      x: end.x,
-                      y: end.y,
-                      spatialReference: fullRouteWorking.spatialReference
-                    }),
+                    geometry: buildPointGeometry(
+                      end.x,
+                      end.y,
+                      fullRouteWorking.spatialReference,
+                      end.z
+                    ),
                       symbol: {
                         type: "simple-marker",
                         style: "circle",
@@ -2844,6 +3299,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const flightLayer = getFlightLayer(layerData, view);
+          syncOverlayLayerElevation(flightLayer, layerData.layer, view, 0.25);
           flightLayer.visible = true;
           flightLayer.opacity = Math.max(baseLayerOpacity, 0.9);
           const flightGraphics: Graphic[] = [];
@@ -2868,11 +3324,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const baseMarkerSize = Math.max(6, baseWidth * 2.2);
             flightGraphics.push(
               new Graphic({
-                geometry: new Point({
-                  x: start.x,
-                  y: start.y,
-                  spatialReference: fullRouteWorking.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  start.x,
+                  start.y,
+                  fullRouteWorking.spatialReference,
+                  start.z
+                ),
                 symbol: {
                   type: "simple-marker",
                   style: cartoon ? "diamond" : "circle",
@@ -2885,11 +3342,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 }
               }),
               new Graphic({
-                geometry: new Point({
-                  x: end.x,
-                  y: end.y,
-                  spatialReference: fullRouteWorking.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  end.x,
+                  end.y,
+                  fullRouteWorking.spatialReference,
+                  end.z
+                ),
                 symbol: {
                   type: "simple-marker",
                   style: cartoon ? "diamond" : "circle",
@@ -2902,11 +3360,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 }
               }),
               new Graphic({
-                geometry: new Point({
-                  x: start.x,
-                  y: start.y,
-                  spatialReference: fullRouteWorking.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  start.x,
+                  start.y,
+                  fullRouteWorking.spatialReference,
+                  start.z
+                ),
                 symbol: {
                   type: "text",
                   text: "A",
@@ -2921,11 +3380,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 }
               }),
               new Graphic({
-                geometry: new Point({
-                  x: end.x,
-                  y: end.y,
-                  spatialReference: fullRouteWorking.spatialReference
-                }),
+                geometry: buildPointGeometry(
+                  end.x,
+                  end.y,
+                  fullRouteWorking.spatialReference,
+                  end.z
+                ),
                 symbol: {
                   type: "text",
                   text: "B",
@@ -2953,6 +3413,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const waypointLayer = getWaypointLayer(layerData, view);
+          syncOverlayLayerElevation(waypointLayer, layerData.layer, view, 0.25);
           waypointLayer.visible = true;
           waypointLayer.opacity = Math.max(baseLayerOpacity, 0.9);
           const waypointGraphics: Graphic[] = [];
@@ -2984,7 +3445,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               total
             );
             const markerSize = clamp(baseWidth * 2.2, 8, 18);
-            const reachedPoints: number[][] = [];
+            const reachedPoints: Array<number[]> = [];
             let activeStop: VertexStop | null = null;
             let activeIndex = -1;
 
@@ -2992,7 +3453,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const stop = stops[index];
               const reached = index === 0 || stop.accum <= revealDistance + revealLead;
               if (!reached) continue;
-              reachedPoints.push([stop.x, stop.y]);
+              reachedPoints.push(toPathCoord(stop.x, stop.y, stop.z));
               activeStop = stop;
               activeIndex = index;
 
@@ -3012,11 +3473,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
               waypointGraphics.push(
                 new Graphic({
-                  geometry: new Point({
-                    x: stop.x,
-                    y: stop.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    stop.x,
+                    stop.y,
+                    fullRouteWorking.spatialReference,
+                    stop.z
+                  ),
                   symbol: {
                     type: "simple-marker",
                     style: cartoon ? "diamond" : "circle",
@@ -3029,11 +3491,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   }
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: stop.x,
-                    y: stop.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    stop.x,
+                    stop.y,
+                    fullRouteWorking.spatialReference,
+                    stop.z
+                  ),
                   symbol: {
                     type: "text",
                     text: label,
@@ -3051,11 +3514,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               if (cartoon) {
                 waypointGraphics.push(
                   new Graphic({
-                    geometry: new Point({
-                      x: stop.x,
-                      y: stop.y,
-                      spatialReference: fullRouteWorking.spatialReference
-                    }),
+                    geometry: buildPointGeometry(
+                      stop.x,
+                      stop.y,
+                      fullRouteWorking.spatialReference,
+                      stop.z
+                    ),
                     symbol: {
                       type: "simple-marker",
                       style: "circle",
@@ -3121,11 +3585,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               );
               waypointGraphics.push(
                 new Graphic({
-                  geometry: new Point({
-                    x: activeStop.x,
-                    y: activeStop.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    activeStop.x,
+                    activeStop.y,
+                    fullRouteWorking.spatialReference,
+                    activeStop.z
+                  ),
                   symbol: {
                     type: "simple-marker",
                     style: "circle",

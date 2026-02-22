@@ -1381,6 +1381,19 @@ arcgis-scene {
   display: none;
 }
 
+.scene-camera-fx-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.scene-camera-fx-overlay[hidden] {
+  display: none;
+}
+
 #rotation-button,
 #scene-mode-btn {
   display: none;
@@ -1462,6 +1475,66 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
   top: 16px;
   left: 16px;
   z-index: 1000;
+}
+
+.scene-camera-studio-panel {
+  width: min(320px, 82vw);
+  padding: 10px 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scene-camera-studio-heading {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #0a4c66;
+}
+
+.scene-camera-studio-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  color: #0a4c66;
+  font-size: 12px;
+}
+
+.scene-camera-studio-control {
+  margin: 0;
+  color: #0a4c66;
+  font-size: 12px;
+}
+
+.scene-camera-studio-control calcite-slider {
+  margin-top: 6px;
+}
+
+.scene-camera-studio-readout {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(10, 76, 102, 0.82);
+}
+
+body.theme-dark .scene-camera-studio-heading,
+body.theme-dark .scene-camera-studio-toggle,
+body.theme-dark .scene-camera-studio-control,
+body.calcite-mode-dark .scene-camera-studio-heading,
+body.calcite-mode-dark .scene-camera-studio-toggle,
+body.calcite-mode-dark .scene-camera-studio-control,
+:root.calcite-mode-dark .scene-camera-studio-heading,
+:root.calcite-mode-dark .scene-camera-studio-toggle,
+:root.calcite-mode-dark .scene-camera-studio-control {
+  color: #f3f7fb;
+}
+
+body.theme-dark .scene-camera-studio-readout,
+body.calcite-mode-dark .scene-camera-studio-readout,
+:root.calcite-mode-dark .scene-camera-studio-readout {
+  color: rgba(243, 247, 251, 0.8);
 }
 
 #rename-modal,
@@ -3638,6 +3711,117 @@ calcite-accordion-item::part(toggle-icon) {
     -6px 6px 0 -1px rgba(255, 226, 174, 0.86),
     6px 6px 0 -1px rgba(255, 226, 174, 0.86);
   animation: preview-fireworks-pop 1.8s ease-out infinite;
+}
+
+.animation-type-preview--crossetteShell {
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(251, 246, 228, 0.95) 0 1.1px, transparent 1.5px),
+    radial-gradient(circle at 50% 50%, rgba(255, 194, 118, 0.42) 0 2.8px, transparent 3.2px);
+  box-shadow: none;
+  position: relative;
+  overflow: visible;
+  animation: preview-fireworks-burst 1.9s ease-in-out infinite;
+}
+
+.animation-type-preview--crossetteShell::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 2px;
+  height: 10px;
+  transform-origin: 50% 100%;
+  transform: translateX(-50%) scaleY(0);
+  background: linear-gradient(
+    to top,
+    rgba(255, 176, 108, 0),
+    rgba(255, 176, 108, 0.9) 48%,
+    rgba(255, 236, 198, 0.94)
+  );
+  box-shadow:
+    0 0 4px rgba(255, 196, 128, 0.58),
+    0 0 8px rgba(255, 172, 104, 0.36);
+  animation: preview-fireworks-launch 1.9s cubic-bezier(0.3, 0.85, 0.32, 1) infinite;
+}
+
+.animation-type-preview--crossetteShell::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  background: rgba(255, 247, 220, 0.96);
+  box-shadow:
+    -9px 0 0 -1px rgba(255, 186, 116, 0.9),
+    9px 0 0 -1px rgba(255, 186, 116, 0.9),
+    0 -9px 0 -1px rgba(255, 216, 166, 0.9),
+    0 9px 0 -1px rgba(255, 216, 166, 0.9),
+    -6px -6px 0 -1px rgba(255, 170, 108, 0.82),
+    6px -6px 0 -1px rgba(255, 170, 108, 0.82),
+    -6px 6px 0 -1px rgba(255, 224, 178, 0.82),
+    6px 6px 0 -1px rgba(255, 224, 178, 0.82);
+  animation: preview-fireworks-pop 1.9s ease-out infinite;
+}
+
+.animation-type-preview--mineShellCombo {
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 50% 70%, rgba(255, 231, 182, 0.84) 0 1.8px, transparent 2.6px),
+    radial-gradient(circle at 50% 70%, rgba(255, 172, 104, 0.28) 0 4.4px, transparent 5.2px);
+  box-shadow: none;
+  position: relative;
+  overflow: visible;
+  animation: preview-fireworks-burst 2.1s ease-in-out infinite;
+}
+
+.animation-type-preview--mineShellCombo::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 2px;
+  height: 11px;
+  transform-origin: 50% 100%;
+  transform: translateX(-50%) scaleY(0);
+  background: linear-gradient(
+    to top,
+    rgba(255, 165, 96, 0),
+    rgba(255, 165, 96, 0.86) 45%,
+    rgba(255, 239, 206, 0.94)
+  );
+  box-shadow:
+    0 0 4px rgba(255, 180, 118, 0.58),
+    0 0 8px rgba(255, 162, 98, 0.34);
+  animation: preview-fireworks-launch 2.1s cubic-bezier(0.3, 0.85, 0.32, 1) infinite;
+}
+
+.animation-type-preview--mineShellCombo::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  background: rgba(255, 244, 210, 0.95);
+  box-shadow:
+    -8px 2px 0 -1px rgba(255, 186, 116, 0.86),
+    8px 2px 0 -1px rgba(255, 186, 116, 0.86),
+    0 -8px 0 -1px rgba(255, 216, 152, 0.86),
+    -6px -5px 0 -1px rgba(255, 164, 102, 0.78),
+    6px -5px 0 -1px rgba(255, 164, 102, 0.78);
+  animation: preview-fireworks-pop 2.1s ease-out infinite;
 }
 
 .animation-type-preview--polyline.animation-type-preview--neonTrail {

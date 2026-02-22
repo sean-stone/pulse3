@@ -148,7 +148,11 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
       }
       const hideBasePointForFireworks =
         layerData.type === "point" &&
-        layerData.animations.some((animation) => animation.type === "fireworks");
+        layerData.animations.some((animation) =>
+          animation.type === "fireworks" ||
+          animation.type === "crossetteShell" ||
+          animation.type === "mineShellCombo"
+        );
       layerData.layer.opacity = 1;
       layerData.layer.graphics.forEach((graphic: any) => {
         if (graphic.symbol) {

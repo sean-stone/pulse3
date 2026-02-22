@@ -7,6 +7,8 @@
     { value: "spin", label: "Spin" },
     { value: "dartHit", label: "Over-Shoulder Dart Hit" },
     { value: "fireworks", label: "Fireworks Burst" },
+    { value: "crossetteShell", label: "Crossette Shell" },
+    { value: "mineShellCombo", label: "Mine + Shell Combo" },
     { value: "grow", label: "Grow" },
     { value: "glow", label: "Glow" },
     { value: "glowPulse", label: "Glow Pulse" },

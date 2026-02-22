@@ -75,6 +75,8 @@ const webglAnimationTypes = new Set([
   "ghostTrail",
   "dartHit",
   "fireworks",
+  "crossetteShell",
+  "mineShellCombo",
   "breathe",
   "pixelate",
   "timeGradient",
@@ -289,6 +291,38 @@ type MapContextMenuItem = {
 };
 
 type MapContextMenuEntry = MapContextMenuItem | { type: "divider" };
+
+const CAMERA_FOV_MIN = 20;
+const CAMERA_FOV_MAX = 120;
+const CAMERA_FX_LEVEL_MIN = 0;
+const CAMERA_FX_LEVEL_MAX = 100;
+const CAMERA_FX_JITTER_MIN = 0;
+const CAMERA_FX_JITTER_MAX = 12;
+
+type CameraStudioSettings = {
+  fov: number;
+  cinematicFxEnabled: boolean;
+  noiseLevel: number;
+  scanlineLevel: number;
+  vignetteLevel: number;
+  jitter: number;
+  chromaticAberration: number;
+};
+
+const cameraStudioSettings: CameraStudioSettings = {
+  fov: 55,
+  cinematicFxEnabled: false,
+  noiseLevel: 42,
+  scanlineLevel: 38,
+  vignetteLevel: 44,
+  jitter: 2.5,
+  chromaticAberration: 2.2
+};
+
+let sceneCameraStudioControlsBound = false;
+let sceneCameraFxOverlayCanvas: HTMLCanvasElement | null = null;
+let sceneCameraFxOverlayContext: CanvasRenderingContext2D | null = null;
+let sceneCameraFxAnimationFrame: number | null = null;
 
 async function handleAutoSaveAction() {
   await ensureStorageConsent(storageState, openConfirmDialog);
@@ -589,6 +623,424 @@ function setSceneModeButtonLabel() {
   button.classList.add("show");
 }
 
+function getSceneView3D() {
+  const sceneView = scene3DHostEl?.view;
+  if (!sceneView || String(sceneView.type) !== "3d") {
+    return null;
+  }
+  return sceneView;
+}
+
+function createSeededRandom(seed: number) {
+  let state = ((Math.floor(seed) >>> 0) ^ 0x9e3779b9) >>> 0;
+  if (state === 0) {
+    state = 1;
+  }
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 4294967295;
+  };
+}
+
+function shouldRenderSceneCameraFxOverlay() {
+  return currentViewMode === "3d" && cameraStudioSettings.cinematicFxEnabled;
+}
+
+function ensureSceneCameraFxOverlayCanvas() {
+  const wrapper = document.getElementById("map-wrapper");
+  if (!wrapper) return null;
+  if (!sceneCameraFxOverlayCanvas || !sceneCameraFxOverlayCanvas.isConnected) {
+    const canvas = document.createElement("canvas");
+    canvas.id = "scene-camera-fx-overlay";
+    canvas.className = "scene-camera-fx-overlay";
+    canvas.setAttribute("aria-hidden", "true");
+    canvas.setAttribute("hidden", "");
+    wrapper.appendChild(canvas);
+    sceneCameraFxOverlayCanvas = canvas;
+    sceneCameraFxOverlayContext = canvas.getContext("2d", { willReadFrequently: true });
+  }
+  const width = Math.max(1, Math.round(wrapper.clientWidth || Number((view as any)?.width) || 1));
+  const height = Math.max(1, Math.round(wrapper.clientHeight || Number((view as any)?.height) || 1));
+  if (sceneCameraFxOverlayCanvas.width !== width) {
+    sceneCameraFxOverlayCanvas.width = width;
+  }
+  if (sceneCameraFxOverlayCanvas.height !== height) {
+    sceneCameraFxOverlayCanvas.height = height;
+  }
+  return sceneCameraFxOverlayCanvas;
+}
+
+function drawSceneCameraFxArtifacts(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  random: () => number,
+  options?: { includeTearing?: boolean }
+) {
+  const noiseStrength = clamp(cameraStudioSettings.noiseLevel / CAMERA_FX_LEVEL_MAX, 0, 1);
+  const scanlineStrength = clamp(cameraStudioSettings.scanlineLevel / CAMERA_FX_LEVEL_MAX, 0, 1);
+  const vignetteStrength = clamp(cameraStudioSettings.vignetteLevel / CAMERA_FX_LEVEL_MAX, 0, 1);
+  const jitterStrength = clamp(cameraStudioSettings.jitter, CAMERA_FX_JITTER_MIN, CAMERA_FX_JITTER_MAX);
+
+  if (noiseStrength > 0.001) {
+    const tileSize = 96;
+    const noiseCanvas = document.createElement("canvas");
+    noiseCanvas.width = tileSize;
+    noiseCanvas.height = tileSize;
+    const noiseContext = noiseCanvas.getContext("2d", { willReadFrequently: true });
+    if (noiseContext) {
+      const imageData = noiseContext.createImageData(tileSize, tileSize);
+      const { data } = imageData;
+      for (let i = 0; i < data.length; i += 4) {
+        const shade = Math.floor(random() * 255);
+        data[i] = shade;
+        data[i + 1] = shade;
+        data[i + 2] = shade;
+        data[i + 3] = 255;
+      }
+      noiseContext.putImageData(imageData, 0, 0);
+      const pattern = ctx.createPattern(noiseCanvas, "repeat");
+      if (pattern) {
+        ctx.save();
+        ctx.globalAlpha = 0.04 + noiseStrength * 0.2;
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
+    }
+  }
+
+  if (scanlineStrength > 0.001) {
+    const lineSpacing = 2;
+    const darkAlpha = Math.min(0.26, 0.03 + scanlineStrength * 0.16);
+    ctx.save();
+    ctx.strokeStyle = `rgba(0, 0, 0, ${darkAlpha.toFixed(3)})`;
+    ctx.lineWidth = 1;
+    for (let y = 0.5; y < height; y += lineSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    const tintAlpha = Math.min(0.12, 0.01 + scanlineStrength * 0.05);
+    ctx.strokeStyle = `rgba(120, 255, 220, ${tintAlpha.toFixed(3)})`;
+    for (let y = 1.5; y < height; y += 8) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (options?.includeTearing && jitterStrength > 0.001) {
+    const tears = Math.max(1, Math.round(jitterStrength * 0.7));
+    for (let i = 0; i < tears; i += 1) {
+      const y = Math.floor(random() * height);
+      const bandHeight = Math.max(1, Math.floor(1 + random() * (3 + jitterStrength * 0.8)));
+      const alpha = 0.02 + random() * 0.12;
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+      ctx.fillRect(0, y, width, bandHeight);
+    }
+  }
+
+  if (vignetteStrength > 0.001) {
+    const gradient = ctx.createRadialGradient(
+      width * 0.5,
+      height * 0.5,
+      Math.min(width, height) * 0.22,
+      width * 0.5,
+      height * 0.5,
+      Math.max(width, height) * 0.7
+    );
+    const vignetteAlpha = Math.min(0.85, 0.06 + vignetteStrength * 0.64);
+    gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+    gradient.addColorStop(1, `rgba(0, 0, 0, ${vignetteAlpha.toFixed(3)})`);
+    ctx.save();
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+}
+
+function applySceneCameraStudioPostFxToCanvas(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  frameSeed: number,
+  sourceViewType?: string
+) {
+  const viewType = String(sourceViewType || currentViewMode);
+  if (!cameraStudioSettings.cinematicFxEnabled || viewType !== "3d") return;
+  if (width <= 0 || height <= 0) return;
+
+  const random = createSeededRandom(frameSeed);
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = width;
+  sourceCanvas.height = height;
+  const sourceContext = sourceCanvas.getContext("2d");
+  if (!sourceContext) return;
+  sourceContext.drawImage(ctx.canvas, 0, 0, width, height);
+
+  ctx.save();
+  ctx.clearRect(0, 0, width, height);
+
+  const jitterStrength = clamp(cameraStudioSettings.jitter, CAMERA_FX_JITTER_MIN, CAMERA_FX_JITTER_MAX);
+  const baseShiftX = jitterStrength > 0.001 ? (random() * 2 - 1) * jitterStrength : 0;
+  const baseShiftY = jitterStrength > 0.001 ? (random() * 2 - 1) * jitterStrength * 0.18 : 0;
+  ctx.drawImage(sourceCanvas, baseShiftX, baseShiftY, width, height);
+
+  if (jitterStrength > 0.001) {
+    const tearCount = Math.max(1, Math.round(jitterStrength * 0.45 + random() * 2));
+    for (let i = 0; i < tearCount; i += 1) {
+      const bandHeight = Math.max(1, Math.floor(2 + random() * (4 + jitterStrength)));
+      const maxY = Math.max(0, height - bandHeight - 1);
+      const y = Math.floor(random() * (maxY + 1));
+      const shift = (random() * 2 - 1) * (0.8 + jitterStrength * 1.7);
+      ctx.drawImage(sourceCanvas, 0, y, width, bandHeight, shift, y, width, bandHeight);
+    }
+  }
+
+  const chromaticStrength = clamp(cameraStudioSettings.chromaticAberration, CAMERA_FX_JITTER_MIN, CAMERA_FX_JITTER_MAX);
+  if (chromaticStrength > 0.001) {
+    const shift = 0.4 + chromaticStrength;
+    const colorAlpha = Math.min(0.28, 0.04 + chromaticStrength * 0.05);
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = colorAlpha;
+    ctx.filter = "sepia(1) saturate(6) hue-rotate(-22deg)";
+    ctx.drawImage(sourceCanvas, -shift, 0, width, height);
+    ctx.filter = "sepia(1) saturate(6) hue-rotate(210deg)";
+    ctx.drawImage(sourceCanvas, shift, 0, width, height);
+    ctx.filter = "none";
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  drawSceneCameraFxArtifacts(ctx, width, height, random, {
+    includeTearing: jitterStrength > 0.001
+  });
+
+  ctx.restore();
+}
+
+function renderSceneCameraFxOverlayFrame() {
+  const canvas = ensureSceneCameraFxOverlayCanvas();
+  if (!canvas || !sceneCameraFxOverlayContext) return;
+
+  if (!shouldRenderSceneCameraFxOverlay()) {
+    canvas.setAttribute("hidden", "");
+    sceneCameraFxOverlayContext.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  canvas.removeAttribute("hidden");
+  const random = createSeededRandom(performance.now() * 1000);
+  sceneCameraFxOverlayContext.clearRect(0, 0, canvas.width, canvas.height);
+  drawSceneCameraFxArtifacts(sceneCameraFxOverlayContext, canvas.width, canvas.height, random, {
+    includeTearing: true
+  });
+}
+
+function stopSceneCameraFxOverlayLoop() {
+  if (sceneCameraFxAnimationFrame !== null) {
+    window.cancelAnimationFrame(sceneCameraFxAnimationFrame);
+    sceneCameraFxAnimationFrame = null;
+  }
+}
+
+function tickSceneCameraFxOverlayLoop() {
+  if (!shouldRenderSceneCameraFxOverlay()) {
+    stopSceneCameraFxOverlayLoop();
+    renderSceneCameraFxOverlayFrame();
+    return;
+  }
+  renderSceneCameraFxOverlayFrame();
+  sceneCameraFxAnimationFrame = window.requestAnimationFrame(tickSceneCameraFxOverlayLoop);
+}
+
+function updateSceneCameraFxOverlayState() {
+  if (!shouldRenderSceneCameraFxOverlay()) {
+    stopSceneCameraFxOverlayLoop();
+    renderSceneCameraFxOverlayFrame();
+    return;
+  }
+  renderSceneCameraFxOverlayFrame();
+  if (sceneCameraFxAnimationFrame === null) {
+    sceneCameraFxAnimationFrame = window.requestAnimationFrame(tickSceneCameraFxOverlayLoop);
+  }
+}
+
+function updateSceneCameraStudioReadouts() {
+  const fovReadout = document.getElementById("scene-camera-fov-value");
+  if (fovReadout) {
+    fovReadout.textContent = `${Math.round(cameraStudioSettings.fov)}deg`;
+  }
+  const noiseReadout = document.getElementById("scene-camera-fx-noise-value");
+  if (noiseReadout) {
+    noiseReadout.textContent = `${Math.round(cameraStudioSettings.noiseLevel)}%`;
+  }
+  const scanlineReadout = document.getElementById("scene-camera-fx-scanline-value");
+  if (scanlineReadout) {
+    scanlineReadout.textContent = `${Math.round(cameraStudioSettings.scanlineLevel)}%`;
+  }
+  const vignetteReadout = document.getElementById("scene-camera-fx-vignette-value");
+  if (vignetteReadout) {
+    vignetteReadout.textContent = `${Math.round(cameraStudioSettings.vignetteLevel)}%`;
+  }
+  const jitterReadout = document.getElementById("scene-camera-fx-jitter-value");
+  if (jitterReadout) {
+    jitterReadout.textContent = `${cameraStudioSettings.jitter.toFixed(1)} px`;
+  }
+  const chromaticReadout = document.getElementById("scene-camera-fx-chromatic-value");
+  if (chromaticReadout) {
+    chromaticReadout.textContent = `${cameraStudioSettings.chromaticAberration.toFixed(1)} px`;
+  }
+}
+
+function syncSceneCameraStudioControlValues() {
+  const fovSlider = document.getElementById("scene-camera-fov") as HTMLElement | null;
+  if (fovSlider) {
+    setCalciteValue(fovSlider, Math.round(cameraStudioSettings.fov));
+  }
+  const noiseSlider = document.getElementById("scene-camera-fx-noise") as HTMLElement | null;
+  if (noiseSlider) {
+    setCalciteValue(noiseSlider, Math.round(cameraStudioSettings.noiseLevel));
+  }
+  const scanlineSlider = document.getElementById("scene-camera-fx-scanline") as HTMLElement | null;
+  if (scanlineSlider) {
+    setCalciteValue(scanlineSlider, Math.round(cameraStudioSettings.scanlineLevel));
+  }
+  const vignetteSlider = document.getElementById("scene-camera-fx-vignette") as HTMLElement | null;
+  if (vignetteSlider) {
+    setCalciteValue(vignetteSlider, Math.round(cameraStudioSettings.vignetteLevel));
+  }
+  const jitterSlider = document.getElementById("scene-camera-fx-jitter") as HTMLElement | null;
+  if (jitterSlider) {
+    setCalciteValue(jitterSlider, Number(cameraStudioSettings.jitter.toFixed(1)));
+  }
+  const chromaticSlider = document.getElementById("scene-camera-fx-chromatic") as HTMLElement | null;
+  if (chromaticSlider) {
+    setCalciteValue(chromaticSlider, Number(cameraStudioSettings.chromaticAberration.toFixed(1)));
+  }
+  const cinematicFxSwitch = document.getElementById("scene-camera-fx-enabled") as any;
+  if (cinematicFxSwitch) {
+    cinematicFxSwitch.checked = cameraStudioSettings.cinematicFxEnabled;
+  }
+  updateSceneCameraStudioReadouts();
+}
+
+function applySceneCameraStudioSettings(sceneViewOverride?: any) {
+  const sceneView = sceneViewOverride ?? getSceneView3D();
+  if (sceneView && String(sceneView.type) === "3d") {
+    const clampedFov = clamp(cameraStudioSettings.fov, CAMERA_FOV_MIN, CAMERA_FOV_MAX);
+    cameraStudioSettings.fov = clampedFov;
+    const camera = sceneView.camera?.clone?.();
+    if (camera) {
+      const existingFov = Number(camera.fov);
+      if (!Number.isFinite(existingFov) || Math.abs(existingFov - clampedFov) > 0.01) {
+        camera.fov = clampedFov;
+        sceneView.camera = camera;
+      }
+    }
+  }
+  updateSceneCameraFxOverlayState();
+}
+
+function bindSceneCameraStudioControls() {
+  if (sceneCameraStudioControlsBound) return;
+  const fovSlider = document.getElementById("scene-camera-fov") as any;
+  const cinematicFxSwitch = document.getElementById("scene-camera-fx-enabled") as any;
+  const noiseSlider = document.getElementById("scene-camera-fx-noise") as any;
+  const scanlineSlider = document.getElementById("scene-camera-fx-scanline") as any;
+  const vignetteSlider = document.getElementById("scene-camera-fx-vignette") as any;
+  const jitterSlider = document.getElementById("scene-camera-fx-jitter") as any;
+  const chromaticSlider = document.getElementById("scene-camera-fx-chromatic") as any;
+  if (!fovSlider || !cinematicFxSwitch || !noiseSlider || !scanlineSlider || !vignetteSlider) return;
+  if (!jitterSlider || !chromaticSlider) return;
+  sceneCameraStudioControlsBound = true;
+
+  syncSceneCameraStudioControlValues();
+
+  const handleFovUpdate = () => {
+    cameraStudioSettings.fov = clamp(
+      readNumber(fovSlider.value, cameraStudioSettings.fov),
+      CAMERA_FOV_MIN,
+      CAMERA_FOV_MAX
+    );
+    updateSceneCameraStudioReadouts();
+    applySceneCameraStudioSettings();
+  };
+
+  const handleNoiseUpdate = () => {
+    cameraStudioSettings.noiseLevel = clamp(
+      readNumber(noiseSlider.value, cameraStudioSettings.noiseLevel),
+      CAMERA_FX_LEVEL_MIN,
+      CAMERA_FX_LEVEL_MAX
+    );
+    updateSceneCameraStudioReadouts();
+    applySceneCameraStudioSettings();
+  };
+
+  const handleScanlineUpdate = () => {
+    cameraStudioSettings.scanlineLevel = clamp(
+      readNumber(scanlineSlider.value, cameraStudioSettings.scanlineLevel),
+      CAMERA_FX_LEVEL_MIN,
+      CAMERA_FX_LEVEL_MAX
+    );
+    updateSceneCameraStudioReadouts();
+    applySceneCameraStudioSettings();
+  };
+
+  const handleVignetteUpdate = () => {
+    cameraStudioSettings.vignetteLevel = clamp(
+      readNumber(vignetteSlider.value, cameraStudioSettings.vignetteLevel),
+      CAMERA_FX_LEVEL_MIN,
+      CAMERA_FX_LEVEL_MAX
+    );
+    updateSceneCameraStudioReadouts();
+    applySceneCameraStudioSettings();
+  };
+
+  const handleJitterUpdate = () => {
+    cameraStudioSettings.jitter = clamp(
+      readNumber(jitterSlider.value, cameraStudioSettings.jitter),
+      CAMERA_FX_JITTER_MIN,
+      CAMERA_FX_JITTER_MAX
+    );
+    updateSceneCameraStudioReadouts();
+    applySceneCameraStudioSettings();
+  };
+
+  const handleChromaticUpdate = () => {
+    cameraStudioSettings.chromaticAberration = clamp(
+      readNumber(chromaticSlider.value, cameraStudioSettings.chromaticAberration),
+      CAMERA_FX_JITTER_MIN,
+      CAMERA_FX_JITTER_MAX
+    );
+    updateSceneCameraStudioReadouts();
+    applySceneCameraStudioSettings();
+  };
+
+  const handleCinematicFxToggle = () => {
+    cameraStudioSettings.cinematicFxEnabled = Boolean(cinematicFxSwitch.checked);
+    applySceneCameraStudioSettings();
+  };
+
+  fovSlider.addEventListener("calciteSliderInput", handleFovUpdate);
+  fovSlider.addEventListener("calciteSliderChange", handleFovUpdate);
+  noiseSlider.addEventListener("calciteSliderInput", handleNoiseUpdate);
+  noiseSlider.addEventListener("calciteSliderChange", handleNoiseUpdate);
+  scanlineSlider.addEventListener("calciteSliderInput", handleScanlineUpdate);
+  scanlineSlider.addEventListener("calciteSliderChange", handleScanlineUpdate);
+  vignetteSlider.addEventListener("calciteSliderInput", handleVignetteUpdate);
+  vignetteSlider.addEventListener("calciteSliderChange", handleVignetteUpdate);
+  jitterSlider.addEventListener("calciteSliderInput", handleJitterUpdate);
+  jitterSlider.addEventListener("calciteSliderChange", handleJitterUpdate);
+  chromaticSlider.addEventListener("calciteSliderInput", handleChromaticUpdate);
+  chromaticSlider.addEventListener("calciteSliderChange", handleChromaticUpdate);
+  cinematicFxSwitch.addEventListener("calciteSwitchChange", handleCinematicFxToggle);
+}
+
 function ensureWorldElevationGround(map: any) {
   if (!map) return;
   const groundAny = map.ground as any;
@@ -796,6 +1248,8 @@ async function handleMapContextMenu(event: MouseEvent) {
 
   if (layerIndex >= 0) {
     const layerData = graphicsLayers[layerIndex];
+    const isTopLayer = layerIndex === graphicsLayers.length - 1;
+    const isBottomLayer = layerIndex === 0;
     const styleLabel = layerData.type === "text" ? "Text settings" : "Style & effects";
     const entries: MapContextMenuEntry[] = [
       {
@@ -816,6 +1270,16 @@ async function handleMapContextMenu(event: MouseEvent) {
       {
         label: "Zoom to layer",
         onSelect: () => zoomToLayer(layerData)
+      },
+      {
+        label: "Send to top",
+        onSelect: () => moveLayerToIndex(layerIndex, graphicsLayers.length - 1),
+        disabled: isTopLayer
+      },
+      {
+        label: "Send to bottom",
+        onSelect: () => moveLayerToIndex(layerIndex, 0),
+        disabled: isBottomLayer
       },
       { type: "divider" },
       {
@@ -1056,6 +1520,11 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     view = targetView;
     currentViewMode = mode;
     setSceneModeButtonLabel();
+    if (mode === "3d") {
+      applySceneCameraStudioSettings(targetView);
+    } else {
+      applySceneCameraStudioSettings(getSceneView3D());
+    }
     resetSketchForCurrentView();
     bindActiveViewHandlers();
     applyViewModeToAllLayers();
@@ -2050,7 +2519,7 @@ async function restoreExportExtent(options?: { animate?: boolean; waitMs?: numbe
 async function cancelFrameExport() {
   if (!isFrameExporting && !exportState.isExporting) return;
   exportCancelRequested = true;
-  setGifExportStatus("Cancelling export…");
+  setGifExportStatus("Cancelling export...");
   if (activeGifEncoder) {
     try {
       activeGifEncoder.abort();
@@ -2139,20 +2608,22 @@ async function captureFrames(targetWidth?: number, targetHeight?: number) {
         throw new Error("Export cancelled");
       }
 
-        const dataUrl = await takeScreenshotDataUrl(viewAny, width, height);
+      const dataUrl = await takeScreenshotDataUrl(viewAny, width, height);
       const img = await loadImage(dataUrl);
 
       ctx.clearRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
-      frames.push(dataUrl);
+      applySceneCameraStudioPostFxToCanvas(ctx, width, height, i + 1, String(viewAny?.type || currentViewMode));
+      const frameDataUrl = canvas.toDataURL("image/png");
+      frames.push(frameDataUrl);
 
       const thumb = document.createElement("img");
       thumb.className = "gif-thumb";
-      thumb.src = dataUrl;
+      thumb.src = frameDataUrl;
       thumb.alt = `Frame ${i + 1}`;
       document.getElementById("gif-thumbnails")?.appendChild(thumb);
 
-      setGifExportStatus(`Captured ${i + 1} / ${totalFrames} frames…`);
+      setGifExportStatus(`Captured ${i + 1} / ${totalFrames} frames...`);
     }
   } finally {
     timelineState.isScrubbingTimeline = previousScrubState;
@@ -2203,7 +2674,7 @@ async function encodeGifFromFrames(
 
   gif.on("progress", (progress: number) => {
     const percent = Math.round(progress * 100);
-    setGifExportStatus(`Encoding GIF… ${percent}%`);
+    setGifExportStatus(`Encoding GIF... ${percent}%`);
   });
 
   const delay = Math.round(1000 / fps);
@@ -2325,7 +2796,7 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
     ffmpegInstance = new FFmpeg();
   }
   if (!ffmpegLoaded) {
-    setGifExportStatus("Loading MP4 encoder…");
+    setGifExportStatus("Loading MP4 encoder...");
     const workerUrl = appendCacheBust(await resolveFfmpegWorkerUrl());
     let coreURL = ffmpegCoreUrl;
     let wasmURL = ffmpegWasmUrl;
@@ -2348,7 +2819,7 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
     await ffmpegInstance.writeFile(name, await fetchFile(frames[i]));
   }
 
-  setGifExportStatus("Encoding MP4…");
+  setGifExportStatus("Encoding MP4...");
   const crf = qualityLevel === 4 ? 18 : qualityLevel === 3 ? 22 : qualityLevel === 2 ? 26 : 30;
   const qscale = qualityLevel === 4 ? 2 : qualityLevel === 3 ? 5 : qualityLevel === 2 ? 8 : 12;
   const ffmpeg = ffmpegInstance;
@@ -2448,7 +2919,7 @@ async function startFrameExport() {
     cancelBtn.removeAttribute("hidden");
   }
   setExportButtonDisabled(true);
-  setGifExportStatus("Preparing export…");
+  setGifExportStatus("Preparing export...");
   clearGifThumbnails();
   hideGifPreview();
   clearGifDownloadUrl();
@@ -2492,7 +2963,7 @@ async function startFrameExport() {
     if (exportCancelRequested) {
       throw new Error("Export cancelled");
     }
-    setGifExportStatus(`Captured ${frames.length} frames…`);
+    setGifExportStatus(`Captured ${frames.length} frames...`);
 
     let blob: Blob;
     let previewType: "image" | "video" = "image";
@@ -3061,12 +3532,17 @@ export function bootApp() {
   if (scene3DHostEl?.view && currentViewMode === "3d") {
     maybeActivateReadyView(scene3DHostEl.view, "3d");
   }
+  if (scene3DHostEl?.view) {
+    applySceneCameraStudioSettings(scene3DHostEl.view);
+  }
 
   map2DHostEl.addEventListener("arcgisViewReadyChange", (event: any) => {
     maybeActivateReadyView(event?.target?.view, "2d");
   });
   scene3DHostEl?.addEventListener("arcgisViewReadyChange", (event: any) => {
-    maybeActivateReadyView(event?.target?.view, "3d");
+    const sceneView = event?.target?.view;
+    maybeActivateReadyView(sceneView, "3d");
+    applySceneCameraStudioSettings(sceneView);
   });
 }
 
@@ -3224,6 +3700,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   updateExportControlsForFormat();
   updateExportResolutionControls();
   updateExportResolutionLabel(view as any);
+  bindSceneCameraStudioControls();
   document.querySelectorAll("calcite-tab-title").forEach((tab) => {
     tab.addEventListener("calciteTabTitleSelect", handleLayoutChange as EventListener);
     tab.addEventListener("click", handleLayoutChange as EventListener);
@@ -4558,25 +5035,39 @@ async function removeLayer(index: number, options?: { confirmHostId?: string }) 
 }
 
 function moveLayer(index: number, direction: -1 | 1) {
-  const nextIndex = index + direction;
-  if (index < 0 || nextIndex < 0 || index >= graphicsLayers.length || nextIndex >= graphicsLayers.length) {
+  moveLayerToIndex(index, index + direction);
+}
+
+function moveLayerToIndex(index: number, targetIndex: number) {
+  const maxIndex = graphicsLayers.length - 1;
+  if (index < 0 || index > maxIndex || targetIndex < 0 || targetIndex > maxIndex || index === targetIndex) {
     return;
   }
-  const temp = graphicsLayers[index];
-  graphicsLayers[index] = graphicsLayers[nextIndex];
-  graphicsLayers[nextIndex] = temp;
+
+  const [movedLayer] = graphicsLayers.splice(index, 1);
+  graphicsLayers.splice(targetIndex, 0, movedLayer);
 
   if (selectedLayerIndex === index) {
-    selectedLayerIndex = nextIndex;
-  } else if (selectedLayerIndex === nextIndex) {
-    selectedLayerIndex = index;
+    selectedLayerIndex = targetIndex;
+  } else if (selectedLayerIndex > index && selectedLayerIndex <= targetIndex) {
+    selectedLayerIndex -= 1;
+  } else if (selectedLayerIndex < index && selectedLayerIndex >= targetIndex) {
+    selectedLayerIndex += 1;
   }
 
   if (timelineState.selectedTimelineAnimation) {
     if (timelineState.selectedTimelineAnimation.layerIdx === index) {
-      timelineState.selectedTimelineAnimation.layerIdx = nextIndex;
-    } else if (timelineState.selectedTimelineAnimation.layerIdx === nextIndex) {
-      timelineState.selectedTimelineAnimation.layerIdx = index;
+      timelineState.selectedTimelineAnimation.layerIdx = targetIndex;
+    } else if (
+      timelineState.selectedTimelineAnimation.layerIdx > index &&
+      timelineState.selectedTimelineAnimation.layerIdx <= targetIndex
+    ) {
+      timelineState.selectedTimelineAnimation.layerIdx -= 1;
+    } else if (
+      timelineState.selectedTimelineAnimation.layerIdx < index &&
+      timelineState.selectedTimelineAnimation.layerIdx >= targetIndex
+    ) {
+      timelineState.selectedTimelineAnimation.layerIdx += 1;
     }
   }
 
@@ -5493,7 +5984,9 @@ function updatePointAnimationPreview(color: string, outlineColor: string, style:
     previews.forEach((preview) => {
       const usesPointStyle =
         !preview.classList.contains("animation-type-preview--dartHit") &&
-        !preview.classList.contains("animation-type-preview--fireworks");
+        !preview.classList.contains("animation-type-preview--fireworks") &&
+        !preview.classList.contains("animation-type-preview--crossetteShell") &&
+        !preview.classList.contains("animation-type-preview--mineShellCombo");
       Array.from(preview.classList)
         .filter((cls) => cls.startsWith("point-style-"))
         .forEach((cls) => preview.classList.remove(cls));
