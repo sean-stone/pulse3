@@ -990,6 +990,17 @@ const clearFireworksLayer = (layerData: LayerData) => {
 };
 
 const densifyPolyline = (polyline: Polyline) => {
+  const hasAnyZ = Boolean(
+    polyline.paths?.some((path) =>
+      path?.some((coord) => Array.isArray(coord) && Number.isFinite(Number(coord[2])))
+    )
+  );
+  // Avoid geometryEngine densify for Z-enabled lines because it may emit mixed/no-Z vertices,
+  // which can pull path-following effects off the actual elevated geometry.
+  if (hasAnyZ) {
+    return polyline.clone();
+  }
+
   const isGeographic = Boolean((polyline.spatialReference as any)?.isGeographic);
   const totalLength = isGeographic
     ? geometryEngine.geodesicLength(polyline) || 0

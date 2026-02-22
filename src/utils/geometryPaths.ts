@@ -1,7 +1,42 @@
 export function distance(a: number[], b: number[]) {
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
+  const az = Number(a[2]);
+  const bz = Number(b[2]);
+  if (Number.isFinite(az) && Number.isFinite(bz)) {
+    return Math.hypot(dx, dy, bz - az);
+  }
   return Math.hypot(dx, dy);
+}
+
+function cloneCoord(coord: number[]) {
+  return [...coord];
+}
+
+function interpolateCoord(prev: number[], curr: number[], t: number) {
+  const interpolated: number[] = [
+    prev[0] + (curr[0] - prev[0]) * t,
+    prev[1] + (curr[1] - prev[1]) * t
+  ];
+
+  const maxDimensions = Math.max(prev.length, curr.length);
+  for (let dim = 2; dim < maxDimensions; dim += 1) {
+    const prevValue = Number(prev[dim]);
+    const currValue = Number(curr[dim]);
+    if (Number.isFinite(prevValue) && Number.isFinite(currValue)) {
+      interpolated.push(prevValue + (currValue - prevValue) * t);
+      continue;
+    }
+    if (Number.isFinite(prevValue)) {
+      interpolated.push(prevValue);
+      continue;
+    }
+    if (Number.isFinite(currValue)) {
+      interpolated.push(currValue);
+    }
+  }
+
+  return interpolated;
 }
 
 export function polylineLength(paths: number[][][]) {
@@ -21,12 +56,12 @@ export function buildPartialPaths(
 ) {
   if (progress <= 0) {
     const firstPath = paths[0] || [];
-    const firstPoint = firstPath[0] ? [firstPath[0][0], firstPath[0][1]] : [];
+    const firstPoint = firstPath[0] ? cloneCoord(firstPath[0]) : [];
     return firstPoint.length ? [[firstPoint]] : [];
   }
 
   if (progress >= 1) {
-    return paths.map((path) => path.map((coord) => [coord[0], coord[1]]));
+    return paths.map((path) => path.map((coord) => cloneCoord(coord)));
   }
 
   const ordered = reverse
@@ -35,7 +70,7 @@ export function buildPartialPaths(
 
   const totalLength = polylineLength(ordered);
   if (totalLength <= 0) {
-    return paths.map((path) => path.map((coord) => [coord[0], coord[1]]));
+    return paths.map((path) => path.map((coord) => cloneCoord(coord)));
   }
   const targetLength = totalLength * progress;
 
@@ -44,7 +79,7 @@ export function buildPartialPaths(
 
   for (const path of ordered) {
     if (path.length === 0) continue;
-    const resultPath: number[][] = [path[0]];
+    const resultPath: number[][] = [cloneCoord(path[0])];
 
     for (let i = 1; i < path.length; i++) {
       const prev = path[i - 1];
@@ -56,14 +91,11 @@ export function buildPartialPaths(
       }
 
       if (segmentLength <= remaining) {
-        resultPath.push(curr);
+        resultPath.push(cloneCoord(curr));
         remaining -= segmentLength;
       } else {
         const t = remaining / segmentLength;
-        resultPath.push([
-          prev[0] + (curr[0] - prev[0]) * t,
-          prev[1] + (curr[1] - prev[1]) * t
-        ]);
+        resultPath.push(interpolateCoord(prev, curr, t));
         remaining = 0;
         break;
       }
