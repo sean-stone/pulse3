@@ -3620,6 +3620,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const waypointLayer = getWaypointLayer(layerData, view);
+          syncOverlayLayerElevation(waypointLayer, layerData.layer, view, 0.25);
           waypointLayer.visible = true;
           waypointLayer.opacity = Math.max(baseLayerOpacity, 0.9);
           const waypointGraphics: Graphic[] = [];
@@ -3636,10 +3637,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const fullRouteWorking = toViewPolyline(sourceGeometry, view);
             const { stops, total } = buildVertexStops(fullRouteWorking);
             if (!stops.length) return;
-            const reachedPoints: number[][] = [];
+            const reachedPoints: Array<number[]> = [];
 
             stops.forEach((stop, index) => {
-              reachedPoints.push([stop.x, stop.y]);
+              reachedPoints.push(toPathCoord(stop.x, stop.y, stop.z));
               const t = total > 0 ? clamp(stop.accum / total, 0, 1) : 0;
               const r = cartoon
                 ? Math.round(92 + 158 * t)
@@ -3654,11 +3655,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
               waypointGraphics.push(
                 new Graphic({
-                  geometry: new Point({
-                    x: stop.x,
-                    y: stop.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    stop.x,
+                    stop.y,
+                    fullRouteWorking.spatialReference,
+                    stop.z
+                  ),
                   symbol: {
                     type: "simple-marker",
                     style: cartoon ? "diamond" : "circle",
@@ -3671,11 +3673,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   }
                 }),
                 new Graphic({
-                  geometry: new Point({
-                    x: stop.x,
-                    y: stop.y,
-                    spatialReference: fullRouteWorking.spatialReference
-                  }),
+                  geometry: buildPointGeometry(
+                    stop.x,
+                    stop.y,
+                    fullRouteWorking.spatialReference,
+                    stop.z
+                  ),
                   symbol: {
                     type: "text",
                     text: label,
@@ -3693,11 +3696,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               if (cartoon) {
                 waypointGraphics.push(
                   new Graphic({
-                    geometry: new Point({
-                      x: stop.x,
-                      y: stop.y,
-                      spatialReference: fullRouteWorking.spatialReference
-                    }),
+                    geometry: buildPointGeometry(
+                      stop.x,
+                      stop.y,
+                      fullRouteWorking.spatialReference,
+                      stop.z
+                    ),
                     symbol: {
                       type: "simple-marker",
                       style: "circle",
@@ -3754,6 +3758,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const view = config.getView?.();
         if (view) {
           const barrageLayer = getBarrageLayer(layerData, view);
+          syncOverlayLayerElevation(barrageLayer, layerData.layer, view, 0.25);
           barrageLayer.visible = true;
           barrageLayer.opacity = baseLayerOpacity;
           const baseColor = layerData.lineStyle?.color ?? defaultLineStyle.color;
@@ -3805,6 +3810,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const hy = head.y + ny * offset;
               const tx = tail.x + nx * offset;
               const ty = tail.y + ny * offset;
+              const hz = Number.isFinite(Number(head.z)) ? Number(head.z) : undefined;
+              const tz = Number.isFinite(Number(tail.z)) ? Number(tail.z) : undefined;
 
               const alpha = clamp(0.55 + (1 - Math.abs(spread)) * 0.35, 0.35, 0.95);
               const width = Math.max(1, baseWidth * (0.35 + (1 - Math.abs(spread)) * 0.35));
@@ -3812,7 +3819,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 new Graphic({
                   geometry: new Polyline({
                     spatialReference: densified.spatialReference,
-                    paths: [[[tx, ty], [hx, hy]]]
+                    paths: [[toPathCoord(tx, ty, tz), toPathCoord(hx, hy, hz)]]
                   }),
                   symbol: {
                     type: "simple-line",
@@ -3826,11 +3833,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const arrowSize = Math.max(6, baseWidth * 2.4);
               barrageGraphics.push(
                 new Graphic({
-                  geometry: new Point({
-                    x: hx,
-                    y: hy,
-                    spatialReference: densified.spatialReference
-                  }),
+                  geometry: buildPointGeometry(hx, hy, densified.spatialReference, hz),
                   symbol: {
                     type: "simple-marker",
                     style: "path",
