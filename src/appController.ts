@@ -7,8 +7,10 @@ import Graphic from "@arcgis/core/Graphic";
 import Color from "@arcgis/core/Color";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
-import Sketch from "@arcgis/core/widgets/Sketch";
+import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
 import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
+import { sqlName } from "@arcgis/core/core/sql";
+import Glow from "@arcgis/core/webscene/Glow";
 
 import "gif.js/dist/gif.js";
 import gifWorkerUrl from "gif.js/dist/gif.worker.js?url";
@@ -54,6 +56,7 @@ import ffmpegWasmUrl from "@ffmpeg/core/wasm?url";
 let ffmpegClassWorkerUrl: string | null = null;
 let ffmpegCoreBaseUrl: string | null = null;
 const THUMBTACK_3D_STYLE = "thumbtack3d";
+const PULSE_SELECTION_HIGHLIGHT_NAME = "pulse-selection";
 
 const webglAnimationTypes = new Set([
   "neonTrail",
@@ -232,8 +235,10 @@ let textPlacementHandle: { remove: () => void } | null = null;
 let activeTextLayerIndex: number | null = null;
 const aiPromptStorageKey = "pulse.ai.lastPrompt";
 const aiModelStorageKey = "pulse.ai.lastModel";
-let sketch: Sketch | null = null;
-let sketchHasUpdateHandler = false;
+let sketch: SketchViewModel | null = null;
+let sketchCreateHandle: { remove: () => void } | null = null;
+let sketchUpdateHandle: { remove: () => void } | null = null;
+let activeSketchCreateLayerIndex: number | null = null;
 let currentAspectRatio: { width: number; height: number } | null = null;
 let isRotated = false;
 let isDrawing = false;
@@ -298,9 +303,23 @@ const CAMERA_FX_LEVEL_MIN = 0;
 const CAMERA_FX_LEVEL_MAX = 100;
 const CAMERA_FX_JITTER_MIN = 0;
 const CAMERA_FX_JITTER_MAX = 12;
+const SCENE_ONLY_BASEMAPS = new Set([
+  "topo-3d",
+  "navigation-3d",
+  "navigation-dark-3d",
+  "osm-3d",
+  "gray-3d",
+  "dark-gray-3d",
+  "streets-3d",
+  "streets-dark-3d"
+]);
+type SceneQualityProfile = "low" | "medium" | "high";
 
 type CameraStudioSettings = {
   fov: number;
+  qualityProfile: SceneQualityProfile;
+  glowEnabled: boolean;
+  glowIntensity: number;
   cinematicFxEnabled: boolean;
   noiseLevel: number;
   scanlineLevel: number;
@@ -311,6 +330,9 @@ type CameraStudioSettings = {
 
 const cameraStudioSettings: CameraStudioSettings = {
   fov: 55,
+  qualityProfile: "high",
+  glowEnabled: true,
+  glowIntensity: 1,
   cinematicFxEnabled: false,
   noiseLevel: 42,
   scanlineLevel: 38,
@@ -323,6 +345,7 @@ let sceneCameraStudioControlsBound = false;
 let sceneCameraFxOverlayCanvas: HTMLCanvasElement | null = null;
 let sceneCameraFxOverlayContext: CanvasRenderingContext2D | null = null;
 let sceneCameraFxAnimationFrame: number | null = null;
+let sceneDaylightPersistenceBound = false;
 
 async function handleAutoSaveAction() {
   await ensureStorageConsent(storageState, openConfirmDialog);
@@ -566,26 +589,118 @@ zoomToLayersRef = zoomToLayers;
 
 function setSketchUpdateOnGraphicClick(value: boolean) {
   if (!sketch) return;
-  const sketchAny = sketch as any;
-  if (sketchAny?.updateOnGraphicClick !== undefined) {
-    sketchAny.updateOnGraphicClick = value;
-  }
+  sketch.updateOnGraphicClick = value;
 }
 
 function syncSketchModeOptions() {
   if (!sketch) return;
-  const sketchAny = sketch as any;
   const enableZ = currentViewMode === "3d";
-  const defaultUpdateOptions = sketchAny.defaultUpdateOptions ?? {};
-  sketchAny.defaultUpdateOptions = {
+  const defaultUpdateOptions = sketch.defaultUpdateOptions ?? {};
+  sketch.defaultUpdateOptions = {
     ...defaultUpdateOptions,
     enableZ
   };
-  const defaultCreateOptions = sketchAny.defaultCreateOptions ?? {};
-  sketchAny.defaultCreateOptions = {
+  const defaultCreateOptions = sketch.defaultCreateOptions ?? {};
+  sketch.defaultCreateOptions = {
     ...defaultCreateOptions,
     hasZ: enableZ
   };
+}
+
+function getSelectionManager() {
+  return (view as any)?.selectionManager ?? null;
+}
+
+function ensureSelectionHighlightOptions() {
+  if (!view?.highlights?.find || !view?.highlights?.add) return;
+  const hasPulseHighlight = view.highlights.find((entry: any) => entry?.name === PULSE_SELECTION_HIGHLIGHT_NAME);
+  if (hasPulseHighlight) return;
+  view.highlights.add(
+    {
+      name: PULSE_SELECTION_HIGHLIGHT_NAME,
+      color: [10, 76, 102, 1],
+      haloOpacity: 0.95,
+      fillOpacity: 0.28
+    } as any,
+    0
+  );
+}
+
+function syncSelectionManagerSources() {
+  const manager = getSelectionManager();
+  if (!manager) return;
+  ensureSelectionHighlightOptions();
+  manager.view = view;
+  manager.highlightEnabled = true;
+  manager.highlightName = PULSE_SELECTION_HIGHLIGHT_NAME;
+  manager.sources = graphicsLayers.map((layerData) => layerData.layer);
+}
+
+function clearSelectionManagerSelection() {
+  const manager = getSelectionManager();
+  if (!manager) return;
+  manager.clear();
+}
+
+function setSelectionManagerSelection(layerData: LayerData | null, graphics: any[] = []) {
+  const manager = getSelectionManager();
+  if (!manager) return;
+  syncSelectionManagerSources();
+  manager.clear();
+  if (!layerData || !graphics.length) return;
+  manager.replace(layerData.layer, graphics);
+}
+
+function ensureSketchViewModel(layer: GraphicsLayer) {
+  if (!view) return null;
+  if (!sketch) {
+    sketch = new SketchViewModel({
+      view,
+      layer,
+      creationMode: "update"
+    });
+    sketchUpdateHandle = sketch.on("update", handleSketchUpdate);
+    sketchCreateHandle = sketch.on("create", (event: any) => {
+      const layerIndex = activeSketchCreateLayerIndex;
+      if (!event || layerIndex === null || layerIndex === undefined) return;
+      const layerData = graphicsLayers[layerIndex];
+      if (!layerData) return;
+      if (event.state !== "complete") {
+        if (event.state === "cancel") {
+          isDrawing = false;
+          setDrawInfoBoxVisible(false);
+          activeSketchCreateLayerIndex = null;
+        }
+        return;
+      }
+      const graphic = event.graphic;
+      if (!graphic) return;
+      graphic.geometry = toGeographicGeometry(graphic.geometry);
+      if (layerData.type === "point") {
+        const style = layerData.pointStyle ?? defaultPointStyle;
+        graphic.symbol = buildPointSymbolForCurrentView(style);
+      } else if (layerData.type === "polyline") {
+        const style = layerData.lineStyle ?? defaultLineStyle;
+        graphic.symbol = buildLineSymbolForCurrentView(style);
+      } else if (layerData.type === "polygon") {
+        const style = layerData.polygonStyle ?? defaultPolygonStyle;
+        graphic.symbol = buildPolygonSymbolForCurrentView(style);
+      }
+      ensureGeometryCache(layerData, graphic);
+      isDrawing = false;
+      setDrawInfoBoxVisible(false);
+      selectLayer(layerIndex);
+      scheduleProjectSave();
+      activeSketchCreateLayerIndex = null;
+    });
+  } else {
+    sketch.view = view;
+    sketch.layer = layer;
+  }
+  setSketchUpdateOnGraphicClick(true);
+  updateSnappingOptions();
+  syncSketchModeOptions();
+  return sketch;
 }
 
 function setDrawInfoBoxVisible(visible: boolean) {
@@ -902,6 +1017,10 @@ function syncSceneCameraStudioControlValues() {
   if (fovSlider) {
     setCalciteValue(fovSlider, Math.round(cameraStudioSettings.fov));
   }
+  const qualitySelect = document.getElementById("scene-quality-profile") as HTMLElement | null;
+  if (qualitySelect) {
+    setCalciteValue(qualitySelect, cameraStudioSettings.qualityProfile);
+  }
   const noiseSlider = document.getElementById("scene-camera-fx-noise") as HTMLElement | null;
   if (noiseSlider) {
     setCalciteValue(noiseSlider, Math.round(cameraStudioSettings.noiseLevel));
@@ -926,12 +1045,50 @@ function syncSceneCameraStudioControlValues() {
   if (cinematicFxSwitch) {
     cinematicFxSwitch.checked = cameraStudioSettings.cinematicFxEnabled;
   }
+  const glowSwitch = document.getElementById("scene-glow-enabled") as any;
+  if (glowSwitch) {
+    glowSwitch.checked = cameraStudioSettings.glowEnabled;
+  }
   updateSceneCameraStudioReadouts();
 }
 
 function applySceneCameraStudioSettings(sceneViewOverride?: any) {
   const sceneView = sceneViewOverride ?? getSceneView3D();
   if (sceneView && String(sceneView.type) === "3d") {
+    const qualityProfile = cameraStudioSettings.qualityProfile;
+    if (sceneView.qualityProfile !== qualityProfile) {
+      sceneView.qualityProfile = qualityProfile;
+    }
+    if (scene3DHostEl && scene3DHostEl.getAttribute("quality-profile") !== qualityProfile) {
+      scene3DHostEl.setAttribute("quality-profile", qualityProfile);
+    }
+
+    const lighting = sceneView.environment?.lighting as any;
+    const currentGlowIntensity = Number(lighting?.glow?.intensity);
+    const glowIntensity = clamp(readNumber(cameraStudioSettings.glowIntensity, 1), 0, 20);
+    cameraStudioSettings.glowIntensity = glowIntensity;
+    const shouldEnableGlow = cameraStudioSettings.glowEnabled;
+    if (lighting) {
+      if (
+        shouldEnableGlow &&
+        (!lighting.glow ||
+          !Number.isFinite(currentGlowIntensity) ||
+          Math.abs(currentGlowIntensity - glowIntensity) > 0.001)
+      ) {
+        // Update only the glow property so current sun/virtual mode and time remain unchanged.
+        lighting.glow = new Glow({ intensity: glowIntensity });
+      } else if (!shouldEnableGlow && lighting.glow) {
+        lighting.glow = null;
+      }
+    } else if (shouldEnableGlow) {
+      sceneView.environment = {
+        ...(sceneView.environment || {}),
+        lighting: {
+          type: "sun",
+          glow: new Glow({ intensity: glowIntensity })
+        }
+      };
+    }
     const clampedFov = clamp(cameraStudioSettings.fov, CAMERA_FOV_MIN, CAMERA_FOV_MAX);
     cameraStudioSettings.fov = clampedFov;
     const camera = sceneView.camera?.clone?.();
@@ -946,16 +1103,137 @@ function applySceneCameraStudioSettings(sceneViewOverride?: any) {
   updateSceneCameraFxOverlayState();
 }
 
+function captureSceneSettingsSnapshot(sceneViewOverride?: any) {
+  const sceneView = sceneViewOverride ?? getSceneView3D();
+  if (!sceneView || String(sceneView.type) !== "3d") return null;
+  const lighting = sceneView.environment?.lighting as any;
+  const lightingSnapshot: Record<string, unknown> = {};
+  const lightingType = String(lighting?.type || "");
+  if (lightingType === "sun" || lightingType === "virtual") {
+    lightingSnapshot.type = lightingType;
+  }
+  const lightingDateRaw = lighting?.date;
+  const lightingDate = lightingDateRaw instanceof Date ? lightingDateRaw : new Date(lightingDateRaw);
+  if (Number.isFinite(lightingDate.getTime())) {
+    lightingSnapshot.date = lightingDate.toISOString();
+  }
+  const displayUTCOffset = Number(lighting?.displayUTCOffset);
+  if (Number.isFinite(displayUTCOffset)) {
+    lightingSnapshot.displayUTCOffset = displayUTCOffset;
+  }
+  if (typeof lighting?.directShadowsEnabled === "boolean") {
+    lightingSnapshot.directShadowsEnabled = Boolean(lighting.directShadowsEnabled);
+  }
+  const glowIntensity = Number(lighting?.glow?.intensity);
+  if (Number.isFinite(glowIntensity)) {
+    lightingSnapshot.glowIntensity = glowIntensity;
+  }
+  return {
+    cameraStudio: { ...cameraStudioSettings },
+    lighting: Object.keys(lightingSnapshot).length ? lightingSnapshot : undefined
+  };
+}
+
+function applySceneSettingsSnapshot(sceneSettings: any, sceneViewOverride?: any) {
+  if (!sceneSettings || typeof sceneSettings !== "object") return;
+  const cameraStudio = sceneSettings.cameraStudio;
+  if (cameraStudio && typeof cameraStudio === "object") {
+    cameraStudioSettings.fov = clamp(
+      readNumber(cameraStudio.fov, cameraStudioSettings.fov),
+      CAMERA_FOV_MIN,
+      CAMERA_FOV_MAX
+    );
+    cameraStudioSettings.qualityProfile = readSceneQualityProfile(
+      cameraStudio.qualityProfile,
+      cameraStudioSettings.qualityProfile
+    );
+    if (typeof cameraStudio.glowEnabled === "boolean") {
+      cameraStudioSettings.glowEnabled = cameraStudio.glowEnabled;
+    }
+    cameraStudioSettings.glowIntensity = clamp(
+      readNumber(cameraStudio.glowIntensity, cameraStudioSettings.glowIntensity),
+      0,
+      20
+    );
+    if (typeof cameraStudio.cinematicFxEnabled === "boolean") {
+      cameraStudioSettings.cinematicFxEnabled = cameraStudio.cinematicFxEnabled;
+    }
+    cameraStudioSettings.noiseLevel = clamp(
+      readNumber(cameraStudio.noiseLevel, cameraStudioSettings.noiseLevel),
+      CAMERA_FX_LEVEL_MIN,
+      CAMERA_FX_LEVEL_MAX
+    );
+    cameraStudioSettings.scanlineLevel = clamp(
+      readNumber(cameraStudio.scanlineLevel, cameraStudioSettings.scanlineLevel),
+      CAMERA_FX_LEVEL_MIN,
+      CAMERA_FX_LEVEL_MAX
+    );
+    cameraStudioSettings.vignetteLevel = clamp(
+      readNumber(cameraStudio.vignetteLevel, cameraStudioSettings.vignetteLevel),
+      CAMERA_FX_LEVEL_MIN,
+      CAMERA_FX_LEVEL_MAX
+    );
+    cameraStudioSettings.jitter = clamp(
+      readNumber(cameraStudio.jitter, cameraStudioSettings.jitter),
+      CAMERA_FX_JITTER_MIN,
+      CAMERA_FX_JITTER_MAX
+    );
+    cameraStudioSettings.chromaticAberration = clamp(
+      readNumber(cameraStudio.chromaticAberration, cameraStudioSettings.chromaticAberration),
+      CAMERA_FX_JITTER_MIN,
+      CAMERA_FX_JITTER_MAX
+    );
+  }
+
+  const sceneView = sceneViewOverride ?? getSceneView3D();
+  if (sceneView && String(sceneView.type) === "3d") {
+    const lighting = sceneView.environment?.lighting as any;
+    const savedLighting = sceneSettings.lighting;
+    if (lighting && savedLighting && typeof savedLighting === "object") {
+      const savedType = String(savedLighting.type || "");
+      if (savedType === "sun" || savedType === "virtual") {
+        lighting.type = savedType;
+      }
+      const savedGlowIntensity = Number(savedLighting.glowIntensity);
+      if (Number.isFinite(savedGlowIntensity)) {
+        cameraStudioSettings.glowIntensity = clamp(savedGlowIntensity, 0, 20);
+      }
+      if (typeof savedLighting.directShadowsEnabled === "boolean") {
+        lighting.directShadowsEnabled = Boolean(savedLighting.directShadowsEnabled);
+      }
+      if ("displayUTCOffset" in savedLighting && "displayUTCOffset" in lighting) {
+        const offset = Number(savedLighting.displayUTCOffset);
+        if (Number.isFinite(offset)) {
+          lighting.displayUTCOffset = offset;
+        }
+      }
+      const effectiveLightingType = String(lighting?.type || savedType || "");
+      if (effectiveLightingType !== "virtual") {
+        const savedDateRaw = savedLighting.date;
+        const savedDate = savedDateRaw ? new Date(String(savedDateRaw)) : null;
+        if (savedDate && Number.isFinite(savedDate.getTime()) && "date" in lighting) {
+          lighting.date = savedDate;
+        }
+      }
+    }
+  }
+  syncSceneCameraStudioControlValues();
+  applySceneCameraStudioSettings(sceneView);
+}
+
 function bindSceneCameraStudioControls() {
   if (sceneCameraStudioControlsBound) return;
   const fovSlider = document.getElementById("scene-camera-fov") as any;
+  const qualitySelect = document.getElementById("scene-quality-profile") as any;
+  const glowSwitch = document.getElementById("scene-glow-enabled") as any;
   const cinematicFxSwitch = document.getElementById("scene-camera-fx-enabled") as any;
   const noiseSlider = document.getElementById("scene-camera-fx-noise") as any;
   const scanlineSlider = document.getElementById("scene-camera-fx-scanline") as any;
   const vignetteSlider = document.getElementById("scene-camera-fx-vignette") as any;
   const jitterSlider = document.getElementById("scene-camera-fx-jitter") as any;
   const chromaticSlider = document.getElementById("scene-camera-fx-chromatic") as any;
-  if (!fovSlider || !cinematicFxSwitch || !noiseSlider || !scanlineSlider || !vignetteSlider) return;
+  if (!fovSlider || !qualitySelect || !glowSwitch) return;
+  if (!cinematicFxSwitch || !noiseSlider || !scanlineSlider || !vignetteSlider) return;
   if (!jitterSlider || !chromaticSlider) return;
   sceneCameraStudioControlsBound = true;
 
@@ -969,6 +1247,7 @@ function bindSceneCameraStudioControls() {
     );
     updateSceneCameraStudioReadouts();
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   const handleNoiseUpdate = () => {
@@ -979,6 +1258,7 @@ function bindSceneCameraStudioControls() {
     );
     updateSceneCameraStudioReadouts();
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   const handleScanlineUpdate = () => {
@@ -989,6 +1269,7 @@ function bindSceneCameraStudioControls() {
     );
     updateSceneCameraStudioReadouts();
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   const handleVignetteUpdate = () => {
@@ -999,6 +1280,7 @@ function bindSceneCameraStudioControls() {
     );
     updateSceneCameraStudioReadouts();
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   const handleJitterUpdate = () => {
@@ -1009,6 +1291,7 @@ function bindSceneCameraStudioControls() {
     );
     updateSceneCameraStudioReadouts();
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   const handleChromaticUpdate = () => {
@@ -1019,15 +1302,34 @@ function bindSceneCameraStudioControls() {
     );
     updateSceneCameraStudioReadouts();
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
+  const handleQualityChange = () => {
+    cameraStudioSettings.qualityProfile = readSceneQualityProfile(
+      qualitySelect.value,
+      cameraStudioSettings.qualityProfile
+    );
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
+  const handleGlowToggle = () => {
+    cameraStudioSettings.glowEnabled = Boolean(glowSwitch.checked);
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   const handleCinematicFxToggle = () => {
     cameraStudioSettings.cinematicFxEnabled = Boolean(cinematicFxSwitch.checked);
     applySceneCameraStudioSettings();
+    scheduleProjectSave();
   };
 
   fovSlider.addEventListener("calciteSliderInput", handleFovUpdate);
   fovSlider.addEventListener("calciteSliderChange", handleFovUpdate);
+  qualitySelect.addEventListener("calciteSelectChange", handleQualityChange);
+  glowSwitch.addEventListener("calciteSwitchChange", handleGlowToggle);
   noiseSlider.addEventListener("calciteSliderInput", handleNoiseUpdate);
   noiseSlider.addEventListener("calciteSliderChange", handleNoiseUpdate);
   scanlineSlider.addEventListener("calciteSliderInput", handleScanlineUpdate);
@@ -1039,6 +1341,16 @@ function bindSceneCameraStudioControls() {
   chromaticSlider.addEventListener("calciteSliderInput", handleChromaticUpdate);
   chromaticSlider.addEventListener("calciteSliderChange", handleChromaticUpdate);
   cinematicFxSwitch.addEventListener("calciteSwitchChange", handleCinematicFxToggle);
+}
+
+function bindSceneDaylightPersistence() {
+  if (sceneDaylightPersistenceBound) return;
+  const daylightEl = document.getElementById("scene-daylight");
+  if (!daylightEl) return;
+  sceneDaylightPersistenceBound = true;
+  daylightEl.addEventListener("arcgisPropertyChange", () => {
+    scheduleProjectSave();
+  });
 }
 
 function ensureWorldElevationGround(map: any) {
@@ -1394,11 +1706,11 @@ function updateSnappingOptions() {
     viewAny.snappingOptions.enabled = true;
     viewAny.snappingOptions.featureSources = sources;
   }
-  const sketchAny = sketch as any;
-  if (sketchAny?.snappingOptions) {
-    sketchAny.snappingOptions.enabled = true;
-    sketchAny.snappingOptions.featureSources = sources;
+  if (sketch?.snappingOptions) {
+    sketch.snappingOptions.enabled = true;
+    sketch.snappingOptions.featureSources = sources as any;
   }
+  syncSelectionManagerSources();
 }
 
 function resetSketchForCurrentView() {
@@ -1410,7 +1722,15 @@ function resetSketchForCurrentView() {
   }
   sketch.destroy?.();
   sketch = null;
-  sketchHasUpdateHandler = false;
+  if (sketchUpdateHandle) {
+    sketchUpdateHandle.remove();
+    sketchUpdateHandle = null;
+  }
+  if (sketchCreateHandle) {
+    sketchCreateHandle.remove();
+    sketchCreateHandle = null;
+  }
+  activeSketchCreateLayerIndex = null;
   isVertexEditing = false;
 }
 
@@ -1487,6 +1807,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
   if (isSwitchingViewMode) return;
   if (mode === currentViewMode && view) {
     setSceneModeButtonLabel();
+    updateBasemapOptionsForViewMode(mode);
     return;
   }
   const targetHost = getMapHostElement(mode);
@@ -1520,6 +1841,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     view = targetView;
     currentViewMode = mode;
     setSceneModeButtonLabel();
+    updateBasemapOptionsForViewMode(mode);
     if (mode === "3d") {
       applySceneCameraStudioSettings(targetView);
     } else {
@@ -1547,7 +1869,7 @@ async function toggleViewMode() {
 }
 
 const buildProjectSnapshot = () => {
-  return buildProjectSnapshotFromState({
+  const snapshot = buildProjectSnapshotFromState({
     view,
     graphicsLayers,
     projectName,
@@ -1558,6 +1880,13 @@ const buildProjectSnapshot = () => {
     ensureGeometryCache,
     arcgisGeometryToGeoJSON
   });
+  if (snapshot?.properties?._pulse?.app) {
+    const sceneSettings = captureSceneSettingsSnapshot();
+    if (sceneSettings) {
+      (snapshot.properties._pulse.app as any).scene = sceneSettings;
+    }
+  }
+  return snapshot;
 };
 buildProjectSnapshotRef = buildProjectSnapshot;
 
@@ -1645,7 +1974,10 @@ async function applyProjectSnapshot(snapshot: unknown) {
     },
     snapshot as ProjectSnapshot
   );
+  applySceneSettingsSnapshot((snapshot as any)?.properties?._pulse?.app?.scene, getSceneView3D());
   applyViewModeToAllLayers();
+  updateSnappingOptions();
+  clearSelectionManagerSelection();
   setSceneModeButtonLabel();
 }
 
@@ -2065,6 +2397,27 @@ function updateExportResolutionLabel(viewAny: any) {
   }
 }
 
+function updateBasemapOptionsForViewMode(mode: ViewMode = currentViewMode) {
+  const select = document.getElementById("basemap-select") as any;
+  if (!select) return;
+  const isSceneMode = mode === "3d";
+  const sceneOnlyOptions = Array.from(
+    select.querySelectorAll("calcite-option[data-scene-only]")
+  ) as Array<HTMLElement & { disabled?: boolean }>;
+  sceneOnlyOptions.forEach((option) => {
+    option.toggleAttribute("hidden", !isSceneMode);
+    option.setAttribute("aria-hidden", isSceneMode ? "false" : "true");
+    option.disabled = !isSceneMode;
+  });
+  const selectedValue = String(select.value || "");
+  if (!isSceneMode && SCENE_ONLY_BASEMAPS.has(selectedValue)) {
+    select.value = "gray-vector";
+    if (view?.map) {
+      handleBasemapChange();
+    }
+  }
+}
+
 function getBasemapBackgroundColor() {
   const input = document.getElementById("basemap-bg-color") as HTMLInputElement | null;
   const raw = input?.value || "#ffffff";
@@ -2106,25 +2459,99 @@ function getBasemapLabelsVisible() {
   return input ? Boolean(input.checked) : true;
 }
 
+function isSceneOnlyBasemapSelected() {
+  const select = document.getElementById("basemap-select") as any;
+  const selected = normalizeBasemap(String(select?.value || "gray-vector"));
+  return SCENE_ONLY_BASEMAPS.has(selected);
+}
+
+function getBasemapReferenceLayers(basemap: any) {
+  if (!basemap?.referenceLayers) return [] as any[];
+  const layers: any[] = [];
+  basemap.referenceLayers.forEach?.((layer: any) => {
+    layers.push(layer);
+  });
+  return layers;
+}
+
+function getBasemapBaseLayers(basemap: any) {
+  if (!basemap?.baseLayers) return [] as any[];
+  const layers: any[] = [];
+  basemap.baseLayers.forEach?.((layer: any) => {
+    layers.push(layer);
+  });
+  return layers;
+}
+
+function isLikely3DBasemapLayer(layer: any) {
+  const layerType = String(layer?.type || "").toLowerCase();
+  if (layerType.includes("scene") || layerType.includes("integrated") || layerType.includes("point-cloud")) {
+    return false;
+  }
+  const descriptor = [
+    layer?.title,
+    layer?.id,
+    layer?.portalItem?.title,
+    layer?.portalItem?.id,
+    layer?.url
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /(building|buildings|3d|mesh|integrated mesh|voxel)/.test(descriptor);
+}
+
+function isLikelyLabelLayer(layer: any) {
+  if (isLikely3DBasemapLayer(layer)) {
+    return false;
+  }
+  const descriptor = [
+    layer?.title,
+    layer?.id,
+    layer?.portalItem?.title,
+    layer?.portalItem?.id,
+    layer?.url
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /(label|labels|annotation|reference|place|places|boundar)/.test(descriptor);
+}
+
+function getBasemapLabelReferenceLayers(basemap: any) {
+  const referenceLayers = getBasemapReferenceLayers(basemap);
+  const baseLayers = getBasemapBaseLayers(basemap);
+  const likelyLabelRefLayers = referenceLayers.filter((layer) => isLikelyLabelLayer(layer));
+  const likelyLabelBaseLayers = baseLayers.filter((layer) => isLikelyLabelLayer(layer));
+  if (likelyLabelRefLayers.length > 0 || likelyLabelBaseLayers.length > 0) {
+    return [...likelyLabelRefLayers, ...likelyLabelBaseLayers];
+  }
+
+  const safeReferenceLayers = referenceLayers.filter((layer) => !isLikely3DBasemapLayer(layer));
+  if (safeReferenceLayers.length > 0) {
+    return safeReferenceLayers;
+  }
+
+  // For non-scene basemaps, preserve legacy behavior.
+  if (!isSceneOnlyBasemapSelected()) {
+    return referenceLayers;
+  }
+  return [];
+}
+
 function applyBasemapLabelsVisibility() {
   if (!view?.map?.basemap) return;
   const basemap = view.map.basemap;
   const visible = getBasemapLabelsVisible();
-  const referenceLayers = basemap?.referenceLayers;
-  if (referenceLayers?.forEach) {
-    referenceLayers.forEach((layer: any) => {
-      layer.visible = visible;
-    });
-  }
+  const targetLayers = getBasemapLabelReferenceLayers(basemap);
+  targetLayers.forEach((layer: any) => {
+    layer.visible = visible;
+  });
 }
 
 function updateBasemapLabelsToggleVisibility() {
   const toggleWrap = document.querySelector(".basemap-labels-toggle") as HTMLElement | null;
   if (!toggleWrap) return;
   const basemap = view?.map?.basemap;
-  const referenceLayers: any = basemap?.referenceLayers;
-  const layerCount =
-    Number(referenceLayers?.length ?? referenceLayers?.items?.length ?? 0);
+  const layerCount = getBasemapLabelReferenceLayers(basemap).length;
   const supportsLabels = Boolean(basemap) && layerCount > 0;
   if (supportsLabels) {
     toggleWrap.removeAttribute("hidden");
@@ -2414,21 +2841,22 @@ function mergeAttributionStrings(...parts: Array<string | null | undefined>) {
   return Array.from(sources).join("; ");
 }
 
-function findMapAttributionText() {
-  const direct = document.querySelector(".esri-attribution__sources") as HTMLElement | null;
-  const directText = direct?.innerText?.trim();
-
-  const hostTexts = [document.getElementById("arcgisMap"), document.getElementById("arcgisScene")]
-    .filter(Boolean)
-    .map((host) => findInShadow(host as HTMLElement, ".esri-attribution__sources")?.innerText?.trim())
+function attributionItemsToText(items: ReadonlyArray<{ text?: string }> | null | undefined) {
+  if (!Array.isArray(items)) return "";
+  return items
+    .map((item) => String(item?.text || "").trim())
     .filter(Boolean)
     .join("; ");
+}
 
-  const fromDocument = findInShadow(document.documentElement, ".esri-attribution__sources");
-  const documentText = fromDocument?.innerText?.trim();
-
+function findMapAttributionText() {
+  const fromView = attributionItemsToText((view as any)?.attributionItems);
+  const fromHosts = [document.getElementById("arcgisMap"), document.getElementById("arcgisScene")]
+    .map((host) => attributionItemsToText((host as any)?.attributionItems))
+    .filter(Boolean)
+    .join("; ");
   const fromLayers = collectMapAttributions();
-  return mergeAttributionStrings(directText, hostTexts, documentText, fromLayers);
+  return mergeAttributionStrings(fromView, fromHosts, fromLayers);
 }
 
 function collectMapAttributions() {
@@ -3084,6 +3512,7 @@ function clearExportSelection() {
   updateLayersList();
   updateTimeline();
   updateAnimationOptions();
+  clearSelectionManagerSelection();
   if (sketch) {
     sketch.cancel();
   }
@@ -3233,7 +3662,7 @@ async function resetProject() {
   }
   if (sketch) {
     sketch.cancel();
-    (sketch as any).layer = null;
+    sketch.layer = null;
   }
   view.graphics?.removeAll?.();
   view.map.removeMany(graphicsLayers.map((layerData) => layerData.layer));
@@ -3251,6 +3680,7 @@ async function resetProject() {
     delete (layerData as any).__fireworksLayer;
   });
   graphicsLayers = [];
+  clearSelectionManagerSelection();
   selectedLayerIndex = -1;
   isDrawing = false;
   setDrawInfoBoxVisible(false);
@@ -3512,6 +3942,8 @@ export function bootApp() {
 
   setMapHostVisibility(currentViewMode);
   setSceneModeButtonLabel();
+  updateBasemapOptionsForViewMode(currentViewMode);
+  bindSceneDaylightPersistence();
 
   const maybeActivateReadyView = (nextView: any, mode: ViewMode) => {
     if (!nextView) return;
@@ -4368,14 +4800,27 @@ function getFeatureLayerFields(layer: FeatureLayer) {
     .map((field) => ({ name: field.name, type: String(field.type || "") }));
 }
 
+function resolveFeatureFieldName(layerData: LayerData) {
+  const requested = String(layerData.featureField || "").trim();
+  if (!requested) return null;
+  const layer = layerData.layer as FeatureLayer;
+  const match = (layer.fields || []).find((field: any) => String(field?.name || "") === requested);
+  return match?.name ? String(match.name) : null;
+}
+
+function buildFeatureFieldWhereClause(fieldName: string, hideNulls = false) {
+  if (!hideNulls) return "1=1";
+  return `${sqlName(fieldName)} IS NOT NULL`;
+}
+
 async function updateFeatureFieldStats(layerData: LayerData) {
   const layer = layerData.layer as FeatureLayer;
-  const field = layerData.featureField;
+  const field = resolveFeatureFieldName(layerData);
   if (!field) return false;
 
   let stats: any;
   try {
-    const where = layerData.featureHideNulls ? `${field} IS NOT NULL` : "1=1";
+    const where = buildFeatureFieldWhereClause(field, layerData.featureHideNulls);
     stats = await layer.queryFeatures({
       where,
       outStatistics: [
@@ -4413,9 +4858,10 @@ async function updateFeatureFieldStats(layerData: LayerData) {
 
 function applyFeatureLayerDefinition(layerData: LayerData) {
   const layer = layerData.layer as FeatureLayer;
-  const field = layerData.featureField;
-  if (!field) return;
-  layer.definitionExpression = layerData.featureHideNulls ? `${field} IS NOT NULL` : "1=1";
+  const field = resolveFeatureFieldName(layerData);
+  layer.definitionExpression = field
+    ? buildFeatureFieldWhereClause(field, layerData.featureHideNulls)
+    : "1=1";
 }
 
 function buildFeatureBaseSymbol(layerData: LayerData, visualType: string) {
@@ -4438,7 +4884,7 @@ function buildFeatureBaseSymbol(layerData: LayerData, visualType: string) {
 
 function applyFeatureLayerRenderer(layerData: LayerData, value: number) {
   applyLayerModeProperties(layerData);
-  const field = layerData.featureField;
+  const field = resolveFeatureFieldName(layerData);
   const stats = layerData.featureFieldStats;
   if (!field || !stats) return;
 
@@ -4512,7 +4958,7 @@ function applyFeatureLayerStaticRenderer(layerData: LayerData) {
 function applyFeatureLayerAnimation(layerData: LayerData, time: number) {
   const anim = layerData.animations.find((entry) => entry.type === "field");
   const stats = layerData.featureFieldStats;
-  if (!anim || !stats || !layerData.featureField) {
+  if (!anim || !stats || !resolveFeatureFieldName(layerData)) {
     applyFeatureLayerStaticRenderer(layerData);
     return;
   }
@@ -4684,11 +5130,7 @@ function beginTextPlacement(layerIndex: number) {
     suppressNextMapClick = true;
     selectLayer(layerIndex);
     if (sketch && !isPlaying) {
-      try {
-        sketch.update(graphic);
-      } catch {
-        // ignore selection errors
-      }
+      void sketch.update(graphic).catch(() => undefined);
     }
     scheduleProjectSave();
     if (textPlacementHandle) {
@@ -4739,24 +5181,7 @@ async function startDrawing(type: LayerType) {
 
   applyLayerModeProperties(layerData);
   graphicsLayers.push(layerData);
-
-  if (!sketch) {
-    sketch = new Sketch({
-      view,
-      layer: newLayer,
-      creationMode: "update"
-    });
-    setSketchUpdateOnGraphicClick(true);
-    updateSnappingOptions();
-  } else {
-    sketch.layer = newLayer;
-    updateSnappingOptions();
-  }
-  syncSketchModeOptions();
-  if (sketch && !sketchHasUpdateHandler) {
-    sketch.on("update", handleSketchUpdate);
-    sketchHasUpdateHandler = true;
-  }
+  const sketchVm = ensureSketchViewModel(newLayer);
 
   if (type === "text") {
     layerData.textContent = "Text";
@@ -4771,38 +5196,21 @@ async function startDrawing(type: LayerType) {
     beginTextPlacement(layerIndex);
     return;
   } else {
+    if (!sketchVm) return;
     const toolMap: Record<string, string> = {
       point: "point",
       polyline: "polyline",
       polygon: "polygon"
     };
 
+    activeSketchCreateLayerIndex = layerIndex;
     const mode = "click";
-    sketch.create(toolMap[type] as any, {
+    void sketchVm.create(toolMap[type] as any, {
       mode
-    });
-
-    sketch.on("create", (event: any) => {
-      if (event.state === "complete") {
-        const graphic = event.graphic;
-        graphic.geometry = toGeographicGeometry(graphic.geometry);
-            if (type === "point") {
-              const style = layerData.pointStyle ?? defaultPointStyle;
-              graphic.symbol = buildPointSymbolForCurrentView(style);
-            } else if (type === "polyline") {
-              const style = layerData.lineStyle ?? defaultLineStyle;
-              graphic.symbol = buildLineSymbolForCurrentView(style);
-            } else if (type === "polygon") {
-              const style = layerData.polygonStyle ?? defaultPolygonStyle;
-              graphic.symbol = buildPolygonSymbolForCurrentView(style);
-            }
-
-        ensureGeometryCache(layerData, graphic);
-        isDrawing = false;
-        setDrawInfoBoxVisible(false);
-        selectLayer(layerIndex);
-        scheduleProjectSave();
-      }
+    }).catch(() => {
+      isDrawing = false;
+      setDrawInfoBoxVisible(false);
+      activeSketchCreateLayerIndex = null;
     });
   }
 }
@@ -4923,7 +5331,7 @@ function expandLayerAccordionSection(layerIndex: number, section: "animate" | "s
   void section;
 }
 
-function selectLayer(index: number, focusGraphic = true) {
+function selectLayer(index: number, focusGraphic = true, selectedGraphic?: any) {
   if (index < 0 || index >= graphicsLayers.length) return;
   selectedLayerIndex = index;
   updateLayersList();
@@ -4936,6 +5344,7 @@ function selectLayer(index: number, focusGraphic = true) {
     if (isPlaying) {
       stopAnimation();
     }
+    setSelectionManagerSelection(layerData, selectedGraphic ? [selectedGraphic] : []);
     return;
   }
   if (isPlaying && (layerData.type === "polyline" || layerData.type === "polygon")) {
@@ -4943,15 +5352,7 @@ function selectLayer(index: number, focusGraphic = true) {
     restoreLayerGeometry(layerData);
   }
 
-  if (!sketch && view) {
-    sketch = new Sketch({
-      view,
-      layer: layerData.layer,
-      creationMode: "update"
-    });
-    setSketchUpdateOnGraphicClick(true);
-    updateSnappingOptions();
-  }
+  ensureSketchViewModel(layerData.layer);
 
   if (!sketch) return;
   sketch.layer = layerData.layer;
@@ -4962,10 +5363,6 @@ function selectLayer(index: number, focusGraphic = true) {
   if (!allowEditing) {
     sketch.cancel();
   }
-  if (!sketchHasUpdateHandler) {
-    sketch.on("update", handleSketchUpdate);
-    sketchHasUpdateHandler = true;
-  }
 
   if (allowEditing) {
     if (layerData.type === "polyline" || layerData.type === "polygon") {
@@ -4974,16 +5371,19 @@ function selectLayer(index: number, focusGraphic = true) {
     prepareLayerGeometryForSketch(layerData);
   }
 
-  if (focusGraphic && !hasPathAnimation(layerData)) {
-    const graphic =
-      (layerData.layer.graphics as any).getItemAt?.(0) ??
-      layerData.layer.graphics?.items?.[0];
-    if (graphic && allowEditing) {
+  const graphic =
+    selectedGraphic ??
+    (layerData.layer.graphics as any).getItemAt?.(0) ??
+    layerData.layer.graphics?.items?.[0];
+  setSelectionManagerSelection(layerData, graphic ? [graphic] : []);
+
+  if (focusGraphic && !hasPathAnimation(layerData) && graphic) {
+    if (allowEditing) {
       const prepared = toViewGeometry(graphic.geometry);
       if (prepared) {
         graphic.geometry = prepared;
       }
-      sketch.update(graphic);
+      void sketch.update(graphic).catch(() => undefined);
     }
   }
 }
@@ -5013,6 +5413,7 @@ async function removeLayer(index: number, options?: { confirmHostId?: string }) 
   if (selectedLayerIndex === index) {
     selectedLayerIndex = -1;
     setDeleteLayerButtonVisible(false);
+    clearSelectionManagerSelection();
   } else if (selectedLayerIndex > index) {
     selectedLayerIndex--;
   }
@@ -5209,6 +5610,7 @@ async function handleMapClick(event: any) {
 
   if (!hit) {
     selectedLayerIndex = -1;
+    clearSelectionManagerSelection();
     updateLayersList();
     updateTimeline();
     updateAnimationOptions();
@@ -5228,7 +5630,7 @@ async function handleMapClick(event: any) {
     if (layerData) {
       restoreLayerGeometry(layerData);
     }
-    selectLayer(layerIndex, !layerData || !hasPathAnimation(layerData));
+    selectLayer(layerIndex, !layerData || !hasPathAnimation(layerData), hit.graphic);
   }
 }
 
@@ -5249,7 +5651,7 @@ async function handleMapDoubleClick(event: any) {
   );
   if (layerIndex < 0) return;
 
-  selectLayer(layerIndex, false);
+  selectLayer(layerIndex, false, hit.graphic);
   openTextSettingsModal();
 }
 
@@ -5814,6 +6216,16 @@ function readNumber(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function readSceneQualityProfile(value: unknown, fallback: SceneQualityProfile): SceneQualityProfile {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return fallback;
+}
+
 function rgbToHex(r: number, g: number, b: number) {
   const toHex = (val: number) => Math.max(0, Math.min(255, Math.round(val))).toString(16).padStart(2, "0");
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
@@ -6061,14 +6473,22 @@ function buildLineSymbol(style: LineStyle) {
 
 function buildLineSymbol3D(style: LineStyle) {
   const color = parseColorToRgba(style.color);
+  const alpha = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
+  const lineSize = Math.max(1, Number(style.width) || defaultLineStyle.width);
   return {
     type: "line-3d",
     symbolLayers: [
       {
-        type: "line",
-        size: Math.max(1, Number(style.width) || defaultLineStyle.width),
+        type: "path",
+        profile: "circle",
+        width: lineSize,
+        height: lineSize,
         material: {
-          color: [color.r, color.g, color.b, Number.isFinite(color.a) ? color.a : 1]
+          color: [color.r, color.g, color.b, alpha],
+          emissive: {
+            source: "color",
+            strength: 3
+          }
         }
       }
     ]

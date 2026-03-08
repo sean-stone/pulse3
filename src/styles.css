@@ -1512,6 +1512,10 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
   margin-top: 6px;
 }
 
+.scene-camera-studio-control calcite-select {
+  margin-top: 6px;
+}
+
 .scene-camera-studio-readout {
   display: inline-block;
   margin-top: 4px;

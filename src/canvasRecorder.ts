@@ -28,8 +28,26 @@ function updateUI(startDisabled: boolean, stopDisabled: boolean, showDownload = 
   if (copyCard) copyCard.style.display = showDownload ? "block" : "none";
 }
 
+function getAttributionTextFromHosts() {
+  const hostIds = ["arcgisMap", "arcgisScene"];
+  const parts: string[] = [];
+  for (const hostId of hostIds) {
+    const host = document.getElementById(hostId) as any;
+    const items = host?.attributionItems;
+    if (!Array.isArray(items)) continue;
+    const text = items
+      .map((item: any) => String(item?.text || "").trim())
+      .filter(Boolean)
+      .join(" | ");
+    if (text) {
+      parts.push(text);
+    }
+  }
+  return Array.from(new Set(parts.join(" | ").split("|").map((item) => item.trim()).filter(Boolean))).join(" | ");
+}
+
 function handleRecordingStop(format: string, extension: "mp4" | "webm") {
-  const attributionSource = document.querySelector(".esri-attribution__sources") as HTMLElement | null;
+  const attributionText = getAttributionTextFromHosts();
   const blob = new Blob(recordedChunks, { type: format });
   const url = URL.createObjectURL(blob);
   downloadUrl = url;
@@ -37,9 +55,8 @@ function handleRecordingStop(format: string, extension: "mp4" | "webm") {
 
   const quoteText = document.getElementById("quote-text");
   if (quoteText) {
-    const sources = attributionSource ? attributionSource.innerText : "";
     quoteText.textContent =
-      `Attribution required when sharing exports: ${sources} ` +
+      `Attribution required when sharing exports: ${attributionText} ` +
       "Powered by Esri, made with Pulse seanst.one/demos/pulse3";
   }
 

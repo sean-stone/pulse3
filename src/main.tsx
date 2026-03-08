@@ -4,7 +4,7 @@ import { defineCustomElements as defineCalciteElements } from "@esri/calcite-com
 import * as ReactDOMClient from "react-dom/client";
 
 import "@arcgis/core/assets/esri/themes/light/main.css";
-import "@esri/calcite-components/dist/calcite/calcite.css";
+import "@esri/calcite-components/main.css";
 import App from "./App";
 import "./styles.css";
 

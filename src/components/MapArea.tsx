@@ -86,6 +86,18 @@ function MapArea() {
                   55deg
                 </span>
               </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                WebScene quality
+                <calcite-select id="scene-quality-profile" value="high">
+                  <calcite-option value="low">Low</calcite-option>
+                  <calcite-option value="medium">Medium</calcite-option>
+                  <calcite-option value="high">High</calcite-option>
+                </calcite-select>
+              </calcite-label>
+              <calcite-label className="scene-camera-studio-toggle">
+                Glow
+                <calcite-switch id="scene-glow-enabled" scale="s" checked></calcite-switch>
+              </calcite-label>
               <calcite-label className="scene-camera-studio-toggle">
                 Cinematic FX
                 <calcite-switch id="scene-camera-fx-enabled" scale="s"></calcite-switch>
@@ -174,7 +186,13 @@ function MapArea() {
             expand-tooltip="Daylight"
             collapse-tooltip="Hide daylight"
           >
-            <arcgis-daylight id="scene-daylight"></arcgis-daylight>
+            <arcgis-daylight
+              id="scene-daylight"
+              date-or-season="date"
+              hide-timezone
+              play-speed-multiplier="2"
+              time-slider-position="600"
+            ></arcgis-daylight>
           </arcgis-expand>
         </arcgis-scene>
       </div>

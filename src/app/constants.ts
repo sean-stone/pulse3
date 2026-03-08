@@ -60,6 +60,14 @@ export const allowedBasemaps = new Set([
   "streets-night-vector",
   "streets-relief-vector",
   "topo-vector",
+  "topo-3d",
+  "navigation-3d",
+  "navigation-dark-3d",
+  "osm-3d",
+  "gray-3d",
+  "dark-gray-3d",
+  "streets-3d",
+  "streets-dark-3d",
   "satellite",
   "hybrid",
   "terrain",
@@ -131,6 +139,27 @@ export type ProjectSnapshot = {
           };
           heading: number;
           tilt: number;
+        };
+        scene?: {
+          cameraStudio?: {
+            fov?: number;
+            qualityProfile?: "low" | "medium" | "high";
+            glowEnabled?: boolean;
+            glowIntensity?: number;
+            cinematicFxEnabled?: boolean;
+            noiseLevel?: number;
+            scanlineLevel?: number;
+            vignetteLevel?: number;
+            jitter?: number;
+            chromaticAberration?: number;
+          };
+          lighting?: {
+            type?: "sun" | "virtual";
+            date?: string;
+            displayUTCOffset?: number;
+            directShadowsEnabled?: boolean;
+            glowIntensity?: number;
+          };
         };
         extent?: { xmin: number; ymin: number; xmax: number; ymax: number; wkid?: number };
       };

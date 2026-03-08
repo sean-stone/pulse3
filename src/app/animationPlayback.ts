@@ -240,6 +240,30 @@ const toClampedColorArray = (
 };
 
 const isSceneView3D = (view: any) => String((view as any)?.type || "") === "3d";
+const GLOW_INTENSITY_MULTIPLIER = 10;
+const GLOW_DISTANCE_MULTIPLIER = 10;
+const FIREWORKS_COOLDOWN_DURATION = 1.2;
+const FIREWORKS_POST_END_PROGRESS_MAX = 2.1;
+const FIREWORKS_FALL_SPEED_MULTIPLIER = 0.5;
+const FIREWORKS_RANDOM_MULTIPLIER_MIN = 1;
+const FIREWORKS_RANDOM_MULTIPLIER_MAX = 10;
+const FIREWORKS_HEIGHT_MULTIPLIER_MIN = 0.7;
+const FIREWORKS_HEIGHT_MULTIPLIER_MAX = 2.0;
+
+const buildEmissiveMaterial = (
+  rgba: [number, number, number, number],
+  intensity: number
+) => {
+  const alpha = clamp(rgba[3], 0, 1);
+  const clampedIntensity = clamp(intensity * GLOW_INTENSITY_MULTIPLIER * alpha, 0, 22);
+  return {
+    color: rgba,
+    emissive: {
+      source: "color",
+      strength: clampedIntensity
+    }
+  };
+};
 
 const buildWeldLineSymbol = (
   width: number,
@@ -248,17 +272,18 @@ const buildWeldLineSymbol = (
 ) => {
   const rgba = toClampedColorArray(color, [255, 255, 255, 1]);
   if (use3D) {
+    const strokeSize = Math.max(0.6, width);
     return {
       type: "line-3d",
       symbolLayers: [
         {
-          type: "line",
+          type: "path",
+          profile: "circle",
           cap: "round",
           join: "round",
-          size: Math.max(0.6, width),
-          material: {
-            color: rgba
-          }
+          width: strokeSize,
+          height: strokeSize,
+          material: buildEmissiveMaterial(rgba, 0.95)
         }
       ]
     } as any;
@@ -288,9 +313,7 @@ const buildWeldPointSymbol = (
           type: "icon",
           resource: { primitive: "circle" },
           size: Math.max(1.4, size),
-          material: {
-            color: fillRgba
-          },
+          material: buildEmissiveMaterial(fillRgba, 0.85),
           outline: {
             color: strokeRgba,
             size: Math.max(0, outlineWidth)
@@ -462,10 +485,15 @@ const applyLineSymbolWidth = (graphic: any, width: number) => {
     if (!symbolLayers.length) return false;
     let changed = false;
     const nextLayers = symbolLayers.map((layer: any) => {
-      if (layer?.type !== "line") return layer;
+      if (layer?.type !== "line" && layer?.type !== "path") return layer;
       changed = true;
       const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
-      nextLayer.size = width;
+      if (nextLayer?.type === "path") {
+        nextLayer.width = width;
+        nextLayer.height = width;
+      } else {
+        nextLayer.size = width;
+      }
       return nextLayer;
     });
     if (changed) {
@@ -475,6 +503,37 @@ const applyLineSymbolWidth = (graphic: any, width: number) => {
     }
   }
   return false;
+};
+
+const applyLineSymbolGlow = (
+  graphic: any,
+  intensity: number,
+  colorOverride?: ArrayLike<number> | null
+) => {
+  const symbol = cloneSymbol(graphic?.symbol);
+  if (!symbol || symbol.type !== "line-3d") return false;
+  const symbolLayers = getSymbolLayers(symbol);
+  if (!symbolLayers.length) return false;
+  const override = colorOverride
+    ? toClampedColorArray(colorOverride, [255, 255, 255, 1])
+    : null;
+  let changed = false;
+  const nextLayers = symbolLayers.map((layer: any) => {
+    if (layer?.type !== "line" && layer?.type !== "path") return layer;
+    changed = true;
+    const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+    const sourceColor = toClampedColorArray(nextLayer?.material?.color, [255, 255, 255, 1]);
+    const nextColor = override ?? sourceColor;
+    nextLayer.material = {
+      ...(nextLayer?.material ?? {}),
+      ...buildEmissiveMaterial(nextColor, intensity)
+    };
+    return nextLayer;
+  });
+  if (!changed) return false;
+  setSymbolLayers(symbol, nextLayers);
+  graphic.symbol = symbol;
+  return true;
 };
 
 const applyPolygonOutlineWidth = (graphic: any, width: number) => {
@@ -1129,6 +1188,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let dartProgress: number | null = null;
     let fireworksProgress: number | null = null;
     let fireworksVariant: "fireworks" | "crossetteShell" | "mineShellCombo" = "fireworks";
+    let fireworksFadeEnvelope = 1;
     let arrowProgress: number | null = null;
     let barrageProgress: number | null = null;
     let jitterProgress: number | null = null;
@@ -1359,6 +1419,31 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         latestEndedAnimationEnd = animEnd;
       }
     });
+      if (fireworksProgress === null && latestEndedAnimation) {
+        const endedType = String((latestEndedAnimation as LayerAnimation).type || "");
+        const isFireworkType =
+          endedType === "fireworks" ||
+          endedType === "crossetteShell" ||
+        endedType === "mineShellCombo";
+      if (isFireworkType) {
+        const cooldownProgress = clamp(
+          (time - latestEndedAnimationEnd) / FIREWORKS_COOLDOWN_DURATION,
+          0,
+          1
+        );
+        if (cooldownProgress < 1) {
+          fireworksProgress =
+            1 + cooldownProgress * (FIREWORKS_POST_END_PROGRESS_MAX - 1);
+          fireworksVariant =
+            endedType === "crossetteShell"
+              ? "crossetteShell"
+              : endedType === "mineShellCombo"
+                ? "mineShellCombo"
+                : "fireworks";
+          fireworksFadeEnvelope = 1 - cooldownProgress;
+        }
+      }
+    }
     if (flightProgress === null && hasFlightRouteAnimation) {
       flightMode = hasFlightRouteCartoonAnimation ? "cartoon" : "default";
     }
@@ -1874,7 +1959,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           fireworksLayer.visible = true;
           fireworksLayer.opacity = Math.max(baseLayerOpacity, 0.9);
           const fireworksGraphics: Graphic[] = [];
-          const progress = clamp(fireworksProgress, 0, 1);
+          const progress = clamp(
+            fireworksProgress,
+            0,
+            FIREWORKS_POST_END_PROGRESS_MAX
+          );
           const resolution = Math.max(Number(view?.resolution) || 1, 1e-6);
           const activeFireworksVariant = fireworksVariant as
             | "fireworks"
@@ -1907,7 +1996,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             rgba[0],
             rgba[1],
             rgba[2],
-            clamp(alpha * baseFireworkAlpha, 0, 1)
+            clamp(alpha * baseFireworkAlpha * fireworksFadeEnvelope, 0, 1)
           ];
           layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
             const sourcePoint =
@@ -1925,15 +2014,13 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const shellRandom = (offset: number) => noise1(shellSeed + offset);
             const shellTypeRoll = shellRandom(0.4);
             let shellType: "ring" | "peony" | "chrysanthemum" | "willow" | "palm" =
-              shellTypeRoll < 0.18
-                ? "ring"
-                : shellTypeRoll < 0.44
-                  ? "peony"
-                  : shellTypeRoll < 0.7
-                    ? "chrysanthemum"
-                    : shellTypeRoll < 0.88
-                      ? "willow"
-                      : "palm";
+              shellTypeRoll < 0.34
+                ? "peony"
+                : shellTypeRoll < 0.62
+                  ? "chrysanthemum"
+                  : shellTypeRoll < 0.84
+                    ? "willow"
+                    : "palm";
             if (isCrossetteShell) {
               shellType = shellTypeRoll < 0.5 ? "peony" : "chrysanthemum";
             }
@@ -1950,8 +2037,24 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             const sceneScaleBoost = use3DSymbols
               ? clamp(1 + Math.log2(resolution + 1) * 0.22, 1, 2.2)
               : 1;
+            const sparkCountMultiplier =
+              FIREWORKS_RANDOM_MULTIPLIER_MIN +
+              shellRandom(1.53) * (FIREWORKS_RANDOM_MULTIPLIER_MAX - FIREWORKS_RANDOM_MULTIPLIER_MIN);
+            const distanceMultiplier =
+              FIREWORKS_RANDOM_MULTIPLIER_MIN +
+              shellRandom(1.59) * (FIREWORKS_RANDOM_MULTIPLIER_MAX - FIREWORKS_RANDOM_MULTIPLIER_MIN);
+            const lifetimeMultiplier =
+              FIREWORKS_RANDOM_MULTIPLIER_MIN +
+              shellRandom(1.67) * (FIREWORKS_RANDOM_MULTIPLIER_MAX - FIREWORKS_RANDOM_MULTIPLIER_MIN);
+            const heightMultiplier =
+              FIREWORKS_HEIGHT_MULTIPLIER_MIN +
+              shellRandom(1.73) * (FIREWORKS_HEIGHT_MULTIPLIER_MAX - FIREWORKS_HEIGHT_MULTIPLIER_MIN);
             const launchHeight = use3DSymbols
-              ? clamp((92 + styleSize * 8 + shellRandom(1.7) * 150) * sceneScaleBoost, 70, 640)
+              ? clamp(
+                  (92 + styleSize * 8 + shellRandom(1.7) * 150) * sceneScaleBoost * heightMultiplier,
+                  70,
+                  1280
+                )
               : 0;
             const lateralSpan = use3DSymbols
               ? clamp(launchHeight * (0.08 + shellRandom(2.3) * 0.18), 6, 130)
@@ -1982,13 +2085,18 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 const mineRise = Math.pow(mineProgress, 0.78);
                 const mineFade = clamp(1 - mineProgress * 0.9, 0.05, 1);
                 const mineCenterZ = use3DSymbols ? Number(centerZ ?? 0) + 0.8 : undefined;
-                const mineRingRadius = use3DSymbols
+                const mineRingRadiusBase = use3DSymbols
                   ? clamp((7 + styleSize * 0.9 + shellRandom(4.8) * 14) * mineRise, 3, 80)
                   : clamp(
                       (10 + styleSize * 1.3 + shellRandom(4.8) * 16) * resolution * mineRise,
                       resolution * 0.5,
                       resolution * 42
                     );
+                const mineRingRadius = clamp(
+                  mineRingRadiusBase * distanceMultiplier,
+                  use3DSymbols ? 3 : resolution * 0.5,
+                  use3DSymbols ? 800 : resolution * 420
+                );
                 const mineFlashAlpha = clamp(0.52 * mineFade, 0, 0.52);
                 fireworksGraphics.push(
                   new Graphic({
@@ -2023,7 +2131,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   })
                 );
 
-                const mineSparkCount = Math.round(clamp(14 + styleSize * 1.1, 14, 30));
+                const mineSparkBaseCount = Math.round(clamp(14 + styleSize * 1.1, 14, 30));
+                const mineSparkCount = Math.max(
+                  mineSparkBaseCount,
+                  Math.round(mineSparkBaseCount * sparkCountMultiplier)
+                );
                 for (let mineIndex = 0; mineIndex < mineSparkCount; mineIndex += 1) {
                   const mineSeed = shellSeed + mineIndex * 2.07;
                   const mineAngle = (mineIndex / mineSparkCount) * TAU + (noise1(mineSeed + 0.6) - 0.5) * 0.48;
@@ -2138,8 +2250,16 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             }
 
             const burstProgress = use3DSymbols
-              ? clamp((progress - burstStart) / Math.max(1 - burstStart, 1e-6), 0, 1)
-              : clamp((progress - burstStart * 0.55) / Math.max(1 - burstStart * 0.55, 1e-6), 0, 1);
+              ? clamp(
+                  (progress - burstStart) / Math.max(1 - burstStart, 1e-6),
+                  0,
+                  fireworksFadeEnvelope < 1 ? FIREWORKS_POST_END_PROGRESS_MAX : 1
+                )
+              : clamp(
+                  (progress - burstStart * 0.55) / Math.max(1 - burstStart * 0.55, 1e-6),
+                  0,
+                  fireworksFadeEnvelope < 1 ? FIREWORKS_POST_END_PROGRESS_MAX : 1
+                );
             if (burstProgress <= 0) {
               if (launchProgress >= 0.96) {
                 fireworksGraphics.push(
@@ -2160,17 +2280,19 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
             const spreadProgress = Math.pow(
               burstProgress,
-              shellType === "palm" ? 0.58 : shellType === "ring" ? 0.66 : 0.74
+              shellType === "palm" ? 0.58 : 0.74
             );
             const burstLife = clamp(
-              1 - burstProgress * (shellType === "willow" ? 0.52 : shellType === "palm" ? 0.66 : 0.74),
-              0.1,
+              1 -
+                (burstProgress / Math.max(lifetimeMultiplier, 1e-6)) *
+                  (shellType === "willow" ? 0.52 : shellType === "palm" ? 0.66 : 0.74),
+              0.03,
               1
             );
             const burstCenterX = apexX + (shellRandom(5.8) - 0.5) * lateralSpan * burstProgress * 0.24;
             const burstCenterY = apexY + (shellRandom(6.1) - 0.5) * lateralSpan * burstProgress * 0.24;
             const burstCenterZ = use3DSymbols ? apexZ : undefined;
-            const sparkCount = Math.max(
+            const baseSparkCount = Math.max(
               12,
               Math.round(
                 use3DSymbols
@@ -2182,18 +2304,20 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                       isCrossetteShell ? 28 : 46
                     )
                   : clamp(
-                      (isCrossetteShell ? 14 : 16) + styleSize * 0.85 + (shellType === "ring" ? 6 : 0),
+                      (isCrossetteShell ? 14 : 16) + styleSize * 0.85,
                       12,
                       isCrossetteShell ? 26 : 36
                     )
               )
             );
-            const burstRadiusMax = use3DSymbols
+            const sparkCount = Math.max(
+              baseSparkCount,
+              Math.round(baseSparkCount * sparkCountMultiplier)
+            );
+            const burstRadiusBase = use3DSymbols
               ? clamp(
                   launchHeight *
-                    (shellType === "ring"
-                      ? 0.34
-                      : shellType === "willow"
+                    (shellType === "willow"
                         ? 0.48
                         : shellType === "palm"
                           ? 0.36
@@ -2207,6 +2331,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                   4,
                   2200
                 );
+            const burstRadiusMax = clamp(
+              burstRadiusBase * distanceMultiplier,
+              use3DSymbols ? 28 : 4,
+              use3DSymbols ? 3200 : 22000
+            );
             const streakBase = use3DSymbols
               ? clamp(
                   burstRadiusMax *
@@ -2263,14 +2392,20 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
               const laneJitter = (sparkRandom(0.4) - 0.5) * (TAU / sparkCount) * 1.35;
               const angle = (i / sparkCount) * TAU + laneJitter;
               let elevation = -0.1 + sparkRandom(0.9) * 0.95;
-              if (shellType === "ring") {
-                elevation = (sparkRandom(1.1) - 0.5) * 0.18;
-              } else if (shellType === "willow") {
+              if (shellType === "willow") {
                 elevation = 0.04 + sparkRandom(1.2) * 0.58;
               } else if (shellType === "palm") {
                 elevation = 0.18 + sparkRandom(1.3) * 0.72;
               } else if (shellType === "chrysanthemum") {
                 elevation = -0.16 + sparkRandom(1.4) * 1.08;
+              }
+              if (use3DSymbols) {
+                const minElevationMagnitude = shellType === "palm" ? 0.14 : 0.2;
+                if (Math.abs(elevation) < minElevationMagnitude) {
+                  const sign = sparkRandom(1.47) < 0.5 ? -1 : 1;
+                  elevation = sign * (minElevationMagnitude + sparkRandom(1.49) * 0.42);
+                }
+                elevation = clamp(elevation, -1.2, 1.2);
               }
               const cosElevation = Math.cos(elevation);
               const dirX = Math.cos(angle) * cosElevation;
@@ -2283,7 +2418,16 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 spreadProgress *
                 speedScale *
                 (1 - dragFactor * burstProgress * 0.35);
-              const dropAmount = use3DSymbols ? gravityDrop * burstProgress * burstProgress : 0;
+              const fallProgress =
+                burstProgress <= 1
+                  ? burstProgress
+                  : 1 + (burstProgress - 1) * FIREWORKS_FALL_SPEED_MULTIPLIER;
+              const dropAmount = use3DSymbols
+                ? gravityDrop *
+                  fallProgress *
+                  fallProgress *
+                  FIREWORKS_FALL_SPEED_MULTIPLIER
+                : 0;
               const tipX = burstCenterX + dirX * travelDistance + windX * burstProgress * burstProgress;
               const tipY = burstCenterY + dirY * travelDistance + windY * burstProgress * burstProgress;
               const tipZ = use3DSymbols
@@ -2294,7 +2438,16 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                 travelDistance - streakBase * (0.78 + speedScale * 0.34)
               );
               const trailProgress = Math.max(0, burstProgress - 0.08);
-              const trailDrop = use3DSymbols ? gravityDrop * trailProgress * trailProgress : 0;
+              const trailFallProgress =
+                trailProgress <= 1
+                  ? trailProgress
+                  : 1 + (trailProgress - 1) * FIREWORKS_FALL_SPEED_MULTIPLIER;
+              const trailDrop = use3DSymbols
+                ? gravityDrop *
+                  trailFallProgress *
+                  trailFallProgress *
+                  FIREWORKS_FALL_SPEED_MULTIPLIER
+                : 0;
               const tailX = burstCenterX + dirX * trailDistance + windX * trailProgress * trailProgress;
               const tailY = burstCenterY + dirY * trailDistance + windY * trailProgress * trailProgress;
               const tailZ = use3DSymbols
@@ -2490,7 +2643,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             }
 
             const ringAlpha = clamp(
-              (1 - burstProgress) * (shellType === "ring" ? 0.42 : 0.28),
+              (1 - burstProgress) * 0.28,
               0,
               0.38
             );
@@ -2594,8 +2747,25 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       }
 
       const baseWidth = layerData.lineStyle?.width ?? defaultLineStyle.width;
+      const use3DLineGlow = isSceneView3D(config.getView?.());
+      const baseLineColor = parseColorToRgbaArray(layerData.lineStyle?.color, [10, 76, 102, 1]);
+      let glowStrength = 0.28;
+      if (glowProgress !== null) {
+        glowStrength = Math.max(glowStrength, glowMode === "soft" ? 0.55 : 0.9);
+      }
+      if (neonProgress !== null) glowStrength = Math.max(glowStrength, 1.35);
+      if (sparkProgress !== null) glowStrength = Math.max(glowStrength, 1.15);
+      if (weldProgress !== null || flightProgress !== null || waypointProgress !== null) {
+        glowStrength = Math.max(glowStrength, 1.05);
+      }
+      if (arrowProgress !== null || barrageProgress !== null) {
+        glowStrength = Math.max(glowStrength, 0.8);
+      }
       layerData.layer.graphics.forEach((graphic: any) => {
         applyLineSymbolWidth(graphic, baseWidth * lineWidthScale);
+        if (use3DLineGlow) {
+          applyLineSymbolGlow(graphic, glowStrength, baseLineColor);
+        }
       });
 
       if (arrowProgress !== null) {
@@ -3832,12 +4002,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
                     spatialReference: densified.spatialReference,
                     paths: [[toPathCoord(tx, ty, tz), toPathCoord(hx, hy, hz)]]
                   }),
-                  symbol: {
-                    type: "simple-line",
-                    style: "solid",
-                    width,
-                    color: toRgbaArray(baseColor, alpha)
-                  }
+                  symbol: buildWeldLineSymbol(width, toRgbaArray(baseColor, alpha), isSceneView3D(view))
                 })
               );
 
@@ -3934,7 +4099,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
     if (sparkProgress !== null) {
       const spark = Math.pow(noise1(timeSeed * 12.7 + 1.3), 5);
-      const blur = 4 + spark * 16;
+      const blur = (4 + spark * 16) * GLOW_DISTANCE_MULTIPLIER;
       const brightness = 1.1 + spark * 0.8;
       const saturate = 1.3 + spark * 1.5;
       extraEffects.push(
@@ -3987,8 +4152,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       const glowPulse = getPulse(glowProgress, mode === "soft" ? 1 : 2);
       const blur =
         mode === "soft"
-          ? 4 + glowPulse * 6
-          : 6 + glowPulse * 18;
+          ? (4 + glowPulse * 6) * GLOW_DISTANCE_MULTIPLIER
+          : (6 + glowPulse * 18) * GLOW_DISTANCE_MULTIPLIER;
       const brightness =
         mode === "soft"
           ? 1.02 + glowPulse * 0.08
@@ -4005,7 +4170,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
     if (neonProgress !== null) {
       const neonPulse = getPulse(neonProgress, 3);
-      const blur = 10 + neonPulse * 22;
+      const blur = (10 + neonPulse * 22) * GLOW_DISTANCE_MULTIPLIER;
       const brightness = 1.2 + neonPulse * 0.35;
       const saturate = 1.6 + neonPulse * 1.2;
       extraEffects.push(

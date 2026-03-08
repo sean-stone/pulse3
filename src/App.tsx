@@ -323,6 +323,18 @@ export default function App() {
                   <calcite-option value="streets-night-vector">Streets Night</calcite-option>
                   <calcite-option value="streets-relief-vector">Streets Relief</calcite-option>
                   <calcite-option value="topo-vector">Topographic</calcite-option>
+                  <calcite-option value="topo-3d" data-scene-only hidden>Topographic 3D</calcite-option>
+                  <calcite-option value="navigation-3d" data-scene-only hidden>Navigation 3D</calcite-option>
+                  <calcite-option value="navigation-dark-3d" data-scene-only hidden>
+                    Navigation Dark 3D
+                  </calcite-option>
+                  <calcite-option value="streets-3d" data-scene-only hidden>Streets 3D</calcite-option>
+                  <calcite-option value="streets-dark-3d" data-scene-only hidden>
+                    Streets Dark 3D
+                  </calcite-option>
+                  <calcite-option value="gray-3d" data-scene-only hidden>Gray 3D</calcite-option>
+                  <calcite-option value="dark-gray-3d" data-scene-only hidden>Dark Gray 3D</calcite-option>
+                  <calcite-option value="osm-3d" data-scene-only hidden>OpenStreetMap 3D</calcite-option>
                   <calcite-option value="satellite">Satellite</calcite-option>
                   <calcite-option value="hybrid">Hybrid</calcite-option>
                   <calcite-option value="terrain">Terrain</calcite-option>
