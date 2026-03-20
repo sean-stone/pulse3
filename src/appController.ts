@@ -7,6 +7,7 @@ import Graphic from "@arcgis/core/Graphic";
 import Color from "@arcgis/core/Color";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import IntegratedMesh3DTilesLayer from "@arcgis/core/layers/IntegratedMesh3DTilesLayer";
 import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
 import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 import { sqlName } from "@arcgis/core/core/sql";
@@ -246,6 +247,9 @@ let compassElement: HTMLElement | null = null;
 let compassRotationHandle: { remove: () => void } | null = null;
 let compassDebounceId: number | null = null;
 let hasCompassActivation = false;
+let google3DTilesLayer: IntegratedMesh3DTilesLayer | null = null;
+let google3DTilesByokApiKey: string | null = null;
+let hasWarnedMissingGoogle3DTilesKey = false;
 let isVertexEditing = false;
 let suppressNextMapClick = false;
 const exportState: ExportState = { isExporting: false };
@@ -313,6 +317,12 @@ const SCENE_ONLY_BASEMAPS = new Set([
   "streets-3d",
   "streets-dark-3d"
 ]);
+const GOOGLE_3D_TILES_BASEMAPS = new Set(["satellite", "hybrid"]);
+const GOOGLE_3D_TILES_LAYER_ID = "google-photorealistic-3d-tiles";
+const GOOGLE_3D_TILES_LAYER_TITLE = "Google Photorealistic 3D Tiles";
+const GOOGLE_3D_TILES_ROOT_URL = "https://tile.googleapis.com/v1/3dtiles/root.json";
+const GOOGLE_3D_TILES_BETA_NOTICE =
+  "Using Google tiles at your own risk - currently in BETA and you need to attribute Google 3D tiles if you export/share the video.";
 type SceneQualityProfile = "low" | "medium" | "high";
 
 type CameraStudioSettings = {
@@ -1808,6 +1818,8 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
   if (mode === currentViewMode && view) {
     setSceneModeButtonLabel();
     updateBasemapOptionsForViewMode(mode);
+    updateGoogle3DTilesToggleVisibility();
+    ensureGoogle3DTilesLayerState();
     return;
   }
   const targetHost = getMapHostElement(mode);
@@ -1854,6 +1866,8 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
       selectLayer(selectedLayerIndex, false);
     }
     updateBasemapBackgroundControls();
+    updateGoogle3DTilesToggleVisibility();
+    ensureGoogle3DTilesLayerState();
     scheduleBasemapLabelsVisibility();
     if (!options?.skipSave) {
       scheduleProjectSave();
@@ -2463,6 +2477,124 @@ function isSceneOnlyBasemapSelected() {
   const select = document.getElementById("basemap-select") as any;
   const selected = normalizeBasemap(String(select?.value || "gray-vector"));
   return SCENE_ONLY_BASEMAPS.has(selected);
+}
+
+function getGoogle3DTilesApiKey() {
+  return google3DTilesByokApiKey;
+}
+
+function promptForGoogle3DTilesByokApiKey() {
+  const acknowledged = window.confirm(
+    `${GOOGLE_3D_TILES_BETA_NOTICE}\n\nPress OK to continue and enter your Google Maps API key.`
+  );
+  if (!acknowledged) {
+    return null;
+  }
+  const raw = window.prompt(
+    "Enter your Google Maps API key for Google 3D Tiles (BYOK). It is stored for this browser session only.",
+    google3DTilesByokApiKey || ""
+  );
+  const apiKey = String(raw || "").trim();
+  if (!apiKey) {
+    return null;
+  }
+  google3DTilesByokApiKey = apiKey;
+  return apiKey;
+}
+
+function getGoogle3DTilesToggle() {
+  return document.getElementById("basemap-google-3d-tiles-toggle") as any;
+}
+
+function isGoogle3DTilesBasemapEligible() {
+  const select = document.getElementById("basemap-select") as any;
+  const selected = normalizeBasemap(String(select?.value || "gray-vector"));
+  return GOOGLE_3D_TILES_BASEMAPS.has(selected);
+}
+
+function shouldEnableGoogle3DTilesLayer() {
+  const toggle = getGoogle3DTilesToggle();
+  return currentViewMode === "3d" && isGoogle3DTilesBasemapEligible() && Boolean(toggle?.checked);
+}
+
+function applyGoogle3DTilesCustomParameters(layer: IntegratedMesh3DTilesLayer, apiKey: string) {
+  (layer as any).customParameters = {
+    key: apiKey,
+    f: null
+  };
+  (layer as any).refresh?.();
+}
+
+function removeGoogle3DTilesLayer() {
+  if (!view?.map) return;
+  const mapLayer = view.map.findLayerById?.(GOOGLE_3D_TILES_LAYER_ID);
+  if (mapLayer) {
+    view.map.remove(mapLayer);
+  }
+}
+
+function ensureGoogle3DTilesLayerState() {
+  if (!view?.map) return;
+  if (!shouldEnableGoogle3DTilesLayer()) {
+    removeGoogle3DTilesLayer();
+    return;
+  }
+
+  const apiKey = getGoogle3DTilesApiKey();
+  if (!apiKey) {
+    if (!hasWarnedMissingGoogle3DTilesKey) {
+      hasWarnedMissingGoogle3DTilesKey = true;
+      console.warn("Google 3D Tiles is enabled but no BYOK API key is available for this session.");
+    }
+    const toggle = getGoogle3DTilesToggle();
+    if (toggle) {
+      toggle.checked = false;
+    }
+    removeGoogle3DTilesLayer();
+    return;
+  }
+
+  hasWarnedMissingGoogle3DTilesKey = false;
+  if (!google3DTilesLayer) {
+    google3DTilesLayer = new IntegratedMesh3DTilesLayer({
+      id: GOOGLE_3D_TILES_LAYER_ID,
+      title: GOOGLE_3D_TILES_LAYER_TITLE,
+      url: GOOGLE_3D_TILES_ROOT_URL,
+      listMode: "hide"
+    });
+    applyGoogle3DTilesCustomParameters(google3DTilesLayer, apiKey);
+  } else {
+    const currentKey = String(((google3DTilesLayer as any).customParameters as any)?.key || "");
+    if (currentKey !== apiKey) {
+      applyGoogle3DTilesCustomParameters(google3DTilesLayer, apiKey);
+    }
+  }
+
+  const existing = view.map.findLayerById?.(GOOGLE_3D_TILES_LAYER_ID);
+  if (existing && existing !== google3DTilesLayer) {
+    view.map.remove(existing);
+  }
+  if (!view.map.layers?.includes?.(google3DTilesLayer)) {
+    view.map.add(google3DTilesLayer, 0);
+  }
+}
+
+function updateGoogle3DTilesToggleVisibility() {
+  const toggleWrap = document.querySelector(".basemap-google-3d-toggle") as HTMLElement | null;
+  const toggle = getGoogle3DTilesToggle();
+  if (!toggleWrap || !toggle) return;
+  const isEligible = currentViewMode === "3d" && isGoogle3DTilesBasemapEligible();
+
+  if (isEligible) {
+    toggleWrap.removeAttribute("hidden");
+    toggleWrap.setAttribute("aria-hidden", "false");
+  } else {
+    toggleWrap.setAttribute("hidden", "");
+    toggleWrap.setAttribute("aria-hidden", "true");
+  }
+
+  toggle.disabled = false;
+  toggleWrap.setAttribute("title", GOOGLE_3D_TILES_BETA_NOTICE);
 }
 
 function getBasemapReferenceLayers(basemap: any) {
@@ -3325,6 +3457,34 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
   return { blob, codec: codecUsed };
 }
 
+function collapseSceneExpandPanelsForExport() {
+  const panelIds = ["scene-camera-studio-expand", "scene-daylight-expand"];
+  const states = panelIds
+    .map((id) => {
+      const el = document.getElementById(id) as any;
+      if (!el) return null;
+      const wasExpanded = Boolean(el.expanded || el.hasAttribute?.("expanded"));
+      if (wasExpanded) {
+        el.expanded = false;
+        el.removeAttribute?.("expanded");
+      }
+      return { el, wasExpanded };
+    })
+    .filter(Boolean) as Array<{ el: any; wasExpanded: boolean }>;
+
+  return () => {
+    states.forEach(({ el, wasExpanded }) => {
+      if (!el) return;
+      el.expanded = wasExpanded;
+      if (wasExpanded) {
+        el.setAttribute?.("expanded", "");
+      } else {
+        el.removeAttribute?.("expanded");
+      }
+    });
+  };
+}
+
 async function startFrameExport() {
   if (isFrameExporting || exportState.isExporting) return;
   if (!hasPlayableAnimation()) {
@@ -3335,6 +3495,8 @@ async function startFrameExport() {
   const formatSelect = document.getElementById("export-format-select") as any;
   const format = String(formatSelect?.value || "gif") as "gif" | "webm" | "png" | "mp4";
   const resolution = getExportResolution();
+  const shouldCollapseScenePanels = format === "webm" || format === "mp4";
+  const restoreSceneExpandPanels = shouldCollapseScenePanels ? collapseSceneExpandPanelsForExport() : null;
 
   isFrameExporting = true;
   exportState.isExporting = true;
@@ -3490,6 +3652,7 @@ async function startFrameExport() {
       closeBtn.removeAttribute("disabled");
     }
     document.body.classList.remove("is-exporting");
+    restoreSceneExpandPanels?.();
   }
 }
 
@@ -4125,6 +4288,8 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     updateExportWarning();
     resetHistory(historyState, historyConfig);
     updateBasemapBackgroundControls();
+    updateGoogle3DTilesToggleVisibility();
+    ensureGoogle3DTilesLayerState();
     scheduleBasemapLabelsVisibility();
   }
 
@@ -4210,6 +4375,20 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     if (basemapLabelsToggle) {
       basemapLabelsToggle.addEventListener("calciteSwitchChange", () => {
         scheduleBasemapLabelsVisibility();
+        scheduleProjectSave();
+      });
+    }
+    const google3DTilesToggle = document.getElementById("basemap-google-3d-tiles-toggle");
+    if (google3DTilesToggle) {
+      google3DTilesToggle.addEventListener("calciteSwitchChange", () => {
+        const toggle = google3DTilesToggle as any;
+        if (Boolean(toggle?.checked) && !getGoogle3DTilesApiKey()) {
+          const apiKey = promptForGoogle3DTilesByokApiKey();
+          if (!apiKey) {
+            toggle.checked = false;
+          }
+        }
+        ensureGoogle3DTilesLayerState();
         scheduleProjectSave();
       });
     }
@@ -4628,6 +4807,8 @@ function handleBasemapChange() {
     view.map.basemap = value;
   }
   updateBasemapBackgroundControls();
+  updateGoogle3DTilesToggleVisibility();
+  ensureGoogle3DTilesLayerState();
   scheduleBasemapLabelsVisibility();
   scheduleProjectSave();
 }

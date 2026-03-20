@@ -128,6 +128,7 @@ export type ProjectSnapshot = {
         basemap: string;
         basemapVisible: boolean;
         basemapLabelsVisible?: boolean;
+        google3DTilesEnabled?: boolean;
         backgroundColor?: string;
         backgroundTransparent?: boolean;
         camera?: {

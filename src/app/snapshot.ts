@@ -191,6 +191,9 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
     "basemap-bg-transparent"
   ) as HTMLInputElement | null;
   const basemapLabelsToggle = document.getElementById("basemap-labels-toggle") as HTMLInputElement | null;
+  const google3DTilesToggle = document.getElementById(
+    "basemap-google-3d-tiles-toggle"
+  ) as HTMLInputElement | null;
   const customWidthInput = document.getElementById("custom-width") as any;
   const customHeightInput = document.getElementById("custom-height") as any;
   const customWidth = Number(customWidthInput?.value);
@@ -198,6 +201,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   const backgroundColor = basemapBackgroundInput?.value || "#ffffff";
   const backgroundTransparent = Boolean(basemapBackgroundTransparentInput?.checked);
   const basemapLabelsVisible = basemapLabelsToggle ? Boolean(basemapLabelsToggle.checked) : true;
+  const google3DTilesEnabled = google3DTilesToggle ? Boolean(google3DTilesToggle.checked) : false;
   const camera = (config.view as any)?.camera;
   const cameraPosition = camera?.position;
   const cameraSnapshot =
@@ -239,6 +243,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           basemap: String(basemapSelect?.value || "gray-vector"),
           basemapVisible: basemapSelect?.value !== "none",
           basemapLabelsVisible,
+          google3DTilesEnabled,
           backgroundColor,
           backgroundTransparent,
           mode: isSceneView ? "3d" : "2d",
@@ -324,6 +329,12 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
     const basemapLabelsToggle = document.getElementById("basemap-labels-toggle") as HTMLInputElement | null;
     if (basemapLabelsToggle) {
       basemapLabelsToggle.checked = meta.app?.basemapLabelsVisible !== false;
+    }
+    const google3DTilesToggle = document.getElementById(
+      "basemap-google-3d-tiles-toggle"
+    ) as HTMLInputElement | null;
+    if (google3DTilesToggle) {
+      google3DTilesToggle.checked = meta.app?.google3DTilesEnabled === true;
     }
     const basemapBackgroundTransparentInput = document.getElementById(
       "basemap-bg-transparent"

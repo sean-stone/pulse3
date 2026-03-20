@@ -347,6 +347,10 @@ export default function App() {
                     <calcite-switch id="basemap-labels-toggle" scale="s" checked></calcite-switch>
                     <span>Labels</span>
                   </label>
+                  <label className="basemap-google-3d-toggle" hidden aria-hidden="true">
+                    <calcite-switch id="basemap-google-3d-tiles-toggle" scale="s"></calcite-switch>
+                    <span>Add Google 3D Tiles</span>
+                  </label>
                 </div>
                 <div
                   id="basemap-bg-picker"
