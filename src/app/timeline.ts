@@ -2,7 +2,7 @@
 import type Point from "@arcgis/core/geometry/Point";
 
 import { clipColors } from "../animationTypes";
-import type { LayerAnimation, LayerData, PointKeyframe } from "../types";
+import type { LayerAnimation, LayerData, PointKeyframe, PointKeyframeEasing } from "../types";
 
 import { isPlaceholderAnimation } from "./animationUtils";
 import { TIMELINE_SNAP_INCREMENT, TIMELINE_SNAP_PX } from "./constants";
@@ -63,6 +63,7 @@ export type TimelineConfig = {
   sanitizePlainText: (value: string, fallback: string) => string;
   setCalciteValue: (element: HTMLElement, value: string) => void;
   upsertPointKeyframe: (layerData: LayerData, geometry: Point, time: number) => void;
+  upsertLayerKeyframeAtCurrentTime?: (layerData: LayerData) => void;
   hasPointKeyframes: (layerData: LayerData) => boolean;
   removeAnimationAt: (layerIdx: number, animIdx: number) => void;
   removePointKeyframeAt?: (layerIdx: number, keyframeIdx: number) => void;
@@ -325,6 +326,34 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
   };
 
+  const getSelectedTimelineKeyframeFrame = () => {
+    if (!state.selectedTimelineKeyframe) return null;
+    const { layerIdx, keyframeIdx } = state.selectedTimelineKeyframe;
+    const layerData = config.getGraphicsLayers()[layerIdx];
+    const frame = layerData?.pointKeyframes?.[keyframeIdx];
+    if (!layerData || !frame) return null;
+    return { layerData, frame };
+  };
+
+  const updateKeyframeEasingControl = () => {
+    const wrap = document.getElementById("timeline-keyframe-easing-wrap");
+    const select = document.getElementById("timeline-keyframe-easing") as any;
+    if (!wrap || !select) return;
+    const selected = getSelectedTimelineKeyframeFrame();
+    const isViewTrackKeyframe = Boolean(selected?.layerData?.isViewTrack);
+    if (!selected || !isViewTrackKeyframe) {
+      wrap.setAttribute("hidden", "");
+      select.setAttribute("disabled", "true");
+      return;
+    }
+    wrap.removeAttribute("hidden");
+    select.removeAttribute("disabled");
+    const easing = selected.frame.easing === "ease-in-out" ? "ease-in-out" : "linear";
+    if (String(select.value || "") !== easing) {
+      config.setCalciteValue(select as HTMLElement, easing);
+    }
+  };
+
   const clearSelectedTimelineAnimation = () => {
     if (state.selectedTimelineClip) {
       state.selectedTimelineClip.classList.remove("selected");
@@ -341,6 +370,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     if (duplicateButton) {
       duplicateButton.setAttribute("disabled", "true");
     }
+    updateKeyframeEasingControl();
   };
 
   const setSelectedTimelineAnimation = (layerIdx: number, animIdx: number, clip?: HTMLElement) => {
@@ -348,6 +378,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       state.selectedTimelineClip.classList.remove("selected");
     }
     state.selectedTimelineAnimation = { layerIdx, animIdx };
+    state.selectedTimelineKeyframe = null;
     if (clip) {
       clip.classList.add("selected");
       state.selectedTimelineClip = clip;
@@ -361,6 +392,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     if (duplicateButton) {
       duplicateButton.removeAttribute("disabled");
     }
+    updateKeyframeEasingControl();
   };
 
   const removeSelectedTimelineAnimation = () => {
@@ -438,8 +470,10 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
 
     layersPanel.innerHTML = "";
+    const lockedBottomIndex = config.getGraphicsLayers().findIndex((layer) => layer.isViewTrack);
     orderedLayers.forEach((layerData) => {
       const layerIndex = config.getGraphicsLayers().indexOf(layerData);
+      const isLockedLayer = Boolean(layerData.isViewTrack);
       const label = document.createElement("div");
       label.className = "timeline-layer-label";
       label.dataset.layerIdx = String(layerIndex);
@@ -457,12 +491,12 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       moveUpButton.setAttribute("icon-start", "chevron-up");
       moveUpButton.title = "Move layer up";
       moveUpButton.setAttribute("aria-label", "Move layer up");
-      if (layerIndex >= config.getGraphicsLayers().length - 1) {
+      if (isLockedLayer || layerIndex >= config.getGraphicsLayers().length - 1) {
         moveUpButton.setAttribute("disabled", "true");
       }
       moveUpButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layerIndex < config.getGraphicsLayers().length - 1) {
+        if (!isLockedLayer && layerIndex < config.getGraphicsLayers().length - 1) {
           config.moveLayer(layerIndex, 1);
         }
       });
@@ -475,12 +509,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       moveDownButton.setAttribute("icon-start", "chevron-down");
       moveDownButton.title = "Move layer down";
       moveDownButton.setAttribute("aria-label", "Move layer down");
-      if (layerIndex <= 0) {
+      const minMovableIndex = lockedBottomIndex >= 0 ? lockedBottomIndex + 1 : 0;
+      if (isLockedLayer || layerIndex <= minMovableIndex) {
         moveDownButton.setAttribute("disabled", "true");
       }
       moveDownButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layerIndex > 0) {
+        if (!isLockedLayer && layerIndex > minMovableIndex) {
           config.moveLayer(layerIndex, -1);
         }
       });
@@ -527,6 +562,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
 
       name.addEventListener("dblclick", (event) => {
         event.stopPropagation();
+        if (isLockedLayer) return;
         startRename();
       });
       label.appendChild(name);
@@ -543,8 +579,12 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       renameButton.setAttribute("aria-label", "Rename layer");
       renameButton.addEventListener("click", (event) => {
         event.stopPropagation();
+        if (isLockedLayer) return;
         startRename();
       });
+      if (isLockedLayer) {
+        renameButton.setAttribute("disabled", "true");
+      }
       actions.appendChild(renameButton);
 
       const duplicateLayerButton = document.createElement("calcite-button");
@@ -556,10 +596,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       duplicateLayerButton.setAttribute("aria-label", "Duplicate layer");
       duplicateLayerButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layerIndex >= 0) {
+        if (!isLockedLayer && layerIndex >= 0) {
           void config.duplicateLayer(layerIndex);
         }
       });
+      if (isLockedLayer) {
+        duplicateLayerButton.setAttribute("disabled", "true");
+      }
       actions.appendChild(duplicateLayerButton);
 
       const deleteButton = document.createElement("calcite-button");
@@ -571,10 +614,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       deleteButton.setAttribute("aria-label", "Delete layer");
       deleteButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layerIndex >= 0) {
+        if (!isLockedLayer && layerIndex >= 0) {
           config.removeLayer(layerIndex, { confirmHostId: "timeline-container" });
         }
       });
+      if (isLockedLayer) {
+        deleteButton.setAttribute("disabled", "true");
+      }
       actions.appendChild(deleteButton);
 
       const zoomButton = document.createElement("calcite-button");
@@ -586,8 +632,12 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       zoomButton.setAttribute("aria-label", "Zoom to layer");
       zoomButton.addEventListener("click", (event) => {
         event.stopPropagation();
+        if (isLockedLayer) return;
         config.zoomToLayer(layerData);
       });
+      if (isLockedLayer) {
+        zoomButton.setAttribute("disabled", "true");
+      }
       actions.appendChild(zoomButton);
 
       if (layerData.type === "point") {
@@ -600,6 +650,12 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
         keyframeButton.setAttribute("aria-label", "Add keyframe");
         keyframeButton.addEventListener("click", (event) => {
           event.stopPropagation();
+          if (config.upsertLayerKeyframeAtCurrentTime) {
+            config.upsertLayerKeyframeAtCurrentTime(layerData);
+            updateTimeline();
+            config.applyAnimationsAtTime(config.getCurrentTime());
+            return;
+          }
           const graphic = (layerData.layer.graphics as any).getItemAt?.(0) ?? layerData.layer.graphics?.items?.[0];
           if (graphic?.geometry?.type === "point") {
             config.upsertPointKeyframe(layerData, graphic.geometry as Point, config.getCurrentTime());
@@ -695,6 +751,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     } else {
       clearSelectedTimelineAnimation();
     }
+    updateKeyframeEasingControl();
     config.updateExportWarning();
   };
   const initTimelineScrollSync = () => {
@@ -761,6 +818,21 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     state.selectedTimelineAnimation = { layerIdx, animIdx: layerData.animations.length - 1 };
     updateTimeline();
     config.scheduleProjectSave();
+  };
+
+  const setSelectedTimelineKeyframeEasing = (easing: PointKeyframeEasing) => {
+    const selected = getSelectedTimelineKeyframeFrame();
+    if (!selected || !selected.layerData.isViewTrack) return;
+    selected.frame.easing = easing;
+    updateKeyframeEasingControl();
+    config.applyAnimationsAtTime(config.getCurrentTime());
+    config.scheduleProjectSave();
+  };
+
+  const handleTimelineKeyframeEasingChange = (event: Event) => {
+    const value = String((event.target as any)?.value || "linear");
+    const easing: PointKeyframeEasing = value === "ease-in-out" ? "ease-in-out" : "linear";
+    setSelectedTimelineKeyframeEasing(easing);
   };
 
   const initTimelineResizer = () => {
@@ -886,6 +958,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
           originalTime: frame.time,
           marker: keyframe
         };
+        updateKeyframeEasingControl();
         keyframe.classList.add("dragging");
         document.addEventListener("mousemove", handleKeyframeMouseMove);
         document.addEventListener("mouseup", handleKeyframeMouseUp);
@@ -1003,7 +1076,16 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     state.keyframeDragState.keyframe.time = nextTime;
     const layerData = config.getGraphicsLayers()[state.keyframeDragState.layerIdx];
     layerData.pointKeyframes?.sort((a, b) => a.time - b.time);
+    const nextIndex = layerData.pointKeyframes?.indexOf(state.keyframeDragState.keyframe) ?? -1;
+    if (nextIndex >= 0) {
+      state.selectedTimelineKeyframe = {
+        layerIdx: state.keyframeDragState.layerIdx,
+        keyframeIdx: nextIndex
+      };
+      state.keyframeDragState.marker.dataset.keyframeIdx = String(nextIndex);
+    }
     state.keyframeDragState.marker.style.left = `${nextTime * state.timelineZoom}px`;
+    updateKeyframeEasingControl();
     config.applyAnimationsAtTime(config.getCurrentTime());
   };
 
@@ -1074,6 +1156,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     getNextNonOverlappingStart,
     handleTimelineDurationAutoFit,
     handleTimelineDurationChange,
+    handleTimelineKeyframeEasingChange,
     handleTimelineMouseDown,
     handleTimelineScrubMove,
     handleTimelineScrubUp,

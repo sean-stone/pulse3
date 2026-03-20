@@ -4980,6 +4980,28 @@ body.theme-dark #timeline-controls .timeline-icon-btn::part(button) {
   cursor: not-allowed;
 }
 
+.timeline-keyframe-easing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  color: var(--color-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.timeline-keyframe-easing[hidden] {
+  display: none !important;
+}
+
+.timeline-keyframe-easing-label {
+  color: var(--color-muted);
+}
+
+.timeline-keyframe-easing calcite-select {
+  width: 132px;
+}
+
 .timeline-duration {
   display: inline-flex;
   align-items: center;
@@ -4997,6 +5019,11 @@ body.theme-dark .timeline-duration {
 body.theme-dark #timeline-zoom-label {
   color: #f3f7fb;
   border-color: rgba(255, 255, 255, 0.35);
+}
+
+body.theme-dark .timeline-keyframe-easing,
+body.theme-dark .timeline-keyframe-easing-label {
+  color: #c3d0d9;
 }
 
 #timeline-controls .timeline-duration-reset::part(button) {

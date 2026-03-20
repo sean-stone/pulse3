@@ -50,7 +50,7 @@ export const PROJECT_STORAGE_KEY_RECENTS = "pulse.project.recents";
 export const PROJECT_STORAGE_KEY_NAME = "pulse.project.name";
 export const STORAGE_CONSENT_KEY = "pulse.storage.consent";
 export const PROJECT_VERSION = 1;
-export const APP_VERSION = "3.11.0";
+export const APP_VERSION = "3.12.0";
 export const ENABLE_PROJECT_STORAGE = true;
 
 export const allowedBasemaps = new Set([
@@ -129,6 +129,19 @@ export type ProjectSnapshot = {
         basemapVisible: boolean;
         basemapLabelsVisible?: boolean;
         google3DTilesEnabled?: boolean;
+        viewTrackKeyframes?: Array<{
+          time: number;
+          x: number;
+          y: number;
+          z?: number;
+          heading?: number;
+          tilt?: number;
+          fov?: number;
+          rotation?: number;
+          scale?: number;
+          easing?: "linear" | "ease-in-out";
+          spatialReference?: { wkid?: number; latestWkid?: number };
+        }>;
         backgroundColor?: string;
         backgroundTransparent?: boolean;
         camera?: {

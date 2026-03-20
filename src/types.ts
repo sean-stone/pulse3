@@ -1,4 +1,5 @@
-﻿export type LayerType = "point" | "polyline" | "polygon" | "text" | "feature";
+export type LayerType = "point" | "polyline" | "polygon" | "text" | "feature";
+export type PointKeyframeEasing = "linear" | "ease-in-out";
 
 export interface LayerAnimation {
   type: string;
@@ -10,6 +11,13 @@ export interface PointKeyframe {
   time: number;
   x: number;
   y: number;
+  z?: number;
+  heading?: number;
+  tilt?: number;
+  fov?: number;
+  rotation?: number;
+  scale?: number;
+  easing?: PointKeyframeEasing;
   spatialReference?: any;
 }
 
@@ -58,6 +66,7 @@ export interface LayerData {
   layer: any;
   name: string;
   type: LayerType;
+  isViewTrack?: boolean;
   color?: string;
   animations: LayerAnimation[];
   pointKeyframes?: PointKeyframe[];

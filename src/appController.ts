@@ -200,6 +200,7 @@ import type {
   LayerType,
   LineStyle,
   PointKeyframe,
+  PointKeyframeEasing,
   PointStyle
 } from "./types";
 import { buildAnimationSettingsSnapshot } from "./utils/animationSettings";
@@ -250,6 +251,8 @@ let hasCompassActivation = false;
 let google3DTilesLayer: IntegratedMesh3DTilesLayer | null = null;
 let google3DTilesByokApiKey: string | null = null;
 let hasWarnedMissingGoogle3DTilesKey = false;
+let isApplyingViewTrackMotion = false;
+let clearViewTrackMotionTimer: number | null = null;
 let isVertexEditing = false;
 let suppressNextMapClick = false;
 const exportState: ExportState = { isExporting: false };
@@ -323,6 +326,7 @@ const GOOGLE_3D_TILES_LAYER_TITLE = "Google Photorealistic 3D Tiles";
 const GOOGLE_3D_TILES_ROOT_URL = "https://tile.googleapis.com/v1/3dtiles/root.json";
 const GOOGLE_3D_TILES_BETA_NOTICE =
   "Using Google tiles at your own risk - currently in BETA and you need to attribute Google 3D tiles if you export/share the video.";
+const VIEW_TRACK_LAYER_ID = "pulse-view-track";
 type SceneQualityProfile = "low" | "medium" | "high";
 
 type CameraStudioSettings = {
@@ -433,6 +437,7 @@ const timelineController = createTimelineController(timelineState, {
   sanitizePlainText,
   setCalciteValue,
   upsertPointKeyframe,
+  upsertLayerKeyframeAtCurrentTime,
   hasPointKeyframes,
   removeAnimationAt,
   removePointKeyframeAt,
@@ -442,6 +447,7 @@ const {
   updateTimeline,
   handleTimelineDurationChange,
   handleTimelineDurationAutoFit,
+  handleTimelineKeyframeEasingChange,
   toggleTimelineSnap,
   toggleTimelineGrid,
   duplicateSelectedTimelineAnimation,
@@ -535,6 +541,7 @@ const animationPlaybackConfig = {
 };
 const applyAnimationsAtTime = (time: number) => {
   applyAnimationsAtTimeFromState(animationPlaybackConfig, time);
+  applyViewTrackAnimationAtTime(time);
   scheduleThumbtackParallaxUpdate();
 };
 applyAnimationsAtTimeRef = applyAnimationsAtTime;
@@ -643,7 +650,9 @@ function syncSelectionManagerSources() {
   manager.view = view;
   manager.highlightEnabled = true;
   manager.highlightName = PULSE_SELECTION_HIGHLIGHT_NAME;
-  manager.sources = graphicsLayers.map((layerData) => layerData.layer);
+  manager.sources = graphicsLayers
+    .filter((layerData) => !isViewTrackLayer(layerData))
+    .map((layerData) => layerData.layer);
 }
 
 function clearSelectionManagerSelection() {
@@ -1570,8 +1579,11 @@ async function handleMapContextMenu(event: MouseEvent) {
 
   if (layerIndex >= 0) {
     const layerData = graphicsLayers[layerIndex];
+    const isLockedLayer = isViewTrackLayer(layerData);
+    const lockedBottomIndex = graphicsLayers.findIndex((layer) => isViewTrackLayer(layer));
+    const lowestMovableIndex = lockedBottomIndex >= 0 ? lockedBottomIndex + 1 : 0;
     const isTopLayer = layerIndex === graphicsLayers.length - 1;
-    const isBottomLayer = layerIndex === 0;
+    const isBottomLayer = layerIndex === lowestMovableIndex;
     const styleLabel = layerData.type === "text" ? "Text settings" : "Style & effects";
     const entries: MapContextMenuEntry[] = [
       {
@@ -1587,30 +1599,34 @@ async function handleMapContextMenu(event: MouseEvent) {
           } else {
             openStyleModal();
           }
-        }
+        },
+        disabled: isLockedLayer
       },
       {
         label: "Zoom to layer",
-        onSelect: () => zoomToLayer(layerData)
+        onSelect: () => zoomToLayer(layerData),
+        disabled: isLockedLayer
       },
       {
         label: "Send to top",
         onSelect: () => moveLayerToIndex(layerIndex, graphicsLayers.length - 1),
-        disabled: isTopLayer
+        disabled: isLockedLayer || isTopLayer
       },
       {
         label: "Send to bottom",
-        onSelect: () => moveLayerToIndex(layerIndex, 0),
-        disabled: isBottomLayer
+        onSelect: () => moveLayerToIndex(layerIndex, lowestMovableIndex),
+        disabled: isLockedLayer || isBottomLayer
       },
       { type: "divider" },
       {
         label: "Duplicate layer",
-        onSelect: () => void duplicateLayer(layerIndex)
+        onSelect: () => void duplicateLayer(layerIndex),
+        disabled: isLockedLayer
       },
       {
         label: "Delete layer",
         onSelect: () => void removeLayer(layerIndex),
+        disabled: isLockedLayer,
         danger: true
       }
     ];
@@ -1710,7 +1726,9 @@ function initMapContextMenu() {
 
 function updateSnappingOptions() {
   if (!view) return;
-  const sources = graphicsLayers.map((layerData) => ({ layer: layerData.layer }));
+  const sources = graphicsLayers
+    .filter((layerData) => !isViewTrackLayer(layerData))
+    .map((layerData) => ({ layer: layerData.layer }));
   const viewAny = view as any;
   if (viewAny?.snappingOptions) {
     viewAny.snappingOptions.enabled = true;
@@ -1751,7 +1769,9 @@ function bindActiveViewHandlers() {
     viewExtentWatchHandle = null;
   }
   viewExtentWatchHandle = reactiveUtils.watch(() => view.extent, () => {
-    scheduleProjectSave();
+    if (!isApplyingViewTrackMotion && !isPlaying && !exportState.isExporting) {
+      scheduleProjectSave();
+    }
     scheduleThumbtackParallaxUpdate();
   });
   if (viewClickHandle) {
@@ -1818,6 +1838,11 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
   if (mode === currentViewMode && view) {
     setSceneModeButtonLabel();
     updateBasemapOptionsForViewMode(mode);
+    ensureViewTrackLayer();
+    syncViewTrackLayerName(mode);
+    updateLayersList();
+    updateTimeline();
+    updateAnimationOptions();
     updateGoogle3DTilesToggleVisibility();
     ensureGoogle3DTilesLayerState();
     return;
@@ -1861,7 +1886,12 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     }
     resetSketchForCurrentView();
     bindActiveViewHandlers();
+    ensureViewTrackLayer();
+    syncViewTrackLayerName(mode);
     applyViewModeToAllLayers();
+    updateLayersList();
+    updateTimeline();
+    updateAnimationOptions();
     if (selectedLayerIndex >= 0) {
       selectLayer(selectedLayerIndex, false);
     }
@@ -1988,9 +2018,15 @@ async function applyProjectSnapshot(snapshot: unknown) {
     },
     snapshot as ProjectSnapshot
   );
+  applyViewTrackKeyframesSnapshot((snapshot as any)?.properties?._pulse?.app?.viewTrackKeyframes);
+  syncViewTrackLayerName(currentViewMode);
   applySceneSettingsSnapshot((snapshot as any)?.properties?._pulse?.app?.scene, getSceneView3D());
+  applyViewTrackAnimationAtTime(currentTime);
   applyViewModeToAllLayers();
   updateSnappingOptions();
+  updateLayersList();
+  updateTimeline();
+  updateAnimationOptions();
   clearSelectionManagerSelection();
   setSceneModeButtonLabel();
 }
@@ -3808,7 +3844,10 @@ function clearLayerOverlayLayers(layerData: LayerData) {
 
 async function resetProject() {
   if (!view) return;
-  if (graphicsLayers.length > 0) {
+  const hasProjectContent = graphicsLayers.some(
+    (layerData) => !isViewTrackLayer(layerData) || hasRealAnimations(layerData) || hasPointKeyframes(layerData)
+  );
+  if (hasProjectContent) {
     const shouldReset = await openConfirmDialog({
       heading: "New project",
       message: "Creating a new project will remove all graphics/animations.",
@@ -3843,6 +3882,8 @@ async function resetProject() {
     delete (layerData as any).__fireworksLayer;
   });
   graphicsLayers = [];
+  ensureViewTrackLayer();
+  syncViewTrackLayerName(currentViewMode);
   clearSelectionManagerSelection();
   selectedLayerIndex = -1;
   isDrawing = false;
@@ -3969,7 +4010,7 @@ function updatePrimaryActionsState() {
     const count = graphics?.length ?? graphics?.items?.length ?? 0;
     return count > 0;
   });
-  const hasSelection = selectedLayerIndex >= 0;
+  const hasSelection = selectedLayerIndex >= 0 && !isViewTrackLayer(graphicsLayers[selectedLayerIndex]);
   const mapActionButtons = document.getElementById("map-action-buttons");
   const onboardingStep = document.getElementById("onboarding-step-draw");
   const onboardingStyleStep = document.getElementById("onboarding-step-style");
@@ -4032,15 +4073,294 @@ function updatePrimaryActionsState() {
   }
 }
 
-function upsertPointKeyframe(layerData: LayerData, geometry: Point, time: number) {
+function isViewTrackLayer(layerData: LayerData | null | undefined) {
+  return Boolean(layerData?.isViewTrack);
+}
+
+function getViewTrackLayerName(mode: ViewMode = currentViewMode) {
+  return mode === "3d" ? "Camera" : "View";
+}
+
+function getViewTrackLayerData() {
+  return graphicsLayers.find((layerData) => isViewTrackLayer(layerData)) ?? null;
+}
+
+function getCurrentViewTrackKeyframe(time: number) {
+  if (!view) return null;
+  if (String((view as any)?.type || "") === "3d") {
+    const camera = view?.camera;
+    const position = view?.camera?.position;
+    if (position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
+      const z = Number(position.z);
+      const heading = Number(camera?.heading);
+      const tilt = Number(camera?.tilt);
+      const fov = Number(camera?.fov);
+      return {
+        time,
+        x: Number(position.x),
+        y: Number(position.y),
+        z: Number.isFinite(z) ? z : undefined,
+        heading: Number.isFinite(heading) ? heading : undefined,
+        tilt: Number.isFinite(tilt) ? tilt : undefined,
+        fov: Number.isFinite(fov) ? fov : undefined,
+        spatialReference: position.spatialReference ?? view.spatialReference
+      } as PointKeyframe;
+    }
+  }
+  const center = view?.center;
+  if (center && Number.isFinite(Number(center.x)) && Number.isFinite(Number(center.y))) {
+    const rotation = Number((view as any)?.rotation);
+    const scale = Number((view as any)?.scale);
+    return {
+      time,
+      x: Number(center.x),
+      y: Number(center.y),
+      rotation: Number.isFinite(rotation) ? rotation : undefined,
+      scale: Number.isFinite(scale) ? scale : undefined,
+      spatialReference: center.spatialReference ?? view.spatialReference
+    } as PointKeyframe;
+  }
+  return null;
+}
+
+function ensureViewTrackLayer() {
+  if (!view?.map) return null;
+  const existing = getViewTrackLayerData();
+  if (existing) {
+    existing.name = getViewTrackLayerName();
+    existing.layer.title = existing.name;
+    const existingIndex = graphicsLayers.indexOf(existing);
+    if (existingIndex > 0) {
+      graphicsLayers.splice(existingIndex, 1);
+      graphicsLayers.unshift(existing);
+      if (selectedLayerIndex === existingIndex) {
+        selectedLayerIndex = 0;
+      } else if (selectedLayerIndex >= 0 && selectedLayerIndex < existingIndex) {
+        selectedLayerIndex += 1;
+      }
+      if (timelineState.selectedTimelineAnimation) {
+        const { layerIdx, animIdx } = timelineState.selectedTimelineAnimation;
+        timelineState.selectedTimelineAnimation = {
+          layerIdx: layerIdx < existingIndex ? layerIdx + 1 : layerIdx,
+          animIdx
+        };
+      }
+      if (timelineState.selectedTimelineKeyframe) {
+        const { layerIdx, keyframeIdx } = timelineState.selectedTimelineKeyframe;
+        timelineState.selectedTimelineKeyframe = {
+          layerIdx: layerIdx < existingIndex ? layerIdx + 1 : layerIdx,
+          keyframeIdx
+        };
+      }
+    }
+    if (view.map.reorder) {
+      graphicsLayers.forEach((layerData, layerIdx) => {
+        view.map.reorder(layerData.layer, layerIdx);
+      });
+    }
+    return existing;
+  }
+
+  const layer = new GraphicsLayer({
+    id: VIEW_TRACK_LAYER_ID,
+    title: getViewTrackLayerName(),
+    visible: false,
+    listMode: "hide"
+  });
+  view.map.add(layer, 0);
+
+  const layerData: LayerData = {
+    layer,
+    name: getViewTrackLayerName(),
+    type: "point",
+    isViewTrack: true,
+    animations: [createPlaceholderAnimation()],
+    pointKeyframes: []
+  };
+
+  graphicsLayers.unshift(layerData);
+  if (selectedLayerIndex >= 0) {
+    selectedLayerIndex += 1;
+  }
+  if (timelineState.selectedTimelineAnimation) {
+    timelineState.selectedTimelineAnimation = {
+      layerIdx: timelineState.selectedTimelineAnimation.layerIdx + 1,
+      animIdx: timelineState.selectedTimelineAnimation.animIdx
+    };
+  }
+  if (timelineState.selectedTimelineKeyframe) {
+    timelineState.selectedTimelineKeyframe = {
+      layerIdx: timelineState.selectedTimelineKeyframe.layerIdx + 1,
+      keyframeIdx: timelineState.selectedTimelineKeyframe.keyframeIdx
+    };
+  }
+  return layerData;
+}
+
+function syncViewTrackLayerName(mode: ViewMode = currentViewMode) {
+  const viewTrack = getViewTrackLayerData();
+  if (!viewTrack) return;
+  const name = getViewTrackLayerName(mode);
+  viewTrack.name = name;
+  viewTrack.layer.title = name;
+}
+
+function upsertLayerKeyframeAtCurrentTime(layerData: LayerData) {
+  if (!layerData || layerData.type !== "point") return;
+  if (isViewTrackLayer(layerData)) {
+    const frame = getCurrentViewTrackKeyframe(currentTime);
+    if (!frame) return;
+    upsertPointKeyframe(
+      layerData,
+      new Point({
+        x: frame.x,
+        y: frame.y,
+        spatialReference: frame.spatialReference ?? view?.spatialReference
+      }),
+      currentTime,
+      {
+        z: frame.z,
+        heading: frame.heading,
+        tilt: frame.tilt,
+        fov: frame.fov,
+        rotation: frame.rotation,
+        scale: frame.scale
+      }
+    );
+    return;
+  }
+  const graphic = (layerData.layer.graphics as any).getItemAt?.(0) ?? layerData.layer.graphics?.items?.[0];
+  if (graphic?.geometry?.type === "point") {
+    upsertPointKeyframe(layerData, graphic.geometry as Point, currentTime);
+  }
+}
+
+function applyViewTrackAnimationAtTime(time: number) {
+  if (!view) return;
+  const viewTrack = getViewTrackLayerData();
+  if (!viewTrack || !hasPointKeyframes(viewTrack)) return;
+  const keyframe = getPointKeyframeAtTime(viewTrack, time);
+  if (!keyframe) return;
+  const point = new Point({
+    x: keyframe.x,
+    y: keyframe.y,
+    spatialReference: keyframe.spatialReference ?? view.spatialReference
+  });
+
+  isApplyingViewTrackMotion = true;
+  try {
+    if (String(view.type) === "3d") {
+      const camera = view?.camera?.clone?.();
+      if (camera?.position) {
+        camera.position.x = point.x;
+        camera.position.y = point.y;
+        if (Number.isFinite(Number(keyframe.z))) {
+          camera.position.z = Number(keyframe.z);
+        }
+        if (point.spatialReference) {
+          camera.position.spatialReference = point.spatialReference;
+        }
+        if (Number.isFinite(Number(keyframe.heading))) {
+          camera.heading = Number(keyframe.heading);
+        }
+        if (Number.isFinite(Number(keyframe.tilt))) {
+          camera.tilt = Number(keyframe.tilt);
+        }
+        if (Number.isFinite(Number(keyframe.fov))) {
+          camera.fov = Number(keyframe.fov);
+          cameraStudioSettings.fov = Number(keyframe.fov);
+        }
+        view.camera = camera;
+      } else {
+        void view.goTo({ center: point }, { animate: false });
+      }
+    } else {
+      view.center = point;
+      if (Number.isFinite(Number(keyframe.rotation))) {
+        (view as any).rotation = Number(keyframe.rotation);
+      }
+      if (Number.isFinite(Number(keyframe.scale))) {
+        (view as any).scale = Number(keyframe.scale);
+      }
+    }
+  } finally {
+    if (clearViewTrackMotionTimer !== null) {
+      window.clearTimeout(clearViewTrackMotionTimer);
+    }
+    clearViewTrackMotionTimer = window.setTimeout(() => {
+      isApplyingViewTrackMotion = false;
+      clearViewTrackMotionTimer = null;
+    }, 0);
+  }
+}
+
+function applyViewTrackKeyframesSnapshot(rawFrames: any) {
+  const viewTrack = ensureViewTrackLayer();
+  if (!viewTrack) return;
+  const isPointKeyframe = (value: PointKeyframe | null): value is PointKeyframe => value !== null;
+  const frames = Array.isArray(rawFrames) ? rawFrames : [];
+  viewTrack.pointKeyframes = frames
+    .map((frame: any) => {
+      const time = Number(frame?.time);
+      const x = Number(frame?.x);
+      const y = Number(frame?.y);
+      if (!Number.isFinite(time) || !Number.isFinite(x) || !Number.isFinite(y)) {
+        return null;
+      }
+      const z = Number(frame?.z);
+      const heading = Number(frame?.heading);
+      const tilt = Number(frame?.tilt);
+      const fov = Number(frame?.fov);
+      const rotation = Number(frame?.rotation);
+      const scale = Number(frame?.scale);
+      const easing = frame?.easing === "ease-in-out" ? "ease-in-out" : frame?.easing === "linear" ? "linear" : undefined;
+      return {
+        time,
+        x,
+        y,
+        z: Number.isFinite(z) ? z : undefined,
+        heading: Number.isFinite(heading) ? heading : undefined,
+        tilt: Number.isFinite(tilt) ? tilt : undefined,
+        fov: Number.isFinite(fov) ? fov : undefined,
+        rotation: Number.isFinite(rotation) ? rotation : undefined,
+        scale: Number.isFinite(scale) ? scale : undefined,
+        easing,
+        spatialReference: frame?.spatialReference
+      } as PointKeyframe;
+    })
+    .filter(isPointKeyframe)
+    .sort((a: PointKeyframe, b: PointKeyframe) => a.time - b.time);
+}
+
+function normalizePointKeyframeEasing(value: unknown): PointKeyframeEasing | undefined {
+  if (value === "ease-in-out") return "ease-in-out";
+  if (value === "linear") return "linear";
+  return undefined;
+}
+
+function upsertPointKeyframe(
+  layerData: LayerData,
+  geometry: Point,
+  time: number,
+  extras?: Partial<PointKeyframe>
+) {
+  const keyframes = layerData.pointKeyframes ? [...layerData.pointKeyframes] : [];
+  const existingIndex = keyframes.findIndex((frame) => Math.abs(frame.time - time) < 0.001);
+  const existingEasing = existingIndex >= 0 ? normalizePointKeyframeEasing(keyframes[existingIndex].easing) : undefined;
+  const nextEasing = normalizePointKeyframeEasing(extras?.easing) ?? existingEasing;
   const next: PointKeyframe = {
     time,
     x: geometry.x,
     y: geometry.y,
+    z: Number.isFinite(Number(extras?.z)) ? Number(extras?.z) : undefined,
+    heading: Number.isFinite(Number(extras?.heading)) ? Number(extras?.heading) : undefined,
+    tilt: Number.isFinite(Number(extras?.tilt)) ? Number(extras?.tilt) : undefined,
+    fov: Number.isFinite(Number(extras?.fov)) ? Number(extras?.fov) : undefined,
+    rotation: Number.isFinite(Number(extras?.rotation)) ? Number(extras?.rotation) : undefined,
+    scale: Number.isFinite(Number(extras?.scale)) ? Number(extras?.scale) : undefined,
+    easing: nextEasing,
     spatialReference: geometry.spatialReference
   };
-  const keyframes = layerData.pointKeyframes ? [...layerData.pointKeyframes] : [];
-  const existingIndex = keyframes.findIndex((frame) => Math.abs(frame.time - time) < 0.001);
   if (existingIndex >= 0) {
     keyframes[existingIndex] = next;
   } else {
@@ -4062,6 +4382,49 @@ function removePointKeyframeAt(layerIdx: number, keyframeIdx: number) {
   scheduleProjectSave();
 }
 
+function interpolateNumber(startValue: unknown, endValue: unknown, t: number) {
+  const start = Number(startValue);
+  const end = Number(endValue);
+  if (Number.isFinite(start) && Number.isFinite(end)) {
+    return start + (end - start) * t;
+  }
+  if (Number.isFinite(start)) return start;
+  if (Number.isFinite(end)) return end;
+  return undefined;
+}
+
+function normalizeDegrees(value: number) {
+  let next = value % 360;
+  if (next < 0) {
+    next += 360;
+  }
+  return next;
+}
+
+function interpolateAngleDegrees(startValue: unknown, endValue: unknown, t: number) {
+  const start = Number(startValue);
+  const end = Number(endValue);
+  if (!Number.isFinite(start) && !Number.isFinite(end)) return undefined;
+  if (!Number.isFinite(start)) return Number.isFinite(end) ? end : undefined;
+  if (!Number.isFinite(end)) return start;
+  const startNorm = normalizeDegrees(start);
+  const endNorm = normalizeDegrees(end);
+  let delta = endNorm - startNorm;
+  if (delta > 180) {
+    delta -= 360;
+  } else if (delta < -180) {
+    delta += 360;
+  }
+  return normalizeDegrees(startNorm + delta * t);
+}
+
+function applyPointKeyframeEasing(t: number, easing: unknown) {
+  if (easing === "ease-in-out") {
+    return t * t * (3 - 2 * t);
+  }
+  return t;
+}
+
 function getPointKeyframeAtTime(layerData: LayerData, time: number) {
   const keyframes = layerData.pointKeyframes ?? [];
   if (keyframes.length === 0) return null;
@@ -4076,10 +4439,18 @@ function getPointKeyframeAtTime(layerData: LayerData, time: number) {
       const span = end.time - start.time;
       if (span <= 0) return end;
       const t = (time - start.time) / span;
+      const easedT = applyPointKeyframeEasing(t, start.easing);
       return {
         time,
-        x: start.x + (end.x - start.x) * t,
-        y: start.y + (end.y - start.y) * t,
+        x: start.x + (end.x - start.x) * easedT,
+        y: start.y + (end.y - start.y) * easedT,
+        z: interpolateNumber(start.z, end.z, easedT),
+        heading: interpolateAngleDegrees(start.heading, end.heading, easedT),
+        tilt: interpolateNumber(start.tilt, end.tilt, easedT),
+        fov: interpolateNumber(start.fov, end.fov, easedT),
+        rotation: interpolateAngleDegrees(start.rotation, end.rotation, easedT),
+        scale: interpolateNumber(start.scale, end.scale, easedT),
+        easing: normalizePointKeyframeEasing(start.easing),
         spatialReference: start.spatialReference || end.spatialReference
       };
     }
@@ -4282,7 +4653,10 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   }
   if (view) {
     bindActiveViewHandlers();
+    ensureViewTrackLayer();
+    syncViewTrackLayerName(currentViewMode);
   }
+  updateLayersList();
   updateTimeline();
   updateAnimationOptions();
     updateExportWarning();
@@ -4721,6 +5095,10 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   getEl("timeline-duration").addEventListener(
     "calciteInputNumberChange",
     handleTimelineDurationChange as EventListener
+  );
+  getEl("timeline-keyframe-easing").addEventListener(
+    "calciteSelectChange",
+    handleTimelineKeyframeEasingChange as EventListener
   );
   getEl("timeline-duration-autofit").addEventListener("click", handleTimelineDurationAutoFit);
   getEl("timeline-snap-toggle").addEventListener("click", toggleTimelineSnap);
@@ -5333,7 +5711,8 @@ async function startDrawing(type: LayerType) {
   setDrawInfoBoxText(drawInfoText);
   setDrawInfoBoxVisible(true);
 
-  const layerName = `${type.charAt(0).toUpperCase() + type.slice(1)} ${graphicsLayers.length + 1}`;
+  const userLayerCount = graphicsLayers.filter((layerData) => !isViewTrackLayer(layerData)).length;
+  const layerName = `${type.charAt(0).toUpperCase() + type.slice(1)} ${userLayerCount + 1}`;
   const newLayer = new GraphicsLayer({
     title: layerName
   });
@@ -5406,10 +5785,11 @@ function updateLayersList() {
   const orderedLayers = [...graphicsLayers].reverse();
   orderedLayers.forEach((layerData) => {
     const index = graphicsLayers.indexOf(layerData);
+    const isLockedLayer = isViewTrackLayer(layerData);
     const item = document.createElement("calcite-accordion-item");
     item.className = "layer-accordion-item";
     item.setAttribute("heading", layerData.name);
-    item.setAttribute("icon-start", getIconForType(layerData.type));
+    item.setAttribute("icon-start", isLockedLayer ? (currentViewMode === "3d" ? "camera" : "map") : getIconForType(layerData.type));
     if (index === selectedLayerIndex) {
       item.setAttribute("expanded", "");
     }
@@ -5418,17 +5798,19 @@ function updateLayersList() {
     title.textContent = layerData.name;
     item.appendChild(title);
 
-    const deleteAction = createLayerAction("trash", "Delete", () => {
-      removeLayer(index);
-    });
-    deleteAction.classList.add("layer-action-delete");
-    deleteAction.setAttribute("slot", "actions-end");
-    item.appendChild(deleteAction);
+    if (!isLockedLayer) {
+      const deleteAction = createLayerAction("trash", "Delete", () => {
+        removeLayer(index);
+      });
+      deleteAction.classList.add("layer-action-delete");
+      deleteAction.setAttribute("slot", "actions-end");
+      item.appendChild(deleteAction);
+    }
 
     const content = document.createElement("div");
     content.className = "layer-item-content";
 
-    if (index === selectedLayerIndex) {
+    if (index === selectedLayerIndex && !isLockedLayer) {
       const animationSection = document.createElement("div");
       animationSection.className = "layer-section";
 
@@ -5518,9 +5900,17 @@ function selectLayer(index: number, focusGraphic = true, selectedGraphic?: any) 
   updateLayersList();
   updateTimeline();
   updateAnimationOptions();
-  setDeleteLayerButtonVisible(true);
+  setDeleteLayerButtonVisible(!isViewTrackLayer(graphicsLayers[index]));
 
   const layerData = graphicsLayers[index];
+  if (isViewTrackLayer(layerData)) {
+    if (sketch) {
+      sketch.cancel();
+      sketch.layer = null;
+    }
+    clearSelectionManagerSelection();
+    return;
+  }
   if (layerData.type === "feature") {
     if (isPlaying) {
       stopAnimation();
@@ -5585,6 +5975,7 @@ async function confirmDeleteLayer(layerData: LayerData, hostId?: string) {
 async function removeLayer(index: number, options?: { confirmHostId?: string }) {
   const layerData = graphicsLayers[index];
   if (!layerData) return;
+  if (isViewTrackLayer(layerData)) return;
   if (!(await confirmDeleteLayer(layerData, options?.confirmHostId))) return;
   view.map.remove(layerData.layer);
   clearLayerOverlayLayers(layerData);
@@ -5625,6 +6016,12 @@ function moveLayerToIndex(index: number, targetIndex: number) {
   if (index < 0 || index > maxIndex || targetIndex < 0 || targetIndex > maxIndex || index === targetIndex) {
     return;
   }
+  if (isViewTrackLayer(graphicsLayers[index])) return;
+  const lockedBottomIndex = graphicsLayers.findIndex((layerData) => isViewTrackLayer(layerData));
+  const minMovableIndex = lockedBottomIndex >= 0 ? lockedBottomIndex + 1 : 0;
+  const clampedTargetIndex = Math.max(minMovableIndex, targetIndex);
+  if (clampedTargetIndex === index) return;
+  targetIndex = clampedTargetIndex;
 
   const [movedLayer] = graphicsLayers.splice(index, 1);
   graphicsLayers.splice(targetIndex, 0, movedLayer);
@@ -5682,6 +6079,7 @@ function getDuplicateLayerName(base: string) {
 async function duplicateLayer(index: number) {
   const layerData = graphicsLayers[index];
   if (!layerData || !view) return;
+  if (isViewTrackLayer(layerData)) return;
   const nextName = getDuplicateLayerName(layerData.name);
 
   if (layerData.type === "feature") {
@@ -5839,6 +6237,11 @@ async function handleMapDoubleClick(event: any) {
 function openStyleModal() {
   if (selectedLayerIndex < 0) return;
   const layerData = graphicsLayers[selectedLayerIndex];
+  if (isViewTrackLayer(layerData)) {
+    attachStylePanelTo();
+    attachTextPanelTo();
+    return;
+  }
   if (layerData.type === "text") {
     openTextSettingsModal();
     return;
@@ -6909,6 +7312,11 @@ function updateStylePanel() {
     return;
   }
   const layerData = graphicsLayers[selectedLayerIndex];
+  if (isViewTrackLayer(layerData)) {
+    attachStylePanelTo();
+    attachTextPanelTo();
+    return;
+  }
   if (layerData.type === "text") {
     attachStylePanelTo();
     attachTextPanelTo(`style-settings-host-${selectedLayerIndex}`);
@@ -6928,11 +7336,18 @@ function updateAnimationOptions() {
     attachTextPanelTo();
     return;
   }
+  const layerData = graphicsLayers[selectedLayerIndex];
+  if (isViewTrackLayer(layerData)) {
+    setAnimationPanelVisible(false);
+    attachAnimationPanelTo();
+    attachStylePanelTo();
+    attachTextPanelTo();
+    return;
+  }
   setAnimationPanelVisible(true);
   attachAnimationPanelTo(`animation-settings-host-${selectedLayerIndex}`);
   updateStylePanel();
   syncAnimationStartInput();
-  const layerData = graphicsLayers[selectedLayerIndex];
 
   const optionsContainer = document.getElementById("animation-type-options");
   const webglOptionsContainer = document.getElementById("animation-type-options-webgl");

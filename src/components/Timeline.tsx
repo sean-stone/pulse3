@@ -104,6 +104,19 @@ function Timeline() {
           <span id="timeline-zoom-label" title="Timeline zoom">
             100%
           </span>
+          <div id="timeline-keyframe-easing-wrap" className="timeline-keyframe-easing" hidden>
+            <span className="timeline-keyframe-easing-label">Easing</span>
+            <calcite-select
+              id="timeline-keyframe-easing"
+              data-testid="timeline-keyframe-easing"
+              scale="s"
+              aria-label="Selected keyframe easing"
+              disabled
+            >
+              <calcite-option value="linear">Linear</calcite-option>
+              <calcite-option value="ease-in-out">Ease In/Out</calcite-option>
+            </calcite-select>
+          </div>
           <div className="timeline-duration">
             <calcite-button
               id="timeline-duration-autofit"

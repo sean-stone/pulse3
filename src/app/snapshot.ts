@@ -3,7 +3,7 @@ import Graphic from "@arcgis/core/Graphic";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 
-import type { LayerAnimation, LayerData, LineStyle, PointStyle, PolygonStyle } from "../types";
+import type { LayerAnimation, LayerData, LineStyle, PointKeyframe, PointStyle, PolygonStyle } from "../types";
 
 import type { ProjectLayerSnapshot, ProjectSnapshot } from "./constants";
 import { PROJECT_VERSION } from "./constants";
@@ -129,7 +129,33 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
       }
     : undefined;
 
-  const layers: ProjectLayerSnapshot[] = config.graphicsLayers.map((layerData, index) => ({
+  const viewTrackLayer = config.graphicsLayers.find((layerData) => layerData.isViewTrack);
+  const savableLayers = config.graphicsLayers.filter((layerData) => !layerData.isViewTrack);
+  const viewTrackKeyframes =
+    viewTrackLayer?.pointKeyframes?.map((frame) => {
+      const easing: PointKeyframe["easing"] =
+        frame.easing === "ease-in-out" ? "ease-in-out" : frame.easing === "linear" ? "linear" : undefined;
+      return {
+        time: Number(frame.time),
+        x: Number(frame.x),
+        y: Number(frame.y),
+        z: Number.isFinite(Number(frame.z)) ? Number(frame.z) : undefined,
+        heading: Number.isFinite(Number(frame.heading)) ? Number(frame.heading) : undefined,
+        tilt: Number.isFinite(Number(frame.tilt)) ? Number(frame.tilt) : undefined,
+        fov: Number.isFinite(Number(frame.fov)) ? Number(frame.fov) : undefined,
+        rotation: Number.isFinite(Number(frame.rotation)) ? Number(frame.rotation) : undefined,
+        scale: Number.isFinite(Number(frame.scale)) ? Number(frame.scale) : undefined,
+        easing,
+        spatialReference: frame.spatialReference
+          ? {
+              wkid: Number(frame.spatialReference?.wkid) || undefined,
+              latestWkid: Number(frame.spatialReference?.latestWkid) || undefined
+            }
+          : undefined
+      };
+    }) ?? [];
+
+  const layers: ProjectLayerSnapshot[] = savableLayers.map((layerData, index) => ({
     id: `layer-${index}`,
     name: layerData.name,
     type: layerData.type,
@@ -161,7 +187,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   }));
 
   const features: ProjectSnapshot["features"] = [];
-  config.graphicsLayers.forEach((layerData, index) => {
+  savableLayers.forEach((layerData, index) => {
     if (layerData.type === "feature") return;
     const layerId = `layer-${index}`;
     layerData.layer.graphics.forEach((graphic: any) => {
@@ -244,6 +270,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
           basemapVisible: basemapSelect?.value !== "none",
           basemapLabelsVisible,
           google3DTilesEnabled,
+          viewTrackKeyframes,
           backgroundColor,
           backgroundTransparent,
           mode: isSceneView ? "3d" : "2d",
