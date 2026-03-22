@@ -348,7 +348,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
     wrap.removeAttribute("hidden");
     select.removeAttribute("disabled");
-    const easing = selected.frame.easing === "ease-in-out" ? "ease-in-out" : "linear";
+    const easing = (() => {
+      const value = selected.frame.easing;
+      if (value === "ease-in") return "ease-in";
+      if (value === "ease-out") return "ease-out";
+      if (value === "ease-in-out") return "ease-in-out";
+      return "linear";
+    })();
     if (String(select.value || "") !== easing) {
       config.setCalciteValue(select as HTMLElement, easing);
     }
@@ -831,7 +837,14 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
 
   const handleTimelineKeyframeEasingChange = (event: Event) => {
     const value = String((event.target as any)?.value || "linear");
-    const easing: PointKeyframeEasing = value === "ease-in-out" ? "ease-in-out" : "linear";
+    const easing: PointKeyframeEasing =
+      value === "ease-in"
+        ? "ease-in"
+        : value === "ease-out"
+          ? "ease-out"
+          : value === "ease-in-out"
+            ? "ease-in-out"
+            : "linear";
     setSelectedTimelineKeyframeEasing(easing);
   };
 

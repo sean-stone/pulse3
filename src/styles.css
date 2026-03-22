@@ -2253,7 +2253,7 @@ body.theme-dark #gif-download-btn::part(button) {
 }
 
 .point-style-options {
-  max-height: 100px;
+  max-height: 220px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -2398,6 +2398,68 @@ body.theme-dark #gif-download-btn::part(button) {
       var(--preview-polygon-outline, var(--color-primary)) 2px,
       transparent 2px,
       transparent 6px
+    );
+}
+
+.polygon-style-swatch--water-calm {
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.5) 0, rgba(255, 255, 255, 0.08) 35%, transparent 50%),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.18) 0%,
+      var(--preview-polygon-fill, rgba(74, 151, 177, 0.75)) 52%,
+      rgba(20, 95, 125, 0.88) 100%
+    );
+}
+
+.polygon-style-swatch--water-rippled {
+  background:
+    repeating-linear-gradient(
+      165deg,
+      rgba(255, 255, 255, 0.42) 0,
+      rgba(255, 255, 255, 0.42) 1px,
+      rgba(255, 255, 255, 0.06) 1px,
+      rgba(255, 255, 255, 0.06) 3px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.12) 0%,
+      var(--preview-polygon-fill, rgba(72, 141, 170, 0.74)) 52%,
+      rgba(18, 82, 116, 0.9) 100%
+    );
+}
+
+.polygon-style-swatch--water-slight {
+  background:
+    repeating-linear-gradient(
+      35deg,
+      rgba(255, 255, 255, 0.36) 0,
+      rgba(255, 255, 255, 0.36) 1px,
+      rgba(255, 255, 255, 0.08) 1px,
+      rgba(255, 255, 255, 0.08) 4px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      var(--preview-polygon-fill, rgba(67, 133, 167, 0.78)) 50%,
+      rgba(15, 74, 112, 0.92) 100%
+    );
+}
+
+.polygon-style-swatch--water-moderate {
+  background:
+    repeating-linear-gradient(
+      22deg,
+      rgba(255, 255, 255, 0.42) 0,
+      rgba(255, 255, 255, 0.42) 1px,
+      rgba(255, 255, 255, 0.08) 1px,
+      rgba(255, 255, 255, 0.08) 5px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(215, 241, 255, 0.16) 0%,
+      var(--preview-polygon-fill, rgba(52, 116, 155, 0.82)) 48%,
+      rgba(7, 52, 94, 0.96) 100%
     );
 }
 

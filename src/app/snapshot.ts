@@ -134,7 +134,15 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
   const viewTrackKeyframes =
     viewTrackLayer?.pointKeyframes?.map((frame) => {
       const easing: PointKeyframe["easing"] =
-        frame.easing === "ease-in-out" ? "ease-in-out" : frame.easing === "linear" ? "linear" : undefined;
+        frame.easing === "ease-in"
+          ? "ease-in"
+          : frame.easing === "ease-out"
+            ? "ease-out"
+            : frame.easing === "ease-in-out"
+              ? "ease-in-out"
+              : frame.easing === "linear"
+                ? "linear"
+                : undefined;
       return {
         time: Number(frame.time),
         x: Number(frame.x),
@@ -162,14 +170,18 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
     animations: layerData.animations.map((anim) => ({ ...anim })),
     pointKeyframes: layerData.pointKeyframes?.map((frame) => ({ ...frame })),
     pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
+    pointFollowTerrain3D: layerData.pointFollowTerrain3D,
     lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
     polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
+    polygonZOffset: layerData.polygonZOffset,
     textContent: layerData.textContent,
     textSize: layerData.textSize,
     textColor: layerData.textColor,
     textFontFamily: layerData.textFontFamily,
     textItalic: layerData.textItalic,
     textUnderline: layerData.textUnderline,
+    textRenderMode: layerData.textRenderMode,
+    textCalloutLine: layerData.textCalloutLine,
     featureLayerUrl: layerData.featureLayerUrl,
     featureFields: layerData.featureFields?.map((field) => ({ ...field })),
     featureField: layerData.featureField,
@@ -461,6 +473,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
           pointStyle: layerSnapshot.pointStyle ? { ...layerSnapshot.pointStyle } : undefined,
           lineStyle: layerSnapshot.lineStyle ? { ...layerSnapshot.lineStyle } : undefined,
           polygonStyle: layerSnapshot.polygonStyle ? { ...layerSnapshot.polygonStyle } : undefined,
+          polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
+            ? Number(layerSnapshot.polygonZOffset)
+            : undefined,
           layerBlendMode: layerSnapshot.layerBlendMode,
           layerEffectSettings: layerSnapshot.layerEffectSettings
             ? { ...layerSnapshot.layerEffectSettings }
@@ -493,6 +508,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         } else if (!layerData.pointStyle) {
           layerData.pointStyle = { ...config.defaultPointStyle };
         }
+        if (featureLayer.geometryType === "polygon" && !Number.isFinite(Number(layerData.polygonZOffset))) {
+          layerData.polygonZOffset = 0;
+        }
         if (layerData.layerEffectsEnabled === undefined) {
           layerData.layerEffectsEnabled = true;
         }
@@ -523,14 +541,20 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
           : [config.createPlaceholderAnimation()],
         pointKeyframes: layerSnapshot.pointKeyframes?.map((frame) => ({ ...frame })),
         pointStyle: layerSnapshot.pointStyle ? { ...layerSnapshot.pointStyle } : undefined,
+        pointFollowTerrain3D: layerSnapshot.pointFollowTerrain3D,
         lineStyle: layerSnapshot.lineStyle ? { ...layerSnapshot.lineStyle } : undefined,
         polygonStyle: layerSnapshot.polygonStyle ? { ...layerSnapshot.polygonStyle } : undefined,
+        polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
+          ? Number(layerSnapshot.polygonZOffset)
+          : undefined,
         textContent: layerSnapshot.textContent,
         textSize: layerSnapshot.textSize,
         textColor: layerSnapshot.textColor,
         textFontFamily: layerSnapshot.textFontFamily,
         textItalic: layerSnapshot.textItalic,
         textUnderline: layerSnapshot.textUnderline,
+        textRenderMode: layerSnapshot.textRenderMode,
+        textCalloutLine: layerSnapshot.textCalloutLine,
         customAttribution: layerSnapshot.customAttribution,
         layerBlendMode: layerSnapshot.layerBlendMode,
         layerEffectSettings: layerSnapshot.layerEffectSettings
@@ -546,6 +570,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
       } else if (layerData.type === "polygon" && !layerData.polygonStyle) {
         layerData.polygonStyle = { ...config.defaultPolygonStyle };
       }
+      if (layerData.type === "polygon" && !Number.isFinite(Number(layerData.polygonZOffset))) {
+        layerData.polygonZOffset = 0;
+      }
       if (layerData.layerEffectsEnabled === undefined) {
         layerData.layerEffectsEnabled = true;
       }
@@ -559,26 +586,11 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         if (!geometry) return;
         const { _pulse, ...attributes } = feature.properties || {};
         const graphic = new Graphic({ geometry, attributes });
-        if (layerData.type === "text") {
-          graphic.symbol = {
-            type: "text",
-            text: layerData.textContent || "Text",
-            color: layerData.textColor || "#22323a",
-            font: {
-              size: layerData.textSize || 14,
-              family: layerData.textFontFamily || "sans-serif",
-              style: layerData.textItalic ? "italic" : "normal",
-              decoration: layerData.textUnderline ? "underline" : "none"
-            }
-          };
-        }
         config.ensureGeometryCache(layerData, graphic);
         newLayer.add(graphic);
       });
 
-      if (layerData.type !== "text") {
-        config.applyLayerStyle(layerData);
-      }
+      config.applyLayerStyle(layerData);
       config.applyLayerEffects(layerData);
       config.addGraphicsLayer(layerData);
     }

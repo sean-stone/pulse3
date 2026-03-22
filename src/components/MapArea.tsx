@@ -94,6 +94,13 @@ function MapArea() {
                   <calcite-option value="high">High</calcite-option>
                 </calcite-select>
               </calcite-label>
+              <calcite-label className="scene-camera-studio-control">
+                Atmosphere quality
+                <calcite-select id="scene-atmosphere-quality" value="high">
+                  <calcite-option value="low">Low</calcite-option>
+                  <calcite-option value="high">High</calcite-option>
+                </calcite-select>
+              </calcite-label>
               <calcite-label className="scene-camera-studio-toggle">
                 Glow
                 <calcite-switch id="scene-glow-enabled" scale="s" checked></calcite-switch>

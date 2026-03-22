@@ -1,15 +1,14 @@
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 import Point from "@arcgis/core/geometry/Point";
-import Multipoint from "@arcgis/core/geometry/Multipoint";
-import Polygon from "@arcgis/core/geometry/Polygon";
-import Polyline from "@arcgis/core/geometry/Polyline";
 import Graphic from "@arcgis/core/Graphic";
 import Color from "@arcgis/core/Color";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import IntegratedMesh3DTilesLayer from "@arcgis/core/layers/IntegratedMesh3DTilesLayer";
+import Portal from "@arcgis/core/portal/Portal";
+import PortalQueryParams from "@arcgis/core/portal/PortalQueryParams";
 import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
-import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
+import WebStyleSymbol from "@arcgis/core/symbols/WebStyleSymbol";
 import { sqlName } from "@arcgis/core/core/sql";
 import Glow from "@arcgis/core/webscene/Glow";
 
@@ -49,6 +48,15 @@ import {
   sanitizePlainText
 } from "./app/constants";
 import type { ProjectSnapshot } from "./app/constants";
+import { createBootController } from "./app/bootstrap";
+import type { ArcgisViewHostElement, ViewMode } from "./app/bootstrap";
+import {
+  arcgisGeometryToGeoJSON,
+  geoJSONToArcGISGeometry,
+  prepareLayerGeometryForSketch,
+  toGeographicGeometry,
+  toViewGeometry
+} from "./app/geometryInterop";
 import "jszip/dist/jszip.min.js";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
@@ -58,6 +66,128 @@ let ffmpegClassWorkerUrl: string | null = null;
 let ffmpegCoreBaseUrl: string | null = null;
 const THUMBTACK_3D_STYLE = "thumbtack3d";
 const PULSE_SELECTION_HIGHLIGHT_NAME = "pulse-selection";
+const DYNAMIC_WEBSTYLE_STYLE_PREFIX = "model-webstyle::";
+const POINT_WEBSTYLE_PRESET_STYLES = [
+  "EsriRealisticTransportationStyle",
+  "EsriRealisticStreetSceneStyle",
+  "EsriThematicShapesStyle",
+  "EsriIconsStyle",
+  "EsriInfrastructureStyle",
+  "EsriRealisticTreesStyle",
+  "EsriRealisticFoliageStyle",
+  "EsriRealisticSignsandSignalsStyle",
+  "EsriRealisticSportsStyle"
+] as const;
+const pointStyleAliases: Record<string, string> = {
+  "model-webstyle": "square",
+  "model-car": "phosphor-car",
+  "model-bus": "phosphor-bus",
+  "model-train": "phosphor-train",
+  "model-boat": "phosphor-boat",
+  "model-airplane": "phosphor-airplane"
+};
+const pointModelSymbols3D: Record<string, { styleName: string; name: string }> = {
+  "model-car": { styleName: "EsriRealisticTransportationStyle", name: "Audi_A6" },
+  "model-bus": { styleName: "EsriRealisticTransportationStyle", name: "Bus" },
+  "model-train": { styleName: "EsriRealisticTransportationStyle", name: "High_Speed_Train" },
+  "model-boat": { styleName: "EsriRealisticTransportationStyle", name: "Motorboat" },
+  "model-airplane": { styleName: "EsriRealisticTransportationStyle", name: "Airplane_Small_Passenger" }
+};
+const resolvedPointModelSymbolCache = new Map<string, Promise<any | null>>();
+const webStyleSymbolNameCache = new Map<string, Promise<string[]>>();
+let pointWebStyleCatalogLoadPromise: Promise<void> | null = null;
+const loadedPointWebStyleCatalogNames = new Set<string>();
+const supportedLinePatternStyles3D = new Set([
+  "solid",
+  "dash",
+  "dot",
+  "dash-dot",
+  "short-dash",
+  "short-dot",
+  "short-dash-dot",
+  "short-dash-dot-dot",
+  "long-dash",
+  "long-dash-dot",
+  "long-dash-dot-dot",
+  "none"
+]);
+const supportedFillPatternStyles3D = new Set([
+  "solid",
+  "backward-diagonal",
+  "forward-diagonal",
+  "diagonal-cross",
+  "cross",
+  "horizontal",
+  "vertical",
+  "none"
+]);
+const supportedFillStyles2D = new Set([
+  "solid",
+  "backward-diagonal",
+  "forward-diagonal",
+  "diagonal-cross",
+  "cross",
+  "horizontal",
+  "vertical",
+  "none"
+]);
+const polygonWaterStyles3D: Record<
+  string,
+  { waterbodySize: "small" | "medium" | "large"; waveStrength: "calm" | "rippled" | "slight" | "moderate"; waveDirection: number | null }
+> = {
+  "water-calm": {
+    waterbodySize: "small",
+    waveStrength: "calm",
+    waveDirection: null
+  },
+  "water-rippled": {
+    waterbodySize: "medium",
+    waveStrength: "rippled",
+    waveDirection: 45
+  },
+  "water-slight": {
+    waterbodySize: "medium",
+    waveStrength: "slight",
+    waveDirection: 120
+  },
+  "water-moderate": {
+    waterbodySize: "large",
+    waveStrength: "moderate",
+    waveDirection: 180
+  }
+};
+
+function resolvePointStyleKey(style: string) {
+  if (style.startsWith(DYNAMIC_WEBSTYLE_STYLE_PREFIX)) {
+    return pointStyleAliases["model-webstyle"] ?? "circle";
+  }
+  return pointStyleAliases[style] ?? style;
+}
+
+function isPointStyle3DOptionValue(style: string) {
+  return String(style || "").startsWith("model-");
+}
+
+function encodeDynamicWebStyleKey(styleName: string, name: string) {
+  return `${DYNAMIC_WEBSTYLE_STYLE_PREFIX}${encodeURIComponent(styleName)}::${encodeURIComponent(name)}`;
+}
+
+function parseDynamicWebStyleKey(style: string): { styleName: string; name: string } | null {
+  if (!style.startsWith(DYNAMIC_WEBSTYLE_STYLE_PREFIX)) return null;
+  const payload = style.slice(DYNAMIC_WEBSTYLE_STYLE_PREFIX.length);
+  const separatorIndex = payload.indexOf("::");
+  if (separatorIndex < 0) return null;
+  try {
+    const encodedStyleName = payload.slice(0, separatorIndex);
+    const encodedName = payload.slice(separatorIndex + 2);
+    const styleName = decodeURIComponent(encodedStyleName || "").trim();
+    const name = decodeURIComponent(encodedName || "").trim();
+    if (!styleName || !name) return null;
+    return { styleName, name };
+  } catch {
+    return null;
+  }
+}
 
 const webglAnimationTypes = new Set([
   "neonTrail",
@@ -210,14 +340,11 @@ type ExportState = {
   isExporting: boolean;
 };
 
-type ViewMode = "2d" | "3d";
-
-let hasBooted = false;
 let view: any = null;
 let currentViewMode: ViewMode = "2d";
 let isSwitchingViewMode = false;
-let map2DHostEl: any = null;
-let scene3DHostEl: any = null;
+let map2DHostEl: ArcgisViewHostElement | null = null;
+let scene3DHostEl: ArcgisViewHostElement | null = null;
 let graphicsLayers: LayerData[] = [];
 let selectedLayerIndex = -1;
 let animationSettingsHighlightTimeout: number | null = null;
@@ -310,6 +437,8 @@ const CAMERA_FX_LEVEL_MIN = 0;
 const CAMERA_FX_LEVEL_MAX = 100;
 const CAMERA_FX_JITTER_MIN = 0;
 const CAMERA_FX_JITTER_MAX = 12;
+const SCENE_ALTITUDE_MIN = 0;
+const SCENE_ALTITUDE_MAX = 20_000_000;
 const SCENE_ONLY_BASEMAPS = new Set([
   "topo-3d",
   "navigation-3d",
@@ -328,10 +457,12 @@ const GOOGLE_3D_TILES_BETA_NOTICE =
   "Using Google tiles at your own risk - currently in BETA and you need to attribute Google 3D tiles if you export/share the video.";
 const VIEW_TRACK_LAYER_ID = "pulse-view-track";
 type SceneQualityProfile = "low" | "medium" | "high";
+type SceneAtmosphereQuality = "low" | "high";
 
 type CameraStudioSettings = {
   fov: number;
   qualityProfile: SceneQualityProfile;
+  atmosphereQuality: SceneAtmosphereQuality;
   glowEnabled: boolean;
   glowIntensity: number;
   cinematicFxEnabled: boolean;
@@ -345,6 +476,7 @@ type CameraStudioSettings = {
 const cameraStudioSettings: CameraStudioSettings = {
   fov: 55,
   qualityProfile: "high",
+  atmosphereQuality: "high",
   glowEnabled: true,
   glowIntensity: 1,
   cinematicFxEnabled: false,
@@ -354,6 +486,7 @@ const cameraStudioSettings: CameraStudioSettings = {
   jitter: 2.5,
   chromaticAberration: 2.2
 };
+let cameraKeyframeEasing: PointKeyframeEasing = "linear";
 
 let sceneCameraStudioControlsBound = false;
 let sceneCameraFxOverlayCanvas: HTMLCanvasElement | null = null;
@@ -411,6 +544,43 @@ let buildProjectSnapshotRef: () => ProjectSnapshot | null = () => {
 };
 let zoomToLayersRef: (layers: LayerData[]) => void = () => undefined;
 const loadingOverlay = createLoadingOverlayController();
+const bootController = createBootController({
+  resolveHosts: () => ({
+    mapHost: document.querySelector("#arcgisMap") as ArcgisViewHostElement | null,
+    sceneHost: document.querySelector("#arcgisScene") as ArcgisViewHostElement | null
+  }),
+  getCurrentViewMode: () => currentViewMode,
+  onHostsResolved: ({ mapHost, sceneHost }) => {
+    map2DHostEl = mapHost;
+    scene3DHostEl = sceneHost;
+  },
+  onBootReady: () => {
+    loadingOverlay.showLoadingOverlay();
+    setMapHostVisibility(currentViewMode);
+    setSceneModeButtonLabel();
+    updateBasemapOptionsForViewMode(currentViewMode);
+    bindSceneDaylightPersistence();
+  },
+  onViewReady: (nextView, mode) => {
+    if (!view || currentViewMode === mode) {
+      view = nextView as any;
+      if (!hasInitialized) {
+        initializeApp();
+        loadingOverlay.finishLoadingOverlay();
+      } else if (currentViewMode === mode) {
+        bindActiveViewHandlers();
+      }
+    }
+  },
+  onSceneViewDetected: (sceneView) => {
+    if (sceneView) {
+      applySceneCameraStudioSettings(sceneView as any);
+    }
+  },
+  onBootFailure: (message) => {
+    console.error(message);
+  }
+});
 const timelineController = createTimelineController(timelineState, {
   getEl,
   getGraphicsLayers: () => graphicsLayers,
@@ -698,6 +868,9 @@ function ensureSketchViewModel(layer: GraphicsLayer) {
       if (layerData.type === "point") {
         const style = layerData.pointStyle ?? defaultPointStyle;
         graphic.symbol = buildPointSymbolForCurrentView(style);
+        if (currentViewMode === "3d" && getPointWebStyleSymbolSpec(style)) {
+          void applyPointModelSymbolToLayer(layerData, style);
+        }
       } else if (layerData.type === "polyline") {
         const style = layerData.lineStyle ?? defaultLineStyle;
         graphic.symbol = buildLineSymbolForCurrentView(style);
@@ -758,8 +931,8 @@ function setSceneModeButtonLabel() {
 }
 
 function getSceneView3D() {
-  const sceneView = scene3DHostEl?.view;
-  if (!sceneView || String(sceneView.type) !== "3d") {
+  const sceneView = scene3DHostEl?.view as any;
+  if (!sceneView || String(sceneView?.type) !== "3d") {
     return null;
   }
   return sceneView;
@@ -1040,6 +1213,10 @@ function syncSceneCameraStudioControlValues() {
   if (qualitySelect) {
     setCalciteValue(qualitySelect, cameraStudioSettings.qualityProfile);
   }
+  const atmosphereQualitySelect = document.getElementById("scene-atmosphere-quality") as HTMLElement | null;
+  if (atmosphereQualitySelect) {
+    setCalciteValue(atmosphereQualitySelect, cameraStudioSettings.atmosphereQuality);
+  }
   const noiseSlider = document.getElementById("scene-camera-fx-noise") as HTMLElement | null;
   if (noiseSlider) {
     setCalciteValue(noiseSlider, Math.round(cameraStudioSettings.noiseLevel));
@@ -1074,6 +1251,21 @@ function syncSceneCameraStudioControlValues() {
 function applySceneCameraStudioSettings(sceneViewOverride?: any) {
   const sceneView = sceneViewOverride ?? getSceneView3D();
   if (sceneView && String(sceneView.type) === "3d") {
+    const constraints = (sceneView as any).constraints;
+    const altitude = constraints?.altitude as any;
+    const hasAltitudeRange =
+      Number(altitude?.min) === SCENE_ALTITUDE_MIN && Number(altitude?.max) === SCENE_ALTITUDE_MAX;
+    if (!hasAltitudeRange) {
+      (sceneView as any).constraints = {
+        ...(constraints ?? {}),
+        altitude: {
+          ...(typeof altitude === "object" && altitude ? altitude : {}),
+          min: SCENE_ALTITUDE_MIN,
+          max: SCENE_ALTITUDE_MAX
+        }
+      };
+    }
+
     const qualityProfile = cameraStudioSettings.qualityProfile;
     if (sceneView.qualityProfile !== qualityProfile) {
       sceneView.qualityProfile = qualityProfile;
@@ -1108,6 +1300,27 @@ function applySceneCameraStudioSettings(sceneViewOverride?: any) {
         }
       };
     }
+
+    const atmosphereQuality = cameraStudioSettings.atmosphereQuality;
+    const atmosphere = sceneView.environment?.atmosphere as any;
+    if (atmosphere && typeof atmosphere === "object") {
+      if (String(atmosphere.quality || "") !== atmosphereQuality) {
+        try {
+          atmosphere.quality = atmosphereQuality;
+        } catch {
+          // ignore environments that do not expose atmosphere quality
+        }
+      }
+    } else {
+      sceneView.environment = {
+        ...(sceneView.environment || {}),
+        atmosphere: {
+          ...(typeof atmosphere === "object" && atmosphere ? atmosphere : {}),
+          quality: atmosphereQuality
+        }
+      };
+    }
+
     const clampedFov = clamp(cameraStudioSettings.fov, CAMERA_FOV_MIN, CAMERA_FOV_MAX);
     cameraStudioSettings.fov = clampedFov;
     const camera = sceneView.camera?.clone?.();
@@ -1165,6 +1378,10 @@ function applySceneSettingsSnapshot(sceneSettings: any, sceneViewOverride?: any)
     cameraStudioSettings.qualityProfile = readSceneQualityProfile(
       cameraStudio.qualityProfile,
       cameraStudioSettings.qualityProfile
+    );
+    cameraStudioSettings.atmosphereQuality = readSceneAtmosphereQuality(
+      cameraStudio.atmosphereQuality,
+      cameraStudioSettings.atmosphereQuality
     );
     if (typeof cameraStudio.glowEnabled === "boolean") {
       cameraStudioSettings.glowEnabled = cameraStudio.glowEnabled;
@@ -1244,6 +1461,7 @@ function bindSceneCameraStudioControls() {
   if (sceneCameraStudioControlsBound) return;
   const fovSlider = document.getElementById("scene-camera-fov") as any;
   const qualitySelect = document.getElementById("scene-quality-profile") as any;
+  const atmosphereQualitySelect = document.getElementById("scene-atmosphere-quality") as any;
   const glowSwitch = document.getElementById("scene-glow-enabled") as any;
   const cinematicFxSwitch = document.getElementById("scene-camera-fx-enabled") as any;
   const noiseSlider = document.getElementById("scene-camera-fx-noise") as any;
@@ -1251,7 +1469,7 @@ function bindSceneCameraStudioControls() {
   const vignetteSlider = document.getElementById("scene-camera-fx-vignette") as any;
   const jitterSlider = document.getElementById("scene-camera-fx-jitter") as any;
   const chromaticSlider = document.getElementById("scene-camera-fx-chromatic") as any;
-  if (!fovSlider || !qualitySelect || !glowSwitch) return;
+  if (!fovSlider || !qualitySelect || !atmosphereQualitySelect || !glowSwitch) return;
   if (!cinematicFxSwitch || !noiseSlider || !scanlineSlider || !vignetteSlider) return;
   if (!jitterSlider || !chromaticSlider) return;
   sceneCameraStudioControlsBound = true;
@@ -1333,6 +1551,15 @@ function bindSceneCameraStudioControls() {
     scheduleProjectSave();
   };
 
+  const handleAtmosphereQualityChange = () => {
+    cameraStudioSettings.atmosphereQuality = readSceneAtmosphereQuality(
+      atmosphereQualitySelect.value,
+      cameraStudioSettings.atmosphereQuality
+    );
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
   const handleGlowToggle = () => {
     cameraStudioSettings.glowEnabled = Boolean(glowSwitch.checked);
     applySceneCameraStudioSettings();
@@ -1342,12 +1569,14 @@ function bindSceneCameraStudioControls() {
   const handleCinematicFxToggle = () => {
     cameraStudioSettings.cinematicFxEnabled = Boolean(cinematicFxSwitch.checked);
     applySceneCameraStudioSettings();
+    updatePrimaryActionsState();
     scheduleProjectSave();
   };
 
   fovSlider.addEventListener("calciteSliderInput", handleFovUpdate);
   fovSlider.addEventListener("calciteSliderChange", handleFovUpdate);
   qualitySelect.addEventListener("calciteSelectChange", handleQualityChange);
+  atmosphereQualitySelect.addEventListener("calciteSelectChange", handleAtmosphereQualityChange);
   glowSwitch.addEventListener("calciteSwitchChange", handleGlowToggle);
   noiseSlider.addEventListener("calciteSliderInput", handleNoiseUpdate);
   noiseSlider.addEventListener("calciteSliderChange", handleNoiseUpdate);
@@ -1801,7 +2030,11 @@ function applyLayerModeProperties(layerData: LayerData) {
   const layerAny = layerData.layer as any;
   const geometryType = layerData.type === "feature" ? String(layerAny.geometryType || "") : layerData.type;
   if (geometryType === "polygon") {
-    layerAny.elevationInfo = { mode: "on-the-ground" };
+    const polygonOffset = Number(layerData.polygonZOffset);
+    layerAny.elevationInfo = {
+      mode: "relative-to-ground",
+      offset: Number.isFinite(polygonOffset) ? polygonOffset : 0
+    };
     return;
   }
   if (geometryType === "polyline") {
@@ -1809,6 +2042,13 @@ function applyLayerModeProperties(layerData: LayerData) {
       layerData.type === "polyline"
         ? { mode: "relative-to-ground", offset: 1 }
         : { mode: "on-the-ground" };
+    return;
+  }
+  if (geometryType === "point" || geometryType === "multipoint") {
+    const followTerrain = layerData.pointFollowTerrain3D !== false;
+    layerAny.elevationInfo = followTerrain
+      ? { mode: "relative-to-ground", offset: 0.5 }
+      : { mode: "absolute-height" };
     return;
   }
   layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0.5 };
@@ -1843,6 +2083,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     updateLayersList();
     updateTimeline();
     updateAnimationOptions();
+    filterPointStyles();
     updateGoogle3DTilesToggleVisibility();
     ensureGoogle3DTilesLayerState();
     return;
@@ -1892,6 +2133,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     updateLayersList();
     updateTimeline();
     updateAnimationOptions();
+    filterPointStyles();
     if (selectedLayerIndex >= 0) {
       selectLayer(selectedLayerIndex, false);
     }
@@ -3523,8 +3765,8 @@ function collapseSceneExpandPanelsForExport() {
 
 async function startFrameExport() {
   if (isFrameExporting || exportState.isExporting) return;
-  if (!hasPlayableAnimation()) {
-    setGifExportStatus("Add at least one animation to enable export.");
+  if (!canExportProject()) {
+    setGifExportStatus("Add an animation, camera keyframe, or camera FX to enable export.");
     return;
   }
 
@@ -4004,18 +4246,37 @@ function hasPlayableAnimation() {
   );
 }
 
+function hasCameraMotionKeyframes() {
+  const viewTrack = getViewTrackLayerData();
+  return Boolean(viewTrack && hasPointKeyframes(viewTrack));
+}
+
+function hasCameraEffectsForExport() {
+  return currentViewMode === "3d" && Boolean(cameraStudioSettings.cinematicFxEnabled);
+}
+
+function canExportProject() {
+  return hasPlayableAnimation() || hasCameraEffectsForExport();
+}
+
 function updatePrimaryActionsState() {
-  const hasGraphics = graphicsLayers.some((layerData) => {
+  const hasDrawableGraphics = graphicsLayers.some((layerData) => {
+    if (isViewTrackLayer(layerData)) return false;
     const graphics = (layerData.layer as any)?.graphics;
     const count = graphics?.length ?? graphics?.items?.length ?? 0;
     return count > 0;
   });
-  const hasSelection = selectedLayerIndex >= 0 && !isViewTrackLayer(graphicsLayers[selectedLayerIndex]);
+  const hasCameraKeyframes = hasCameraMotionKeyframes();
+  const selectedLayer = selectedLayerIndex >= 0 ? graphicsLayers[selectedLayerIndex] : null;
+  const hasSelection =
+    selectedLayerIndex >= 0 &&
+    (!isViewTrackLayer(selectedLayer) || (selectedLayer ? hasPointKeyframes(selectedLayer) : false));
+  const hasStyleableContent = hasDrawableGraphics || hasCameraKeyframes;
   const mapActionButtons = document.getElementById("map-action-buttons");
   const onboardingStep = document.getElementById("onboarding-step-draw");
   const onboardingStyleStep = document.getElementById("onboarding-step-style");
   if (mapActionButtons) {
-    mapActionButtons.style.display = hasGraphics && hasSelection ? "flex" : "none";
+    mapActionButtons.style.display = hasSelection ? "flex" : "none";
   }
   if (onboardingStep || onboardingStyleStep) {
     const setStepperState = (
@@ -4048,9 +4309,9 @@ function updatePrimaryActionsState() {
     };
 
     const onboardingExportStep = document.getElementById("onboarding-step-export");
-    const exportEnabled = hasGraphics;
+    const exportEnabled = canExportProject();
     const hasAnimations = hasPlayableAnimation();
-    if (hasGraphics) {
+    if (hasStyleableContent) {
       setStepperState(onboardingStep, { selected: false, complete: true, disabled: true });
       setStepperState(onboardingStyleStep, { selected: true, disabled: false, complete: hasAnimations });
       setStepperState(onboardingExportStep, { selected: false, disabled: !exportEnabled });
@@ -4063,12 +4324,12 @@ function updatePrimaryActionsState() {
 
   const exportButton = document.getElementById("export-action-btn");
   if (exportButton) {
-    if (hasPlayableAnimation()) {
+    if (canExportProject()) {
       exportButton.removeAttribute("disabled");
       exportButton.removeAttribute("title");
     } else {
       exportButton.setAttribute("disabled", "");
-      exportButton.setAttribute("title", "Add at least one animation to enable export.");
+      exportButton.setAttribute("title", "Add an animation, camera keyframe, or camera FX to enable export.");
     }
   }
 }
@@ -4083,6 +4344,44 @@ function getViewTrackLayerName(mode: ViewMode = currentViewMode) {
 
 function getViewTrackLayerData() {
   return graphicsLayers.find((layerData) => isViewTrackLayer(layerData)) ?? null;
+}
+
+function getCameraAnimationEasing(layerData?: LayerData | null): PointKeyframeEasing {
+  if (!layerData || !isViewTrackLayer(layerData)) {
+    return cameraKeyframeEasing;
+  }
+  const frames = layerData.pointKeyframes ?? [];
+  for (const frame of frames) {
+    const easing = normalizePointKeyframeEasing(frame?.easing);
+    if (easing) {
+      return easing;
+    }
+  }
+  return cameraKeyframeEasing;
+}
+
+function syncCameraAnimationEasingControl(layerData?: LayerData | null) {
+  const select = document.getElementById("camera-keyframe-easing") as any;
+  if (!select) return;
+  const easing = getCameraAnimationEasing(layerData);
+  cameraKeyframeEasing = easing;
+  if (String(select.value || "") !== easing) {
+    setCalciteValue(select as HTMLElement, easing);
+  }
+}
+
+function setCameraAnimationEasing(value: unknown) {
+  const easing = normalizePointKeyframeEasing(value) ?? "linear";
+  cameraKeyframeEasing = easing;
+  const viewTrack = getViewTrackLayerData();
+  const frames = viewTrack?.pointKeyframes;
+  if (!frames?.length) return;
+  frames.forEach((frame) => {
+    frame.easing = easing;
+  });
+  updateTimeline();
+  applyAnimationsAtTime(currentTime);
+  scheduleProjectSave();
 }
 
 function getCurrentViewTrackKeyframe(time: number) {
@@ -4224,14 +4523,62 @@ function upsertLayerKeyframeAtCurrentTime(layerData: LayerData) {
         tilt: frame.tilt,
         fov: frame.fov,
         rotation: frame.rotation,
-        scale: frame.scale
+        scale: frame.scale,
+        easing: cameraKeyframeEasing
       }
     );
     return;
   }
-  const graphic = (layerData.layer.graphics as any).getItemAt?.(0) ?? layerData.layer.graphics?.items?.[0];
-  if (graphic?.geometry?.type === "point") {
-    upsertPointKeyframe(layerData, graphic.geometry as Point, currentTime);
+  const collection = layerData.layer.graphics as any;
+  const graphics: any[] = Array.isArray(collection?.items)
+    ? collection.items
+    : typeof collection?.toArray === "function"
+      ? collection.toArray()
+      : [];
+  const toKeyframePoint = (geometry: any): Point | null => {
+    if (!geometry) return null;
+    const x = Number(geometry?.x);
+    const y = Number(geometry?.y);
+    const z = Number(geometry?.z);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      return new Point({
+        x,
+        y,
+        spatialReference: geometry?.spatialReference ?? view?.spatialReference,
+        ...(Number.isFinite(z) ? { z } : {})
+      });
+    }
+    const firstPoint = Array.isArray(geometry?.points) ? geometry.points[0] : null;
+    if (Array.isArray(firstPoint) && firstPoint.length >= 2) {
+      const px = Number(firstPoint[0]);
+      const py = Number(firstPoint[1]);
+      const pz = Number(firstPoint[2]);
+      if (Number.isFinite(px) && Number.isFinite(py)) {
+        return new Point({
+          x: px,
+          y: py,
+          spatialReference: geometry?.spatialReference ?? view?.spatialReference,
+          ...(Number.isFinite(pz) ? { z: pz } : {})
+        });
+      }
+    }
+    return null;
+  };
+  const firstPointGraphic = graphics.find((graphic: any) => Boolean(toKeyframePoint(graphic?.geometry)));
+  const pointGeometry = toKeyframePoint(firstPointGraphic?.geometry);
+  if (pointGeometry) {
+    const symbolRotation = getPointSymbolRotation(firstPointGraphic?.symbol);
+    const styleRotation = Number(layerData.pointStyle?.angle);
+    const keyframeRotation = Number.isFinite(symbolRotation)
+      ? symbolRotation
+      : Number.isFinite(styleRotation)
+        ? styleRotation
+        : undefined;
+    upsertPointKeyframe(layerData, pointGeometry, currentTime, {
+      z: Number.isFinite(Number((pointGeometry as any)?.z)) ? Number((pointGeometry as any).z) : undefined,
+      heading: Number.isFinite(Number(keyframeRotation)) ? Number(keyframeRotation) : undefined,
+      rotation: Number.isFinite(Number(keyframeRotation)) ? Number(keyframeRotation) : undefined
+    });
   }
 }
 
@@ -4313,7 +4660,7 @@ function applyViewTrackKeyframesSnapshot(rawFrames: any) {
       const fov = Number(frame?.fov);
       const rotation = Number(frame?.rotation);
       const scale = Number(frame?.scale);
-      const easing = frame?.easing === "ease-in-out" ? "ease-in-out" : frame?.easing === "linear" ? "linear" : undefined;
+      const easing = normalizePointKeyframeEasing(frame?.easing);
       return {
         time,
         x,
@@ -4330,9 +4677,13 @@ function applyViewTrackKeyframesSnapshot(rawFrames: any) {
     })
     .filter(isPointKeyframe)
     .sort((a: PointKeyframe, b: PointKeyframe) => a.time - b.time);
+  const firstEasing = normalizePointKeyframeEasing(viewTrack.pointKeyframes?.[0]?.easing);
+  cameraKeyframeEasing = firstEasing ?? "linear";
 }
 
 function normalizePointKeyframeEasing(value: unknown): PointKeyframeEasing | undefined {
+  if (value === "ease-in") return "ease-in";
+  if (value === "ease-out") return "ease-out";
   if (value === "ease-in-out") return "ease-in-out";
   if (value === "linear") return "linear";
   return undefined;
@@ -4368,6 +4719,7 @@ function upsertPointKeyframe(
   }
   keyframes.sort((a, b) => a.time - b.time);
   layerData.pointKeyframes = keyframes;
+  updatePrimaryActionsState();
   scheduleProjectSave();
 }
 
@@ -4379,6 +4731,7 @@ function removePointKeyframeAt(layerIdx: number, keyframeIdx: number) {
   keyframes.splice(keyframeIdx, 1);
   layerData.pointKeyframes = keyframes;
   updateTimeline();
+  updatePrimaryActionsState();
   scheduleProjectSave();
 }
 
@@ -4419,6 +4772,12 @@ function interpolateAngleDegrees(startValue: unknown, endValue: unknown, t: numb
 }
 
 function applyPointKeyframeEasing(t: number, easing: unknown) {
+  if (easing === "ease-in") {
+    return t * t;
+  }
+  if (easing === "ease-out") {
+    return 1 - (1 - t) * (1 - t);
+  }
   if (easing === "ease-in-out") {
     return t * t * (3 - 2 * t);
   }
@@ -4466,165 +4825,11 @@ function ensurePlaceholderAnimation(layerData: LayerData) {
 }
 
 export function bootApp() {
-  if (hasBooted) return;
-  hasBooted = true;
-  loadingOverlay.showLoadingOverlay();
-
-  map2DHostEl = document.querySelector("#arcgisMap") as any;
-  scene3DHostEl = document.querySelector("#arcgisScene") as any;
-  if (!map2DHostEl) return;
-
-  setMapHostVisibility(currentViewMode);
-  setSceneModeButtonLabel();
-  updateBasemapOptionsForViewMode(currentViewMode);
-  bindSceneDaylightPersistence();
-
-  const maybeActivateReadyView = (nextView: any, mode: ViewMode) => {
-    if (!nextView) return;
-    if (!view || currentViewMode === mode) {
-      view = nextView;
-      if (!hasInitialized) {
-        initializeApp();
-        loadingOverlay.finishLoadingOverlay();
-      } else if (currentViewMode === mode) {
-        bindActiveViewHandlers();
-      }
-    }
-  };
-
-  if (map2DHostEl.view && currentViewMode === "2d") {
-    maybeActivateReadyView(map2DHostEl.view, "2d");
-  }
-  if (scene3DHostEl?.view && currentViewMode === "3d") {
-    maybeActivateReadyView(scene3DHostEl.view, "3d");
-  }
-  if (scene3DHostEl?.view) {
-    applySceneCameraStudioSettings(scene3DHostEl.view);
-  }
-
-  map2DHostEl.addEventListener("arcgisViewReadyChange", (event: any) => {
-    maybeActivateReadyView(event?.target?.view, "2d");
-  });
-  scene3DHostEl?.addEventListener("arcgisViewReadyChange", (event: any) => {
-    const sceneView = event?.target?.view;
-    maybeActivateReadyView(sceneView, "3d");
-    applySceneCameraStudioSettings(sceneView);
-  });
+  bootController.boot();
 }
 
 export function getAnimationSettingsSnapshot() {
   return buildAnimationSettingsSnapshot(graphicsLayers, timelineController.getTimelineDurationOverride());
-}
-
-function arcgisGeometryToGeoJSON(geometry: any) {
-  if (!geometry) return null;
-  if (geometry.spatialReference?.isWebMercator) {
-    geometry = webMercatorUtils.webMercatorToGeographic(geometry);
-  }
-  if (geometry.type === "point") {
-    return { type: "Point", coordinates: [geometry.x, geometry.y] };
-  }
-  if (geometry.type === "multipoint") {
-    return { type: "MultiPoint", coordinates: geometry.points ?? [] };
-  }
-  if (geometry.type === "polyline") {
-    const paths = geometry.paths ?? [];
-    if (paths.length === 1) {
-      return { type: "LineString", coordinates: paths[0] };
-    }
-    return { type: "MultiLineString", coordinates: paths };
-  }
-  if (geometry.type === "polygon") {
-    const rings = geometry.rings ?? [];
-    if (geometry.isMultipart && rings.length > 1) {
-      return { type: "MultiPolygon", coordinates: rings.map((ring: any) => [ring]) };
-    }
-    return { type: "Polygon", coordinates: rings };
-  }
-  return null;
-}
-
-function toGeographicGeometry(geometry: any) {
-  if (!geometry) return geometry;
-  const spatialRef = geometry.spatialReference;
-  if (spatialRef?.isGeographic || spatialRef?.wkid === 4326) {
-    return geometry;
-  }
-  if (spatialRef?.isWebMercator) {
-    return webMercatorUtils.webMercatorToGeographic(geometry);
-  }
-  return geometry;
-}
-
-function toViewGeometry(geometry: any) {
-  if (!geometry || !view?.spatialReference) return geometry;
-  const spatialRef = geometry.spatialReference;
-  const viewSpatialRef = view.spatialReference;
-  if (!spatialRef) return geometry;
-  if (viewSpatialRef?.isWebMercator && (spatialRef.isGeographic || spatialRef.wkid === 4326)) {
-    return webMercatorUtils.geographicToWebMercator(geometry) ?? geometry;
-  }
-  if ((viewSpatialRef?.isGeographic || viewSpatialRef?.wkid === 4326) && spatialRef.isWebMercator) {
-    return webMercatorUtils.webMercatorToGeographic(geometry) ?? geometry;
-  }
-  return geometry;
-}
-
-function ensurePolylineGeometryHasZ(geometry: any) {
-  if (!geometry || geometry.type !== "polyline") return geometry;
-  const paths = (geometry.paths ?? []).map((path: any[]) =>
-    path.map((coord: any) => {
-      if (!Array.isArray(coord) || coord.length < 2) return coord;
-      const x = Number(coord[0]);
-      const y = Number(coord[1]);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return coord;
-      const z = Number(coord[2]);
-      return [x, y, Number.isFinite(z) ? z : 0];
-    })
-  );
-  return new Polyline({
-    paths,
-    spatialReference: geometry.spatialReference,
-    hasZ: true
-  });
-}
-
-function prepareLayerGeometryForSketch(layerData: LayerData) {
-  layerData.layer.graphics.forEach((graphic: any) => {
-    if (!graphic?.geometry) return;
-    let prepared = toViewGeometry(graphic.geometry);
-    if (currentViewMode === "3d" && layerData.type === "polyline") {
-      prepared = ensurePolylineGeometryHasZ(prepared);
-    }
-    if (prepared) {
-      graphic.geometry = prepared;
-    }
-  });
-}
-
-function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
-  if (!geometry) return null;
-  if (geometry.type === "Point") {
-    const [x, y] = geometry.coordinates ?? [];
-    return new Point({ x, y, spatialReference });
-  }
-  if (geometry.type === "MultiPoint") {
-    return new Multipoint({ points: geometry.coordinates ?? [], spatialReference });
-  }
-  if (geometry.type === "LineString") {
-    return new Polyline({ paths: [geometry.coordinates ?? []], spatialReference });
-  }
-  if (geometry.type === "MultiLineString") {
-    return new Polyline({ paths: geometry.coordinates ?? [], spatialReference });
-  }
-  if (geometry.type === "Polygon") {
-    return new Polygon({ rings: geometry.coordinates ?? [], spatialReference });
-  }
-  if (geometry.type === "MultiPolygon") {
-    const rings = (geometry.coordinates ?? []).flat();
-    return new Polygon({ rings, spatialReference });
-  }
-  return null;
 }
 
   function initializeApp() {
@@ -4837,33 +5042,11 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   });
   const pointStyleSearch = document.getElementById("point-style-search") as HTMLInputElement | null;
   if (pointStyleSearch) {
-    const filterPointStyles = () => {
-      const query = pointStyleSearch.value.trim().toLowerCase();
-      const container = getEl("point-style-options");
-      const buttons = Array.from(container.querySelectorAll(".style-option-btn")) as HTMLElement[];
-      buttons.forEach((button) => {
-        const label = button.textContent?.trim().toLowerCase() || "";
-        const matches = !query || label.includes(query);
-        button.style.display = matches ? "" : "none";
-      });
-      const titles = Array.from(container.querySelectorAll(".style-option-section-title")) as HTMLElement[];
-      titles.forEach((title) => {
-        let next: Element | null = title.nextElementSibling;
-        let hasVisible = false;
-        while (next && !next.classList.contains("style-option-section-title")) {
-          if (next instanceof HTMLElement && next.style.display !== "none") {
-            hasVisible = true;
-            break;
-          }
-          next = next.nextElementSibling;
-        }
-        title.style.display = !query || hasVisible ? "" : "none";
-      });
-    };
     pointStyleSearch.addEventListener("input", filterPointStyles);
     pointStyleSearch.addEventListener("change", filterPointStyles);
     pointStyleSearch.addEventListener("calciteInputInput", filterPointStyles as EventListener);
     pointStyleSearch.addEventListener("calciteInputChange", filterPointStyles as EventListener);
+    filterPointStyles();
   }
   getEl("point-size-input").addEventListener("calciteSliderInput", () => {
     const sizeInput = getEl("point-size-input") as any;
@@ -4893,6 +5076,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   getEl("point-angle-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
   getEl("point-xoffset-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
   getEl("point-yoffset-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("point-follow-terrain-toggle").addEventListener("calciteSwitchChange", () => applyStyleSettings(false));
 
   getEl("line-style-options").addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null;
@@ -4938,6 +5122,7 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     applyStyleSettings(false);
   });
   getEl("polygon-outline-width").addEventListener("calciteSliderInput", () => applyStyleSettings(false));
+  getEl("polygon-zoffset-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
 
   getEl("layer-blend-mode-select").addEventListener("calciteSelectChange", () =>
     applyStyleSettings(false)
@@ -4972,12 +5157,18 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
   getEl("text-content-input").addEventListener("calciteInputInput", handleTextContentInput);
   getEl("text-content-input").addEventListener("calciteInputChange", handleTextContentInput);
   getEl("text-content-input").addEventListener("input", handleTextContentInput);
+  getEl("text-render-mode-select").addEventListener("calciteSelectChange", () => {
+    const renderModeSelect = getEl("text-render-mode-select") as any;
+    updateTextCalloutControlVisibility(String(renderModeSelect?.value || "scene-3d"));
+    applyTextSettings(false);
+  });
   getEl("text-font-select").addEventListener("calciteSelectChange", () => applyTextSettings(false));
   getEl("text-size-slider").addEventListener("calciteSliderInput", () => applyTextSettings(false));
   getEl("text-color-input").addEventListener("input", () => applyTextSettings(false));
   getEl("text-color-input").addEventListener("change", () => applyTextSettings(false));
   getEl("text-italic-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
   getEl("text-underline-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
+  getEl("text-3d-callout-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
 
   getEl("play-button").addEventListener("click", handlePlayFromStart);
   getEl("scene-mode-btn").addEventListener("click", () => {
@@ -5100,6 +5291,10 @@ function geoJSONToArcGISGeometry(geometry: any, spatialReference: any) {
     "calciteSelectChange",
     handleTimelineKeyframeEasingChange as EventListener
   );
+  getEl("camera-keyframe-easing").addEventListener("calciteSelectChange", (event: Event) => {
+    const value = String((event.target as any)?.value || "linear");
+    setCameraAnimationEasing(value);
+  });
   getEl("timeline-duration-autofit").addEventListener("click", handleTimelineDurationAutoFit);
   getEl("timeline-snap-toggle").addEventListener("click", toggleTimelineSnap);
   getEl("timeline-grid-toggle").addEventListener("click", toggleTimelineGrid);
@@ -5621,12 +5816,14 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
 
   if (type === "point") {
     layerData.pointStyle = { ...defaultPointStyle };
+    layerData.pointFollowTerrain3D = true;
     layerData.layerEffectsEnabled = true;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
     layerData.layerEffectsEnabled = true;
   } else if (type === "polygon") {
     layerData.polygonStyle = { ...defaultPolygonStyle };
+    layerData.polygonZOffset = 0;
     layerData.layerEffectsEnabled = true;
   }
 
@@ -5678,7 +5875,7 @@ function beginTextPlacement(layerIndex: number) {
 
   textPlacementHandle = view.on("click", (event: any) => {
     const graphic = new Graphic({
-      geometry: toGeographicGeometry(event.mapPoint),
+      geometry: toGeographicGeometry(event.mapPoint) as any,
       symbol: buildTextSymbolForCurrentView(layerData)
     });
 
@@ -5730,12 +5927,14 @@ async function startDrawing(type: LayerType) {
 
   if (type === "point") {
     layerData.pointStyle = { ...defaultPointStyle };
+    layerData.pointFollowTerrain3D = true;
     layerData.layerEffectsEnabled = true;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
     layerData.layerEffectsEnabled = true;
   } else if (type === "polygon") {
     layerData.polygonStyle = { ...defaultPolygonStyle };
+    layerData.polygonZOffset = 0;
     layerData.layerEffectsEnabled = true;
   }
 
@@ -5750,6 +5949,8 @@ async function startDrawing(type: LayerType) {
     layerData.textFontFamily = "sans-serif";
     layerData.textItalic = false;
     layerData.textUnderline = false;
+    layerData.textRenderMode = "scene-3d";
+    layerData.textCalloutLine = false;
     pendingTextPlacement = { layerIndex };
     selectLayer(layerIndex, false);
     openTextSettingsModal();
@@ -5810,33 +6011,38 @@ function updateLayersList() {
     const content = document.createElement("div");
     content.className = "layer-item-content";
 
-    if (index === selectedLayerIndex && !isLockedLayer) {
+    if (index === selectedLayerIndex) {
       const animationSection = document.createElement("div");
       animationSection.className = "layer-section";
 
       const animationTitle = document.createElement("div");
       animationTitle.className = "layer-section-title";
-      animationTitle.textContent = "Animation Type";
+      animationTitle.textContent = isLockedLayer
+        ? currentViewMode === "3d"
+          ? "Camera Motion"
+          : "View Motion"
+        : "Animation Type";
       animationSection.appendChild(animationTitle);
 
       const host = document.createElement("div");
       host.id = `animation-settings-host-${index}`;
       animationSection.appendChild(host);
 
-      const styleSection = document.createElement("div");
-      styleSection.className = "layer-section";
-
-      const styleTitle = document.createElement("div");
-      styleTitle.className = "layer-section-title";
-      styleTitle.textContent = "Colour and styles";
-      styleSection.appendChild(styleTitle);
-
-      const styleHost = document.createElement("div");
-      styleHost.id = `style-settings-host-${index}`;
-      styleSection.appendChild(styleHost);
-
       content.appendChild(animationSection);
-      content.appendChild(styleSection);
+      if (!isLockedLayer) {
+        const styleSection = document.createElement("div");
+        styleSection.className = "layer-section";
+
+        const styleTitle = document.createElement("div");
+        styleTitle.className = "layer-section-title";
+        styleTitle.textContent = "Colour and styles";
+        styleSection.appendChild(styleTitle);
+
+        const styleHost = document.createElement("div");
+        styleHost.id = `style-settings-host-${index}`;
+        styleSection.appendChild(styleHost);
+        content.appendChild(styleSection);
+      }
     }
 
     item.appendChild(content);
@@ -5939,7 +6145,10 @@ function selectLayer(index: number, focusGraphic = true, selectedGraphic?: any) 
     if (layerData.type === "polyline" || layerData.type === "polygon") {
       restoreLayerGeometry(layerData);
     }
-    prepareLayerGeometryForSketch(layerData);
+    prepareLayerGeometryForSketch(layerData, {
+      currentViewMode,
+      viewSpatialReference: view?.spatialReference
+    });
   }
 
   const graphic =
@@ -5950,7 +6159,7 @@ function selectLayer(index: number, focusGraphic = true, selectedGraphic?: any) 
 
   if (focusGraphic && !hasPathAnimation(layerData) && graphic) {
     if (allowEditing) {
-      const prepared = toViewGeometry(graphic.geometry);
+      const prepared = toViewGeometry(graphic.geometry, view?.spatialReference);
       if (prepared) {
         graphic.geometry = prepared;
       }
@@ -6111,14 +6320,19 @@ async function duplicateLayer(index: number) {
       featureHideNulls: layerData.featureHideNulls,
       featureKeepVisible: layerData.featureKeepVisible,
       pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
+      pointFollowTerrain3D: layerData.pointFollowTerrain3D,
       lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
       polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
+      polygonZOffset: layerData.polygonZOffset,
       layerBlendMode: layerData.layerBlendMode,
       layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
       layerEffectsEnabled: layerData.layerEffectsEnabled
     };
     if (!duplicate.featureFields || !duplicate.featureFields.length) {
       duplicate.featureFields = getFeatureLayerFields(featureLayer);
+    }
+    if (featureLayer.geometryType === "polygon" && !Number.isFinite(Number(duplicate.polygonZOffset))) {
+      duplicate.polygonZOffset = 0;
     }
     graphicsLayers.push(duplicate);
     selectLayer(graphicsLayers.length - 1);
@@ -6146,14 +6360,18 @@ async function duplicateLayer(index: number) {
     animations: layerData.animations.map((anim) => ({ ...anim })),
     pointKeyframes: layerData.pointKeyframes?.map((frame) => ({ ...frame })),
     pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
+    pointFollowTerrain3D: layerData.pointFollowTerrain3D,
     lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
     polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
+    polygonZOffset: layerData.polygonZOffset,
     textContent: layerData.textContent,
     textSize: layerData.textSize,
     textColor: layerData.textColor,
     textFontFamily: layerData.textFontFamily,
     textItalic: layerData.textItalic,
     textUnderline: layerData.textUnderline,
+    textRenderMode: layerData.textRenderMode,
+    textCalloutLine: layerData.textCalloutLine,
     layerBlendMode: layerData.layerBlendMode,
     layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
     layerEffectsEnabled: layerData.layerEffectsEnabled
@@ -6164,6 +6382,9 @@ async function duplicateLayer(index: number) {
     duplicate.lineStyle = duplicate.lineStyle ?? { ...defaultLineStyle };
   } else if (layerData.type === "polygon") {
     duplicate.polygonStyle = duplicate.polygonStyle ?? { ...defaultPolygonStyle };
+    duplicate.polygonZOffset = Number.isFinite(Number(duplicate.polygonZOffset))
+      ? Number(duplicate.polygonZOffset)
+      : 0;
   }
 
   graphicsLayers.push(duplicate);
@@ -6264,6 +6485,7 @@ function syncStylePanelFromLayer(layerData: LayerData) {
 
   if (styleType === "point") {
     const style = layerData.pointStyle ?? defaultPointStyle;
+    const followTerrainToggle = document.getElementById("point-follow-terrain-toggle") as any;
     setPointStyleSelection(style.style);
     setCalciteValue(getEl("point-size-input"), style.size);
     lastPointSizeInput = Number(style.size) || DEFAULT_PIN_SIZE;
@@ -6273,8 +6495,16 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     setCalciteValue(getEl("point-angle-input"), style.angle ?? 0);
     setCalciteValue(getEl("point-xoffset-input"), style.xoffset ?? 0);
     setCalciteValue(getEl("point-yoffset-input"), style.yoffset ?? 0);
+    if (followTerrainToggle) {
+      followTerrainToggle.checked = layerData.pointFollowTerrain3D !== false;
+    }
     updatePointAnimationPreview(style.color, style.outlineColor, style.style);
     updatePointStyleOptionColors(style.color, style.outlineColor);
+    if (currentViewMode === "3d") {
+      void ensureAllPointWebStyleOptionsFor3D(style.style);
+    } else {
+      filterPointStyles();
+    }
   } else if (styleType === "polyline") {
     const style = layerData.lineStyle ?? defaultLineStyle;
     setLineStyleSelection(style.style);
@@ -6288,6 +6518,7 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     setColorPickerValue("polygon-outline-color", style.outlineColor, 1);
     setCalciteValue(getEl("polygon-outline-style-select"), style.outlineStyle ?? "solid");
     setCalciteValue(getEl("polygon-outline-width"), style.outlineWidth);
+    setCalciteValue(getEl("polygon-zoffset-input"), Number(layerData.polygonZOffset) || 0);
     updatePolygonStyleOptionColors(style.color, style.outlineColor);
   }
 
@@ -6367,6 +6598,7 @@ function applyStyleSettings(shouldClose: boolean) {
     const selected = getSelectedPointStyle();
     const xOffsetInput = getEl("point-xoffset-input") as any;
     const yOffsetInput = getEl("point-yoffset-input") as any;
+    const followTerrainToggle = document.getElementById("point-follow-terrain-toggle") as any;
     layerData.pointStyle = {
       style: selected || defaultPointStyle.style,
       size: Number((getEl("point-size-input") as any).value) || defaultPointStyle.size,
@@ -6377,6 +6609,7 @@ function applyStyleSettings(shouldClose: boolean) {
       xoffset: Number(xOffsetInput.value) || 0,
       yoffset: Number(yOffsetInput.value) || 0
     };
+    layerData.pointFollowTerrain3D = Boolean(followTerrainToggle?.checked ?? true);
     updatePointAnimationPreview(
       layerData.pointStyle.color,
       layerData.pointStyle.outlineColor,
@@ -6400,6 +6633,7 @@ function applyStyleSettings(shouldClose: boolean) {
       outlineWidth: readNumber((getEl("polygon-outline-width") as any).value, defaultPolygonStyle.outlineWidth),
       outlineStyle: String((getEl("polygon-outline-style-select") as any).value || "solid")
     };
+    layerData.polygonZOffset = readNumber((getEl("polygon-zoffset-input") as any).value, 0);
     updatePolygonAnimationPreview(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
     updatePolygonStyleOptionColors(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
   }
@@ -6427,7 +6661,8 @@ function toggleStyleEffects() {
 }
 
 function buildPointSymbol(style: PointStyle) {
-  const path = pointPathStyles[style.style];
+  const resolvedStyle = resolvePointStyleKey(style.style);
+  const path = pointPathStyles[resolvedStyle];
   const outlineWidth = Number(style.outlineWidth) || 0;
   const outline =
     outlineWidth > 0
@@ -6438,7 +6673,7 @@ function buildPointSymbol(style: PointStyle) {
         })();
   const symbol: any = {
     type: "simple-marker",
-    style: path ? "path" : style.style,
+    style: path ? "path" : resolvedStyle,
     color: style.color,
     size: style.size,
     angle: style.angle ?? 0,
@@ -6452,25 +6687,209 @@ function buildPointSymbol(style: PointStyle) {
   return symbol;
 }
 
+function colorToCssRgba(color: { r: number; g: number; b: number; a: number }) {
+  const alpha = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+}
+
+function buildPointSymbolSvgHref(styleKey: string, style: PointStyle) {
+  const fallbackPathByStyle: Record<string, string> = {
+    diamond: "M12 2 L22 12 L12 22 L2 12 Z"
+  };
+  const path = pointPathStyles[styleKey] ?? fallbackPathByStyle[styleKey];
+  if (!path) return null;
+  const viewBoxSize = styleKey.startsWith("phosphor-") ? 1024 : 24;
+  const scale = viewBoxSize / 24;
+  const fillColor = parseColorToRgba(style.color);
+  const outlineColor = parseColorToRgba(style.outlineColor);
+  const outlineWidth = Math.max(0, Number(style.outlineWidth) || 0) * scale;
+  const outlineAttrs =
+    outlineWidth > 0
+      ? ` stroke="${colorToCssRgba(outlineColor)}" stroke-width="${outlineWidth}" stroke-linejoin="round" stroke-linecap="round"`
+      : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBoxSize} ${viewBoxSize}"><path d="${path}" fill="${colorToCssRgba(fillColor)}"${outlineAttrs}/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function getSymbolLayersArray(symbol: any): any[] {
+  const symbolLayers = symbol?.symbolLayers;
+  if (!symbolLayers) return [];
+  if (Array.isArray(symbolLayers)) return symbolLayers;
+  if (typeof symbolLayers.toArray === "function") {
+    try {
+      return symbolLayers.toArray();
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function setSymbolLayersCollection(symbol: any, nextLayers: any[]) {
+  try {
+    symbol.symbolLayers = nextLayers;
+    return;
+  } catch {
+    // fallback for Collection-backed symbolLayers
+  }
+  const collection = symbol?.symbolLayers;
+  if (!collection) return;
+  if (typeof collection.removeAll === "function") {
+    collection.removeAll();
+  }
+  if (typeof collection.addMany === "function") {
+    collection.addMany(nextLayers);
+  }
+}
+
+function getPointSymbolRotation(symbol: any) {
+  if (!symbol) return undefined;
+  if (symbol.type === "simple-marker") {
+    const angle = Number(symbol.angle);
+    return Number.isFinite(angle) ? angle : undefined;
+  }
+  if (symbol.type === "point-3d") {
+    const symbolLayers = getSymbolLayersArray(symbol);
+    for (const layer of symbolLayers) {
+      if (!layer) continue;
+      if (layer.type === "object") {
+        const heading = Number(layer.heading);
+        if (Number.isFinite(heading)) {
+          return heading;
+        }
+      }
+      if (layer.type === "icon") {
+        const angle = Number(layer.angle);
+        if (Number.isFinite(angle)) {
+          return angle;
+        }
+      }
+    }
+  }
+  const fallbackAngle = Number((symbol as any)?.angle);
+  return Number.isFinite(fallbackAngle) ? fallbackAngle : undefined;
+}
+
+function applyPoint3DSymbolRotation(symbol: any, angle: number) {
+  if (!symbol || symbol.type !== "point-3d") return symbol;
+  const rotation = Number.isFinite(angle) ? angle : 0;
+  const symbolLayers = getSymbolLayersArray(symbol);
+  if (!symbolLayers.length) return symbol;
+  const nextLayers = symbolLayers.map((layer: any) => {
+    if (!layer) return layer;
+    const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+    if (nextLayer.type === "object") {
+      nextLayer.heading = rotation;
+      return nextLayer;
+    }
+    if (nextLayer.type === "icon") {
+      nextLayer.angle = rotation;
+      return nextLayer;
+    }
+    return nextLayer;
+  });
+  setSymbolLayersCollection(symbol, nextLayers);
+  return symbol;
+}
+
+function getPointWebStyleSymbolSpec(style: PointStyle) {
+  const dynamicSpec = parseDynamicWebStyleKey(style.style);
+  if (dynamicSpec) {
+    return dynamicSpec;
+  }
+  const modelSymbol = pointModelSymbols3D[style.style];
+  if (modelSymbol) {
+    return modelSymbol;
+  }
+  return null;
+}
+
+async function resolvePointModelSymbol3D(style: PointStyle) {
+  const spec = getPointWebStyleSymbolSpec(style);
+  if (!spec) return null;
+  const cacheKey = `${spec.styleName}::${spec.name}`;
+  let pending = resolvedPointModelSymbolCache.get(cacheKey);
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const webStyleSymbol = new WebStyleSymbol({
+          styleName: spec.styleName,
+          name: spec.name
+        });
+        const resolvedSymbol = await webStyleSymbol.fetchSymbol();
+        return resolvedSymbol?.type === "point-3d" ? resolvedSymbol : null;
+      } catch (error) {
+        console.warn(`[symbols] Failed to resolve WebStyleSymbol ${cacheKey}`, error);
+        return null;
+      }
+    })();
+    resolvedPointModelSymbolCache.set(cacheKey, pending);
+  }
+  const resolved = await pending;
+  if (!resolved) return null;
+  return typeof resolved.clone === "function" ? resolved.clone() : resolved;
+}
+
+async function applyPointModelSymbolToLayer(layerData: LayerData, style: PointStyle) {
+  if (currentViewMode !== "3d" || layerData.type !== "point") return;
+  const styleKey = style.style;
+  if (!getPointWebStyleSymbolSpec(style)) return;
+  const resolvedBase = await resolvePointModelSymbol3D(style);
+  if (!resolvedBase || currentViewMode !== "3d") return;
+  const latestStyle = layerData.pointStyle ?? defaultPointStyle;
+  if (latestStyle.style !== styleKey) return;
+  const rotation = Number(latestStyle.angle) || 0;
+  layerData.layer.graphics.forEach((graphic: any) => {
+    const symbolInstance =
+      typeof resolvedBase.clone === "function" ? resolvedBase.clone() : { ...resolvedBase };
+    graphic.symbol = applyPoint3DSymbolRotation(symbolInstance, rotation);
+  });
+}
+
 function buildPointSymbol3D(style: PointStyle) {
+  const modelSymbol = getPointWebStyleSymbolSpec(style);
+  if (modelSymbol) {
+    return {
+      type: "web-style",
+      styleName: modelSymbol.styleName,
+      name: modelSymbol.name
+    } as any;
+  }
+  const resolvedStyle = resolvePointStyleKey(style.style);
   const fillColor = parseColorToRgba(style.color);
   const outlineColor = parseColorToRgba(style.outlineColor);
   const primitiveByStyle: Record<string, string> = {
     circle: "circle",
     square: "square",
-    diamond: "diamond",
     triangle: "triangle",
     cross: "cross",
     x: "x"
   };
-  const primitive = primitiveByStyle[style.style] ?? "circle";
+  const size = Math.max(2, Number(style.size) || defaultPointStyle.size);
+  const angle = Number(style.angle) || 0;
+  const href = buildPointSymbolSvgHref(resolvedStyle, style);
+  if (href) {
+    return {
+      type: "point-3d",
+      symbolLayers: [
+        {
+          type: "icon",
+          resource: { href },
+          size,
+          angle
+        }
+      ]
+    } as any;
+  }
+  const primitive = primitiveByStyle[resolvedStyle] ?? "circle";
   return {
     type: "point-3d",
     symbolLayers: [
       {
         type: "icon",
         resource: { primitive },
-        size: Math.max(2, Number(style.size) || defaultPointStyle.size),
+        size,
+        angle,
         material: {
           color: [fillColor.r, fillColor.g, fillColor.b, Number.isFinite(fillColor.a) ? fillColor.a : 1]
         },
@@ -6497,9 +6916,10 @@ function buildPolygonSymbol2D(style: any) {
   const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
   const outlineColor = parseColorToRgba(style.outlineColor);
   const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
+  const fillStyle2D = normalizeFillStyle2D(String(style.style || "solid"));
   return {
     type: "simple-fill",
-    style: style.style as any,
+    style: fillStyle2D as any,
     color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha],
     outline: {
       color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
@@ -6509,25 +6929,91 @@ function buildPolygonSymbol2D(style: any) {
   } as any;
 }
 
+function normalizeLinePatternStyle3D(style: string) {
+  const normalized = normalizeLineStyle(style);
+  return supportedLinePatternStyles3D.has(normalized) ? normalized : "solid";
+}
+
+function normalizeFillStyle2D(style: string) {
+  return supportedFillStyles2D.has(style) ? style : "solid";
+}
+
+function normalizeFillPatternStyle3D(style: string) {
+  return supportedFillPatternStyles3D.has(style) ? style : "solid";
+}
+
+function getPolygonWaterStyle3D(style: string) {
+  return polygonWaterStyles3D[style] ?? null;
+}
+
 function buildPolygonSymbol3D(style: any) {
   const fillColor = parseColorToRgba(style.color);
   const fillAlpha = Number.isFinite(fillColor.a) ? fillColor.a : 0.3;
   const outlineColor = parseColorToRgba(style.outlineColor);
   const outlineAlpha = Number.isFinite(outlineColor.a) ? outlineColor.a : 1;
-  return {
-    type: "polygon-3d",
-    symbolLayers: [
-      {
+  const selectedStyle = String(style.style || "solid");
+  const fillPatternStyle = normalizeFillPatternStyle3D(selectedStyle);
+  const outlinePatternStyle = normalizeLinePatternStyle3D(String(style.outlineStyle ?? "solid"));
+  const waterStyle = getPolygonWaterStyle3D(selectedStyle);
+  if (waterStyle) {
+    const outlineSize = Math.max(0.5, Number(style.outlineWidth) || 0);
+    const waterLayer: any = {
+      type: "water",
+      color: [fillColor.r, fillColor.g, fillColor.b, Number.isFinite(fillColor.a) ? fillColor.a : 1],
+      waterbodySize: waterStyle.waterbodySize,
+      waveStrength: waterStyle.waveStrength,
+      waveDirection: waterStyle.waveDirection
+    };
+    const symbolLayers: any[] = [waterLayer];
+    if (outlineSize > 0) {
+      const outlineLayer: any = {
         type: "fill",
         material: {
-          color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha]
+          color: [fillColor.r, fillColor.g, fillColor.b, 0]
         },
         outline: {
           color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
-          size: Math.max(0.5, Number(style.outlineWidth) || 0)
+          size: outlineSize
         }
+      };
+      if (outlinePatternStyle !== "solid") {
+        outlineLayer.outline.pattern = {
+          type: "style",
+          style: outlinePatternStyle
+        };
       }
-    ]
+      symbolLayers.push(outlineLayer);
+    }
+    return {
+      type: "polygon-3d",
+      symbolLayers
+    } as any;
+  }
+  const fillLayer: any = {
+    type: "fill",
+    material: {
+      color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha]
+    },
+    outline: {
+      color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
+      size: Math.max(0.5, Number(style.outlineWidth) || 0)
+    }
+  };
+  if (fillPatternStyle !== "solid") {
+    fillLayer.pattern = {
+      type: "style",
+      style: fillPatternStyle
+    };
+  }
+  if (outlinePatternStyle !== "solid") {
+    fillLayer.outline.pattern = {
+      type: "style",
+      style: outlinePatternStyle
+    };
+  }
+  return {
+    type: "polygon-3d",
+    symbolLayers: [fillLayer]
   } as any;
 }
 
@@ -6551,7 +7037,7 @@ function buildTextSymbol2D(layerData: LayerData) {
 
 function buildTextSymbol3D(layerData: LayerData) {
   const color = parseColorToRgba(layerData.textColor || "#22323a");
-  return {
+  const symbol: any = {
     type: "point-3d",
     symbolLayers: [
       {
@@ -6572,11 +7058,30 @@ function buildTextSymbol3D(layerData: LayerData) {
         }
       }
     ]
-  } as any;
+  };
+  if (layerData.textCalloutLine) {
+    symbol.verticalOffset = {
+      screenLength: 34,
+      maxWorldLength: 140,
+      minWorldLength: 14
+    };
+    symbol.callout = {
+      type: "line",
+      size: 1.5,
+      color: [color.r, color.g, color.b, 0.9],
+      border: {
+        color: [255, 255, 255, 0.9]
+      }
+    };
+  }
+  return symbol as any;
 }
 
 function buildTextSymbolForCurrentView(layerData: LayerData) {
-  return currentViewMode === "3d" ? buildTextSymbol3D(layerData) : buildTextSymbol2D(layerData);
+  if (currentViewMode !== "3d") {
+    return buildTextSymbol2D(layerData);
+  }
+  return layerData.textRenderMode === "flat" ? buildTextSymbol2D(layerData) : buildTextSymbol3D(layerData);
 }
 
 function applyTextSymbols(layerData: LayerData) {
@@ -6643,12 +7148,21 @@ function applyLayerStyle(layerData: LayerData) {
     applyTextSymbols(layerData);
     return;
   }
-  layerData.layer.graphics.forEach((graphic: any) => {
-    if (layerData.type === "point") {
-      const style = layerData.pointStyle ?? defaultPointStyle;
+  if (layerData.type === "point") {
+    const style = layerData.pointStyle ?? defaultPointStyle;
+    layerData.layer.graphics.forEach((graphic: any) => {
       graphic.symbol = buildPointSymbolForCurrentView(style);
+    });
+    if (currentViewMode === "3d" && getPointWebStyleSymbolSpec(style)) {
+      void applyPointModelSymbolToLayer(layerData, style);
       return;
     }
+    if (currentViewMode !== "3d" && style.style === THUMBTACK_3D_STYLE) {
+      scheduleThumbtackParallaxUpdate();
+    }
+    return;
+  }
+  layerData.layer.graphics.forEach((graphic: any) => {
     if (layerData.type === "polyline") {
       const style = layerData.lineStyle ?? defaultLineStyle;
       graphic.symbol = buildLineSymbolForCurrentView(style);
@@ -6659,12 +7173,6 @@ function applyLayerStyle(layerData: LayerData) {
       graphic.symbol = buildPolygonSymbolForCurrentView(style);
     }
   });
-  if (
-    currentViewMode !== "3d" &&
-    (layerData.pointStyle?.style ?? defaultPointStyle.style) === THUMBTACK_3D_STYLE
-  ) {
-    scheduleThumbtackParallaxUpdate();
-  }
 }
 
 function ensureGeometryCache(layerData: LayerData, graphic: any) {
@@ -6774,6 +7282,8 @@ function setStyleSectionVisibility(
   const lineSection = getEl("line-style-section");
   const polygonSection = getEl("polygon-style-section");
   const pointAdvanced = getEl("point-advanced-section");
+  const pointFollowTerrainRow = document.getElementById("point-follow-terrain-row") as HTMLElement | null;
+  const polygonZOffsetRow = document.getElementById("polygon-zoffset-row") as HTMLElement | null;
   const polygonOutlineStyle = getEl("polygon-outline-style-row");
   const effectsSection = getEl("layer-effects-section");
 
@@ -6783,7 +7293,16 @@ function setStyleSectionVisibility(
   effectsSection.style.display = showEffects ? "block" : "none";
 
   pointAdvanced.style.display = type === "point" ? "block" : "none";
+  if (pointFollowTerrainRow) {
+    pointFollowTerrainRow.style.display = type === "point" && currentViewMode === "3d" ? "" : "none";
+  }
+  if (polygonZOffsetRow) {
+    polygonZOffsetRow.style.display = type === "polygon" && currentViewMode === "3d" ? "" : "none";
+  }
   polygonOutlineStyle.style.display = showFeatureExtras && type === "polygon" ? "block" : "none";
+  if (type === "point") {
+    filterPointStyles();
+  }
 }
 
 function setCalciteValue(element: HTMLElement, value: string | number) {
@@ -6805,6 +7324,19 @@ function readSceneQualityProfile(value: unknown, fallback: SceneQualityProfile):
     .trim()
     .toLowerCase();
   if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return fallback;
+}
+
+function readSceneAtmosphereQuality(
+  value: unknown,
+  fallback: SceneAtmosphereQuality
+): SceneAtmosphereQuality {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "low" || normalized === "high") {
     return normalized;
   }
   return fallback;
@@ -6905,9 +7437,241 @@ function updateColorPickerSwatch(colorId: string, color: string) {
   swatch.style.background = color;
 }
 
+function filterPointStyles() {
+  const pointStyleSearch = document.getElementById("point-style-search") as HTMLInputElement | null;
+  const container = document.getElementById("point-style-options");
+  if (!container) return;
+  const is3D = currentViewMode === "3d";
+  const query = pointStyleSearch?.value.trim().toLowerCase() || "";
+
+  const buttons = Array.from(container.querySelectorAll(".style-option-btn")) as HTMLElement[];
+  buttons.forEach((button) => {
+    const value = String(button.dataset.value || "");
+    const label = button.textContent?.trim().toLowerCase() || "";
+    const is3DOption = isPointStyle3DOptionValue(value);
+    const matchesMode = is3D || !is3DOption;
+    const matchesQuery = !query || label.includes(query);
+    button.style.display = matchesMode && matchesQuery ? "" : "none";
+  });
+
+  const titles = Array.from(container.querySelectorAll(".style-option-section-title")) as HTMLElement[];
+  titles.forEach((title) => {
+    let next: Element | null = title.nextElementSibling;
+    let hasVisible = false;
+    while (next && !next.classList.contains("style-option-section-title")) {
+      if (next instanceof HTMLElement && next.style.display !== "none") {
+        hasVisible = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    const isThreeDTitle = title.id === "point-webstyle-dynamic-title" || title.id === "point-3d-models-title";
+    if (isThreeDTitle && !is3D) {
+      title.style.display = "none";
+      return;
+    }
+    title.style.display = hasVisible ? "" : "none";
+  });
+}
+
+function createPointStyleButton(value: string, label: string) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "style-option-btn";
+  button.dataset.value = value;
+  const swatch = document.createElement("span");
+  swatch.className = "point-style-swatch point-style-swatch--square";
+  button.appendChild(swatch);
+  button.appendChild(document.createTextNode(label));
+  return button;
+}
+
+function clearDynamicPointStyleButtons() {
+  const container = document.getElementById("point-style-options");
+  if (!container) return;
+  container
+    .querySelectorAll('.style-option-btn[data-webstyle-dynamic="true"]')
+    .forEach((element) => element.remove());
+  const title = document.getElementById("point-webstyle-dynamic-title") as HTMLElement | null;
+  if (title) {
+    title.style.display = "none";
+  }
+}
+
+function ensurePointStyleSelectionOption(styleValue: string, label?: string) {
+  const container = document.getElementById("point-style-options");
+  if (!container) return;
+  const existing = Array.from(container.querySelectorAll(".style-option-btn")).find(
+    (button) => (button as HTMLElement).dataset.value === styleValue
+  );
+  if (existing) return;
+  const title = document.getElementById("point-webstyle-dynamic-title");
+  if (!title || !title.parentElement) return;
+  const displayName =
+    label ??
+    (() => {
+      const dynamicSpec = parseDynamicWebStyleKey(styleValue);
+      if (!dynamicSpec) return "3D WebStyle Symbol";
+      return `${dynamicSpec.name} (${dynamicSpec.styleName})`;
+    })();
+  const button = createPointStyleButton(styleValue, displayName);
+  button.dataset.webstyleDynamic = "true";
+  title.parentElement.insertBefore(button, title.nextSibling);
+  (title as HTMLElement).style.display = "";
+}
+
+async function fetchWebStyleSymbolNames(styleName: string) {
+  const normalizedStyleName = String(styleName || "").trim();
+  if (!normalizedStyleName) return [] as string[];
+  let pending: Promise<string[]> | undefined = webStyleSymbolNameCache.get(normalizedStyleName);
+  if (!pending) {
+    pending = (async (): Promise<string[]> => {
+      try {
+        const portal = Portal.getDefault();
+        await portal.load();
+        const query = new PortalQueryParams({
+          query: `owner:esri_en AND type:Style AND typekeywords:"${normalizedStyleName}"`
+        });
+        const results = await portal.queryItems(query);
+        const item = (results?.results ?? []).find((entry: any) => {
+          const keywords = Array.isArray(entry?.typeKeywords)
+            ? entry.typeKeywords.map((keyword: unknown) => String(keyword || "").toLowerCase())
+            : [];
+          return (
+            String(entry?.type || "").toLowerCase() === "style" &&
+            String(entry?.owner || "").toLowerCase() === "esri_en" &&
+            keywords.includes(normalizedStyleName.toLowerCase())
+          );
+        }) as any;
+        if (!item) return [] as string[];
+        if (typeof item.load === "function") {
+          await item.load();
+        }
+        const data = (await item.fetchData?.()) as any;
+        const names = Array.isArray(data?.items)
+          ? data.items
+              .map((entry: any) => String(entry?.name || "").trim())
+              .filter((name: string) => Boolean(name))
+          : [];
+        const uniqueNames = Array.from(new Set<string>(names));
+        return uniqueNames.sort((a, b) => a.localeCompare(b));
+      } catch (error) {
+        console.warn(`[symbols] Failed to load web style names for ${normalizedStyleName}`, error);
+        return [] as string[];
+      }
+    })();
+    webStyleSymbolNameCache.set(normalizedStyleName, pending);
+  }
+  return await pending;
+}
+
+async function loadDynamicPointWebStyleOptionsForStyles(styleNames: string[], selectedStyle?: string) {
+  const normalizedStyleNames = Array.from(
+    new Set(
+      styleNames
+        .map((styleName) => String(styleName || "").trim())
+        .filter((styleName) => Boolean(styleName))
+    )
+  );
+  clearDynamicPointStyleButtons();
+  if (!normalizedStyleNames.length) {
+    loadedPointWebStyleCatalogNames.clear();
+    filterPointStyles();
+    return;
+  }
+  const styleEntries = await Promise.all(
+    normalizedStyleNames.map(async (styleName) => ({
+      styleName,
+      names: await fetchWebStyleSymbolNames(styleName)
+    }))
+  );
+  const container = document.getElementById("point-style-options");
+  const title = document.getElementById("point-webstyle-dynamic-title");
+  if (!container || !title || !title.parentElement) {
+    return;
+  }
+  const flattenedEntries = styleEntries.flatMap((entry) =>
+    entry.names.map((name) => ({
+      styleName: entry.styleName,
+      name
+    }))
+  );
+  if (!flattenedEntries.length) {
+    loadedPointWebStyleCatalogNames.clear();
+    filterPointStyles();
+    return;
+  }
+  const parent = title.parentElement;
+  const anchor = title.nextSibling;
+  const fragment = document.createDocumentFragment();
+  flattenedEntries.forEach(({ styleName, name }) => {
+    const value = encodeDynamicWebStyleKey(styleName, name);
+    const button = createPointStyleButton(
+      value,
+      normalizedStyleNames.length > 1 ? `${name} (${styleName})` : name
+    );
+    button.dataset.webstyleDynamic = "true";
+    fragment.appendChild(button);
+  });
+  parent.insertBefore(fragment, anchor);
+  title.style.display = "";
+  loadedPointWebStyleCatalogNames.clear();
+  normalizedStyleNames.forEach((styleName) => loadedPointWebStyleCatalogNames.add(styleName));
+  if (selectedStyle) {
+    ensurePointStyleSelectionOption(selectedStyle);
+    setPointStyleSelection(selectedStyle);
+  }
+  filterPointStyles();
+}
+
+async function ensureAllPointWebStyleOptionsFor3D(selectedStyle?: string) {
+  if (currentViewMode !== "3d") {
+    filterPointStyles();
+    return;
+  }
+  const dynamicSpec = selectedStyle ? parseDynamicWebStyleKey(selectedStyle) : null;
+  const styleNames = Array.from(
+    new Set(
+      [...POINT_WEBSTYLE_PRESET_STYLES, dynamicSpec?.styleName || ""].filter((value) => Boolean(value))
+    )
+  );
+  const container = document.getElementById("point-style-options");
+  const hasDynamicButtons =
+    (container?.querySelectorAll?.('.style-option-btn[data-webstyle-dynamic="true"]')?.length ?? 0) > 0;
+  const hasAllStyleCatalogsLoaded = styleNames.every((styleName) =>
+    loadedPointWebStyleCatalogNames.has(styleName)
+  );
+  if (hasDynamicButtons && hasAllStyleCatalogsLoaded) {
+    if (selectedStyle) {
+      ensurePointStyleSelectionOption(selectedStyle);
+      setPointStyleSelection(selectedStyle);
+    }
+    filterPointStyles();
+    return;
+  }
+  if (pointWebStyleCatalogLoadPromise) {
+    await pointWebStyleCatalogLoadPromise;
+    if (selectedStyle) {
+      ensurePointStyleSelectionOption(selectedStyle);
+      setPointStyleSelection(selectedStyle);
+    }
+    filterPointStyles();
+    return;
+  }
+  pointWebStyleCatalogLoadPromise = loadDynamicPointWebStyleOptionsForStyles(styleNames, selectedStyle).finally(
+    () => {
+      pointWebStyleCatalogLoadPromise = null;
+    }
+  );
+  await pointWebStyleCatalogLoadPromise;
+}
+
 function setPointStyleSelection(value: string) {
   const container = document.getElementById("point-style-options");
   if (!container) return;
+  if (value) {
+    ensurePointStyleSelectionOption(value);
+  }
   updatePointStyleOptionColors(
     getColorFromPicker("point-fill-color", 1),
     getColorFromPicker("point-outline-color", 1)
@@ -6918,6 +7682,7 @@ function setPointStyleSelection(value: string) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+  filterPointStyles();
 }
 
 function getSelectedPointStyle() {
@@ -6967,6 +7732,7 @@ function updateLineAnimationPreview(color: string, style: string) {
 }
 
 function updatePointAnimationPreview(color: string, outlineColor: string, style: string) {
+  const resolvedStyle = resolvePointStyleKey(style);
   const containers = Array.from(
     document.querySelectorAll(".animation-type-options")
   ) as HTMLElement[];
@@ -6987,11 +7753,11 @@ function updatePointAnimationPreview(color: string, outlineColor: string, style:
         .filter((cls) => cls.startsWith("point-style-"))
         .forEach((cls) => preview.classList.remove(cls));
       if (usesPointStyle) {
-        preview.classList.add(`point-style-${style}`);
+        preview.classList.add(`point-style-${resolvedStyle}`);
       }
-      const path = pointPathStyles[style];
+      const path = pointPathStyles[resolvedStyle];
       if (path && usesPointStyle) {
-        const viewBox = style.startsWith("phosphor-") ? "0 0 1024 1024" : "0 0 24 24";
+        const viewBox = resolvedStyle.startsWith("phosphor-") ? "0 0 1024 1024" : "0 0 24 24";
         preview.innerHTML = `<svg viewBox="${viewBox}" aria-hidden="true"><path d="${path}"></path></svg>`;
         preview.classList.add("animation-type-preview--icon");
       } else {
@@ -7059,23 +7825,29 @@ function buildLineSymbol3D(style: LineStyle) {
   const color = parseColorToRgba(style.color);
   const alpha = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
   const lineSize = Math.max(1, Number(style.width) || defaultLineStyle.width);
+  const patternStyle = normalizeLinePatternStyle3D(style.style);
+  const marker = buildLineMarker3D(style.style, [color.r, color.g, color.b, alpha]);
+  const layer: any = {
+    type: "line",
+    size: lineSize,
+    cap: "round",
+    join: "round",
+    material: {
+      color: [color.r, color.g, color.b, alpha]
+    }
+  };
+  if (patternStyle !== "solid") {
+    layer.pattern = {
+      type: "style",
+      style: patternStyle
+    };
+  }
+  if (marker) {
+    layer.marker = marker;
+  }
   return {
     type: "line-3d",
-    symbolLayers: [
-      {
-        type: "path",
-        profile: "circle",
-        width: lineSize,
-        height: lineSize,
-        material: {
-          color: [color.r, color.g, color.b, alpha],
-          emissive: {
-            source: "color",
-            strength: 3
-          }
-        }
-      }
-    ]
+    symbolLayers: [layer]
   } as any;
 }
 
@@ -7095,6 +7867,22 @@ function normalizeLineStyle(style: string) {
     return "solid";
   }
   return style;
+}
+
+function buildLineMarker3D(style: string, color: [number, number, number, number]) {
+  if (!style.startsWith("arrow-")) return null;
+  let placement: "begin" | "end" | "begin-end" = "end";
+  if (style === "arrow-start") {
+    placement = "begin";
+  } else if (style === "arrow-both") {
+    placement = "begin-end";
+  }
+  return {
+    type: "style",
+    style: "arrow",
+    placement,
+    color
+  };
 }
 
 function buildLineMarker(style: string, color: string) {
@@ -7124,21 +7912,33 @@ function openTextSettingsModal() {
   setTimeout(() => (getEl("text-content-input") as any)?.focus?.(), 0);
 }
 
+function updateTextCalloutControlVisibility(renderMode: string) {
+  const calloutRow = document.getElementById("text-3d-callout-row") as HTMLElement | null;
+  if (!calloutRow) return;
+  calloutRow.style.display = renderMode === "scene-3d" ? "" : "none";
+}
+
 function syncTextPanelFromLayer(layerData: LayerData) {
   const contentInput = document.getElementById("text-content-input") as any;
   if (!contentInput) return;
   const sizeSlider = document.getElementById("text-size-slider") as any;
   const colorInput = document.getElementById("text-color-input") as HTMLInputElement | null;
+  const renderModeSelect = document.getElementById("text-render-mode-select") as any;
   const fontSelect = document.getElementById("text-font-select") as any;
   const italicToggle = document.getElementById("text-italic-toggle") as any;
   const underlineToggle = document.getElementById("text-underline-toggle") as any;
+  const calloutToggle = document.getElementById("text-3d-callout-toggle") as any;
 
   contentInput.value = layerData.textContent || "Text";
   if (sizeSlider) sizeSlider.value = layerData.textSize || 14;
   if (colorInput) colorInput.value = layerData.textColor || "#22323a";
+  const renderMode = layerData.textRenderMode || "scene-3d";
+  if (renderModeSelect) renderModeSelect.value = renderMode;
   if (fontSelect) fontSelect.value = layerData.textFontFamily || "sans-serif";
   if (italicToggle) italicToggle.checked = Boolean(layerData.textItalic);
   if (underlineToggle) underlineToggle.checked = Boolean(layerData.textUnderline);
+  if (calloutToggle) calloutToggle.checked = Boolean(layerData.textCalloutLine);
+  updateTextCalloutControlVisibility(renderMode);
 }
 
 function openAiModal() {
@@ -7282,19 +8082,28 @@ function applyTextSettings(
   const size = overrides?.size ?? Number(sizeInput?.value);
   const colorInput = getEl("text-color-input") as HTMLInputElement;
   const color = overrides?.color ?? colorInput.value;
+  const renderModeSelect = getEl("text-render-mode-select") as any;
+  const renderModeRaw = String(renderModeSelect?.value || layerData.textRenderMode || "scene-3d");
+  const renderMode = renderModeRaw === "flat" ? "flat" : "scene-3d";
   const fontSelect = getEl("text-font-select") as any;
   const fontFamily = String(fontSelect?.value || layerData.textFontFamily || "sans-serif");
   const italicToggle = getEl("text-italic-toggle") as any;
   const underlineToggle = getEl("text-underline-toggle") as any;
+  const calloutToggle = getEl("text-3d-callout-toggle") as any;
   const isItalic = Boolean(italicToggle?.checked);
   const isUnderline = Boolean(underlineToggle?.checked);
+  const hasCalloutLine = Boolean(calloutToggle?.checked);
 
   layerData.textContent = content;
   layerData.textSize = Number.isFinite(size) ? size : layerData.textSize;
   layerData.textColor = color;
+  layerData.textRenderMode = renderMode;
   layerData.textFontFamily = fontFamily;
   layerData.textItalic = isItalic;
   layerData.textUnderline = isUnderline;
+  layerData.textCalloutLine = hasCalloutLine;
+
+  updateTextCalloutControlVisibility(renderMode);
 
   applyTextSymbols(layerData);
 
@@ -7334,24 +8143,51 @@ function updateAnimationOptions() {
     attachAnimationPanelTo();
     attachStylePanelTo();
     attachTextPanelTo();
+    const cameraSettings = document.getElementById("camera-animation-settings");
+    if (cameraSettings) {
+      cameraSettings.style.display = "none";
+    }
     return;
   }
   const layerData = graphicsLayers[selectedLayerIndex];
-  if (isViewTrackLayer(layerData)) {
-    setAnimationPanelVisible(false);
-    attachAnimationPanelTo();
-    attachStylePanelTo();
-    attachTextPanelTo();
-    return;
-  }
   setAnimationPanelVisible(true);
   attachAnimationPanelTo(`animation-settings-host-${selectedLayerIndex}`);
+  const baseTypeSection = document.getElementById("animation-type-base-section");
+  const webglSection = document.getElementById("webgl-animation-section");
+  const featureSettings = document.getElementById("feature-animation-settings");
+  const cameraSettings = document.getElementById("camera-animation-settings");
+
+  if (isViewTrackLayer(layerData)) {
+    attachStylePanelTo();
+    attachTextPanelTo();
+    if (baseTypeSection) {
+      baseTypeSection.style.display = "none";
+    }
+    if (webglSection) {
+      webglSection.style.display = "none";
+    }
+    if (featureSettings) {
+      featureSettings.style.display = "none";
+    }
+    if (cameraSettings) {
+      cameraSettings.style.display = "block";
+    }
+    syncCameraAnimationEasingControl(layerData);
+    updateAnimationsList();
+    return;
+  }
+
+  if (cameraSettings) {
+    cameraSettings.style.display = "none";
+  }
+  if (baseTypeSection) {
+    baseTypeSection.style.display = "block";
+  }
   updateStylePanel();
   syncAnimationStartInput();
 
   const optionsContainer = document.getElementById("animation-type-options");
   const webglOptionsContainer = document.getElementById("animation-type-options-webgl");
-  const webglSection = document.getElementById("webgl-animation-section");
   if (!optionsContainer || !webglOptionsContainer) return;
   optionsContainer.innerHTML = "";
   webglOptionsContainer.innerHTML = "";
@@ -7400,8 +8236,7 @@ function updateAnimationOptions() {
     updatePolygonAnimationPreview(style.color, style.outlineColor);
   }
 
-  const featureSettings = getEl("feature-animation-settings");
-  if (layerData.type === "feature") {
+  if (layerData.type === "feature" && featureSettings) {
     featureSettings.style.display = "block";
     const featureAnim = layerData.animations.find(
       (entry) => entry.type === "field" && !isPlaceholderAnimation(entry)
@@ -7447,7 +8282,7 @@ function updateAnimationOptions() {
     hideNullsSwitch.checked = Boolean(layerData.featureHideNulls);
     const fadeOutSwitch = getEl("feature-fade-out") as any;
     fadeOutSwitch.checked = !layerData.featureKeepVisible;
-  } else {
+  } else if (featureSettings) {
     featureSettings.style.display = "none";
   }
 

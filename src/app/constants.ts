@@ -5,7 +5,8 @@ import type {
   LineStyle,
   PointKeyframe,
   PointStyle,
-  PolygonStyle
+  PolygonStyle,
+  TextRenderMode
 } from "../types";
 
 export const TIMELINE_SNAP_INCREMENT = 0.1;
@@ -84,14 +85,18 @@ export type ProjectLayerSnapshot = {
   animations: LayerAnimation[];
   pointKeyframes?: PointKeyframe[];
   pointStyle?: PointStyle;
+  pointFollowTerrain3D?: boolean;
   lineStyle?: LineStyle;
   polygonStyle?: PolygonStyle;
+  polygonZOffset?: number;
   textContent?: string;
   textSize?: number;
   textColor?: string;
   textFontFamily?: string;
   textItalic?: boolean;
   textUnderline?: boolean;
+  textRenderMode?: TextRenderMode;
+  textCalloutLine?: boolean;
   featureLayerUrl?: string;
   featureFields?: Array<{ name: string; type: string }>;
   featureField?: string;
@@ -139,7 +144,7 @@ export type ProjectSnapshot = {
           fov?: number;
           rotation?: number;
           scale?: number;
-          easing?: "linear" | "ease-in-out";
+          easing?: "linear" | "ease-in" | "ease-out" | "ease-in-out";
           spatialReference?: { wkid?: number; latestWkid?: number };
         }>;
         backgroundColor?: string;
@@ -158,6 +163,7 @@ export type ProjectSnapshot = {
           cameraStudio?: {
             fov?: number;
             qualityProfile?: "low" | "medium" | "high";
+            atmosphereQuality?: "low" | "high";
             glowEnabled?: boolean;
             glowIntensity?: number;
             cinematicFxEnabled?: boolean;

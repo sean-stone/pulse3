@@ -1,3 +1,5 @@
+import { validateProjectSnapshot } from "./projectSnapshotValidation";
+
 type ProjectIoConfig = {
   getEl: (id: string) => HTMLElement;
   buildProjectSnapshot: () => unknown | null;
@@ -37,8 +39,15 @@ const handleProjectFileChange = (config: ProjectIoConfig, event: Event) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const snapshot = JSON.parse(String(reader.result || ""));
-      void config.applyProjectSnapshot(snapshot);
+      const parsed = JSON.parse(String(reader.result || ""));
+      const validation = validateProjectSnapshot(parsed);
+      if (!validation.ok) {
+        config.setProjectError(`Unable to import project. ${validation.error}`);
+        return;
+      }
+      void Promise.resolve(config.applyProjectSnapshot(validation.snapshot)).catch(() => {
+        config.setProjectError("Unable to import project. The snapshot could not be applied.");
+      });
     } catch (error) {
       config.setProjectError("Unable to import project. The file is not valid GeoJSON.");
     }

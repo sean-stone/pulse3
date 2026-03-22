@@ -114,6 +114,8 @@ function Timeline() {
               disabled
             >
               <calcite-option value="linear">Linear</calcite-option>
+              <calcite-option value="ease-in">Ease In</calcite-option>
+              <calcite-option value="ease-out">Ease Out</calcite-option>
               <calcite-option value="ease-in-out">Ease In/Out</calcite-option>
             </calcite-select>
           </div>

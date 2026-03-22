@@ -4,12 +4,39 @@ import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
 import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
-import Color from "@arcgis/core/Color";
 import * as webMercatorUtils from "@arcgis/core/geometry/support/webMercatorUtils";
 
 import type { LayerAnimation, LayerData, PointKeyframe, PointStyle } from "../types";
 import { buildPartialPaths } from "../utils/geometryPaths";
-import { buildLayerEffectString, defaultLayerEffectSettings, isDefaultEffectSettings } from "../utils/effects";
+import {
+  applyBaseLayerEffect,
+  applyLineSymbolGlow,
+  applyLineSymbolWidth,
+  applyPointSymbolScaleAngle,
+  arrowMarkerPath,
+  buildBaseLayerEffect,
+  buildWeldLineSymbol,
+  buildWeldPointSymbol,
+  cartoonPlaneMarkerPath,
+  clamp,
+  cloneSymbol,
+  dartCoreMarkerPath,
+  dartFinMarkerPath,
+  dartMarkerPath,
+  getLayerGlowColor,
+  getPulse,
+  getSymbolLayers,
+  hashString,
+  joinEffects,
+  noise1,
+  parseColorToRgbaArray,
+  planeMarkerPath,
+  rotateHueRgba,
+  setSymbolLayers,
+  TAU,
+  toRgbaArray,
+  triangleWave
+} from "./animationPlaybackHelpers";
 import { defaultLineStyle, defaultPolygonStyle } from "./constants";
 
 type AnimationPlaybackConfig = {
@@ -129,118 +156,7 @@ const buildEmptyPolygon = (geometry: Polygon) => {
   });
 };
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-const TAU = Math.PI * 2;
-
-const fract = (value: number) => value - Math.floor(value);
-const noise1 = (value: number) => fract(Math.sin(value) * 43758.5453123);
-const triangleWave = (value: number) => {
-  const t = value - Math.floor(value);
-  return 1 - Math.abs(t * 2 - 1);
-};
-
-const hashString = (value: string) => {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-};
-
-const buildBaseLayerEffect = (layerData: LayerData) => {
-  const settings = layerData.layerEffectSettings ?? defaultLayerEffectSettings;
-  const enabled = layerData.layerEffectsEnabled !== false;
-  if (!enabled || isDefaultEffectSettings(settings)) {
-    return "";
-  }
-  return buildLayerEffectString(settings);
-};
-
-const applyBaseLayerEffect = (layerData: LayerData) => {
-  layerData.layer.blendMode = layerData.layerBlendMode || "normal";
-  layerData.layer.effect = buildBaseLayerEffect(layerData);
-};
-
-const getLayerGlowColor = (layerData: LayerData) => {
-  if (layerData.type === "point") {
-    return layerData.pointStyle?.color ?? "#7ac7b0";
-  }
-  if (layerData.type === "polyline") {
-    return layerData.lineStyle?.color ?? "#7ac7b0";
-  }
-  if (layerData.type === "polygon") {
-    return layerData.polygonStyle?.outlineColor ?? layerData.polygonStyle?.color ?? "#7ac7b0";
-  }
-  if (layerData.type === "text") {
-    return layerData.textColor ?? "#7ac7b0";
-  }
-  return "#7ac7b0";
-};
-
-const getPulse = (progress: number, cycles = 2) =>
-  0.5 + 0.5 * Math.sin(progress * TAU * cycles);
-
-const joinEffects = (parts: Array<string | null | undefined>) =>
-  parts.filter((part) => part && part.length > 0).join(" ");
-
-const arrowMarkerPath = "M12 2 L22 22 L12 17 L2 22 Z";
-const planeMarkerPath = "M12 1 L14.8 8.8 L22.5 11 L14.8 13.2 L12 23 L9.2 13.2 L1.5 11 L9.2 8.8 Z";
-const cartoonPlaneMarkerPath =
-  "M2 12 L8 10 L9 6 L15 4 L21 7 L16 10 L23 12 L16 14 L21 17 L15 20 L9 18 L8 14 Z";
-const dartMarkerPath =
-  "M1.5 6.5 L7.8 9.8 L18.8 9.8 L24 12 L18.8 14.2 L7.8 14.2 L1.5 17.5 L3.7 12 Z";
-const dartCoreMarkerPath =
-  "M5.2 10.5 L19.6 10.5 L22.2 12 L19.6 13.5 L5.2 13.5 L4.1 12 Z";
-const dartFinMarkerPath = "M3 12 L20.5 5.6 L20.5 18.4 Z";
-
-const toRgbaArray = (color: string, alpha = 1) => {
-  try {
-    const arcColor = new Color(color);
-    const rgba = arcColor.toRgba() as number[];
-    rgba[3] = alpha;
-    return rgba;
-  } catch {
-    return [10, 76, 102, alpha];
-  }
-};
-
-const parseColorToRgbaArray = (
-  color: string | undefined,
-  fallback: [number, number, number, number]
-): [number, number, number, number] => {
-  if (!color) return fallback;
-  try {
-    const rgba = new Color(color).toRgba() as number[];
-    return [
-      Number.isFinite(Number(rgba[0])) ? Number(rgba[0]) : fallback[0],
-      Number.isFinite(Number(rgba[1])) ? Number(rgba[1]) : fallback[1],
-      Number.isFinite(Number(rgba[2])) ? Number(rgba[2]) : fallback[2],
-      Number.isFinite(Number(rgba[3])) ? clamp(Number(rgba[3]), 0, 1) : fallback[3]
-    ];
-  } catch {
-    return fallback;
-  }
-};
-
-const toClampedColorArray = (
-  color: ArrayLike<number> | null | undefined,
-  fallback: [number, number, number, number]
-): [number, number, number, number] => {
-  const r = Number(color?.[0]);
-  const g = Number(color?.[1]);
-  const b = Number(color?.[2]);
-  const a = Number(color?.[3]);
-  return [
-    Number.isFinite(r) ? clamp(r, 0, 255) : fallback[0],
-    Number.isFinite(g) ? clamp(g, 0, 255) : fallback[1],
-    Number.isFinite(b) ? clamp(b, 0, 255) : fallback[2],
-    Number.isFinite(a) ? clamp(a, 0, 1) : fallback[3]
-  ];
-};
-
 const isSceneView3D = (view: any) => String((view as any)?.type || "") === "3d";
-const GLOW_INTENSITY_MULTIPLIER = 10;
 const GLOW_DISTANCE_MULTIPLIER = 10;
 const FIREWORKS_COOLDOWN_DURATION = 1.2;
 const FIREWORKS_POST_END_PROGRESS_MAX = 2.1;
@@ -249,292 +165,6 @@ const FIREWORKS_RANDOM_MULTIPLIER_MIN = 1;
 const FIREWORKS_RANDOM_MULTIPLIER_MAX = 10;
 const FIREWORKS_HEIGHT_MULTIPLIER_MIN = 0.7;
 const FIREWORKS_HEIGHT_MULTIPLIER_MAX = 2.0;
-
-const buildEmissiveMaterial = (
-  rgba: [number, number, number, number],
-  intensity: number
-) => {
-  const alpha = clamp(rgba[3], 0, 1);
-  const clampedIntensity = clamp(intensity * GLOW_INTENSITY_MULTIPLIER * alpha, 0, 22);
-  return {
-    color: rgba,
-    emissive: {
-      source: "color",
-      strength: clampedIntensity
-    }
-  };
-};
-
-const buildWeldLineSymbol = (
-  width: number,
-  color: ArrayLike<number> | null | undefined,
-  use3D: boolean
-) => {
-  const rgba = toClampedColorArray(color, [255, 255, 255, 1]);
-  if (use3D) {
-    const strokeSize = Math.max(0.6, width);
-    return {
-      type: "line-3d",
-      symbolLayers: [
-        {
-          type: "path",
-          profile: "circle",
-          cap: "round",
-          join: "round",
-          width: strokeSize,
-          height: strokeSize,
-          material: buildEmissiveMaterial(rgba, 0.95)
-        }
-      ]
-    } as any;
-  }
-  return {
-    type: "simple-line",
-    style: "solid",
-    width,
-    color: rgba
-  } as any;
-};
-
-const buildWeldPointSymbol = (
-  size: number,
-  color: ArrayLike<number> | null | undefined,
-  outlineColor: ArrayLike<number> | null | undefined,
-  outlineWidth: number,
-  use3D: boolean
-) => {
-  const fillRgba = toClampedColorArray(color, [255, 255, 255, 1]);
-  const strokeRgba = toClampedColorArray(outlineColor, [0, 0, 0, 0]);
-  if (use3D) {
-    return {
-      type: "point-3d",
-      symbolLayers: [
-        {
-          type: "icon",
-          resource: { primitive: "circle" },
-          size: Math.max(1.4, size),
-          material: buildEmissiveMaterial(fillRgba, 0.85),
-          outline: {
-            color: strokeRgba,
-            size: Math.max(0, outlineWidth)
-          }
-        }
-      ]
-    } as any;
-  }
-  return {
-    type: "simple-marker",
-    style: "circle",
-    size,
-    color: fillRgba,
-    outline: {
-      color: strokeRgba,
-      width: Math.max(0, outlineWidth)
-    }
-  } as any;
-};
-
-const hueToRgb = (p: number, q: number, t: number) => {
-  let next = t;
-  if (next < 0) next += 1;
-  if (next > 1) next -= 1;
-  if (next < 1 / 6) return p + (q - p) * 6 * next;
-  if (next < 1 / 2) return q;
-  if (next < 2 / 3) return p + (q - p) * (2 / 3 - next) * 6;
-  return p;
-};
-
-const rotateHueRgba = (
-  rgba: [number, number, number, number],
-  degrees: number
-): [number, number, number, number] => {
-  const r = clamp(rgba[0], 0, 255) / 255;
-  const g = clamp(rgba[1], 0, 255) / 255;
-  const b = clamp(rgba[2], 0, 255) / 255;
-  const a = clamp(rgba[3], 0, 1);
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r:
-        h = (g - b) / d + (g < b ? 6 : 0);
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      default:
-        h = (r - g) / d + 4;
-        break;
-    }
-    h /= 6;
-  }
-
-  h += degrees / 360;
-  h = ((h % 1) + 1) % 1;
-
-  if (s === 0) {
-    const gray = Math.round(l * 255);
-    return [gray, gray, gray, a];
-  }
-
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const nextR = Math.round(hueToRgb(p, q, h + 1 / 3) * 255);
-  const nextG = Math.round(hueToRgb(p, q, h) * 255);
-  const nextB = Math.round(hueToRgb(p, q, h - 1 / 3) * 255);
-  return [nextR, nextG, nextB, a];
-};
-
-const cloneSymbol = (symbol: any) => {
-  if (!symbol) return null;
-  if (typeof symbol.clone === "function") {
-    return symbol.clone();
-  }
-  return {
-    ...symbol,
-    outline: symbol?.outline ? { ...symbol.outline } : symbol?.outline,
-    font: symbol?.font ? { ...symbol.font } : symbol?.font,
-    symbolLayers: Array.isArray(symbol?.symbolLayers)
-      ? symbol.symbolLayers.map((layer: any) => ({
-          ...layer,
-          material: layer?.material ? { ...layer.material } : layer?.material,
-          outline: layer?.outline ? { ...layer.outline } : layer?.outline,
-          halo: layer?.halo ? { ...layer.halo } : layer?.halo,
-          font: layer?.font ? { ...layer.font } : layer?.font,
-          resource: layer?.resource ? { ...layer.resource } : layer?.resource
-        }))
-      : symbol?.symbolLayers
-  };
-};
-
-const getSymbolLayers = (symbol: any): any[] => {
-  const layers = symbol?.symbolLayers;
-  if (!layers) return [];
-  if (Array.isArray(layers)) return layers;
-  if (typeof layers.toArray === "function") return layers.toArray();
-  try {
-    return Array.from(layers as Iterable<any>);
-  } catch {
-    return [];
-  }
-};
-
-const setSymbolLayers = (symbol: any, nextLayers: any[]) => {
-  try {
-    symbol.symbolLayers = nextLayers;
-    return;
-  } catch {
-    // fallback for Collection-backed symbolLayers
-  }
-  const collection = symbol?.symbolLayers;
-  if (!collection) return;
-  if (typeof collection.removeAll === "function") {
-    collection.removeAll();
-  }
-  if (typeof collection.addMany === "function") {
-    collection.addMany(nextLayers);
-  }
-};
-
-const applyPointSymbolScaleAngle = (graphic: any, size: number, angle: number) => {
-  const symbol = cloneSymbol(graphic?.symbol);
-  if (!symbol) return false;
-  if (symbol.type === "simple-marker") {
-    symbol.size = size;
-    symbol.angle = angle;
-    graphic.symbol = symbol;
-    return true;
-  }
-  if (symbol.type === "point-3d") {
-    const symbolLayers = getSymbolLayers(symbol);
-    if (!symbolLayers.length) return false;
-    let changed = false;
-    const nextLayers = symbolLayers.map((layer: any) => {
-      if (layer?.type !== "icon") return layer;
-      changed = true;
-      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
-      nextLayer.size = size;
-      nextLayer.angle = angle;
-      return nextLayer;
-    });
-    if (changed) {
-      setSymbolLayers(symbol, nextLayers);
-      graphic.symbol = symbol;
-      return true;
-    }
-  }
-  return false;
-};
-
-const applyLineSymbolWidth = (graphic: any, width: number) => {
-  const symbol = cloneSymbol(graphic?.symbol);
-  if (!symbol) return false;
-  if (symbol.type === "simple-line") {
-    symbol.width = width;
-    graphic.symbol = symbol;
-    return true;
-  }
-  if (symbol.type === "line-3d") {
-    const symbolLayers = getSymbolLayers(symbol);
-    if (!symbolLayers.length) return false;
-    let changed = false;
-    const nextLayers = symbolLayers.map((layer: any) => {
-      if (layer?.type !== "line" && layer?.type !== "path") return layer;
-      changed = true;
-      const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
-      if (nextLayer?.type === "path") {
-        nextLayer.width = width;
-        nextLayer.height = width;
-      } else {
-        nextLayer.size = width;
-      }
-      return nextLayer;
-    });
-    if (changed) {
-      setSymbolLayers(symbol, nextLayers);
-      graphic.symbol = symbol;
-      return true;
-    }
-  }
-  return false;
-};
-
-const applyLineSymbolGlow = (
-  graphic: any,
-  intensity: number,
-  colorOverride?: ArrayLike<number> | null
-) => {
-  const symbol = cloneSymbol(graphic?.symbol);
-  if (!symbol || symbol.type !== "line-3d") return false;
-  const symbolLayers = getSymbolLayers(symbol);
-  if (!symbolLayers.length) return false;
-  const override = colorOverride
-    ? toClampedColorArray(colorOverride, [255, 255, 255, 1])
-    : null;
-  let changed = false;
-  const nextLayers = symbolLayers.map((layer: any) => {
-    if (layer?.type !== "line" && layer?.type !== "path") return layer;
-    changed = true;
-    const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
-    const sourceColor = toClampedColorArray(nextLayer?.material?.color, [255, 255, 255, 1]);
-    const nextColor = override ?? sourceColor;
-    nextLayer.material = {
-      ...(nextLayer?.material ?? {}),
-      ...buildEmissiveMaterial(nextColor, intensity)
-    };
-    return nextLayer;
-  });
-  if (!changed) return false;
-  setSymbolLayers(symbol, nextLayers);
-  graphic.symbol = symbol;
-  return true;
-};
 
 const applyPolygonOutlineWidth = (graphic: any, width: number) => {
   const symbol = cloneSymbol(graphic?.symbol);
@@ -1095,7 +725,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     }
     const isPreviewing = isPlaying || isScrubbingTimeline;
     const hasRealAnimations = layerData.animations?.some((anim) => anim.type !== "__placeholder__") ?? false;
-    if (!hasRealAnimations && !config.hasPointKeyframes(layerData)) {
+    const hasLayerPointKeyframes = config.hasPointKeyframes(layerData);
+    const pointKeyframe = hasLayerPointKeyframes ? config.getPointKeyframeAtTime(layerData, time) : null;
+    const keyframedPointAngle = getPointKeyframeAngle(pointKeyframe);
+    if (!hasRealAnimations && !hasLayerPointKeyframes) {
       layerData.layer.opacity = 1;
       return;
     }
@@ -1116,7 +749,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       clearFireworksLayer(layerData);
       if (layerData.type === "point") {
         const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
-        const baseAngle = layerData.pointStyle?.angle ?? 0;
+        const baseAngle =
+          Number.isFinite(Number(keyframedPointAngle))
+            ? Number(keyframedPointAngle)
+            : layerData.pointStyle?.angle ?? 0;
         layerData.layer.graphics.forEach((graphic: any) => {
           applyPointSymbolScaleAngle(graphic, baseSize, baseAngle);
         });
@@ -1140,8 +776,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           applyTextSymbolState(graphic, layerData, baseText, baseSize);
         });
       }
-      if (config.hasPointKeyframes(layerData)) {
-        applyPointKeyframes(layerData, time, config.getPointKeyframeAtTime);
+      if (pointKeyframe) {
+        applyPointKeyframes(layerData, pointKeyframe);
       }
       return;
     }
@@ -1507,8 +1143,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     if (hasFillAnimation) {
       updatePolygonFill(layerData, activeFillAnimation, time, maxFillEnd);
     }
-    if (config.hasPointKeyframes(layerData)) {
-      applyPointKeyframes(layerData, time, config.getPointKeyframeAtTime);
+    if (pointKeyframe) {
+      applyPointKeyframes(layerData, pointKeyframe);
     }
     if (jitterProgress === null) {
       if (layerData.type === "polyline" && !hasDrawAnimation) {
@@ -1556,7 +1192,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     }
     if (layerData.type === "point") {
       const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
-      const baseAngle = layerData.pointStyle?.angle ?? 0;
+      const baseAngle =
+        Number.isFinite(Number(keyframedPointAngle))
+          ? Number(keyframedPointAngle)
+          : layerData.pointStyle?.angle ?? 0;
       const dartReveal = dartProgress !== null ? clamp((dartProgress - 0.78) / 0.22, 0, 1) : 1;
       const hideBasePoint = hasFireworksAnimation;
       layerData.layer.graphics.forEach((graphic: any) => {
@@ -4198,19 +3837,30 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
   });
 };
 
-const applyPointKeyframes = (
-  layerData: LayerData,
-  time: number,
-  getPointKeyframeAtTime: (layerData: LayerData, time: number) => PointKeyframe | null
-) => {
+const getPointKeyframeAngle = (frame: PointKeyframe | null) => {
+  const heading = Number(frame?.heading);
+  if (Number.isFinite(heading)) {
+    return heading;
+  }
+  const rotation = Number(frame?.rotation);
+  if (Number.isFinite(rotation)) {
+    return rotation;
+  }
+  return undefined;
+};
+
+const applyPointKeyframes = (layerData: LayerData, frame: PointKeyframe | null) => {
+  if (!frame) return;
   layerData.layer.graphics.forEach((graphic: any) => {
     if (!graphic?.geometry) return;
-    const frame = getPointKeyframeAtTime(layerData, time);
-    if (!frame) return;
+    const frameZ = Number(frame.z);
+    const currentZ = Number((graphic.geometry as any)?.z);
+    const z = Number.isFinite(frameZ) ? frameZ : Number.isFinite(currentZ) ? currentZ : undefined;
     graphic.geometry = new Point({
       x: frame.x,
       y: frame.y,
-      spatialReference: frame.spatialReference
+      spatialReference: frame.spatialReference ?? graphic.geometry?.spatialReference,
+      ...(Number.isFinite(Number(z)) ? { z: Number(z) } : {})
     });
   });
 };

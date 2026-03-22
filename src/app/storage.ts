@@ -8,6 +8,7 @@ import {
   STORAGE_CONSENT_KEY,
   sanitizePlainText
 } from "./constants";
+import { validateProjectSnapshot } from "./projectSnapshotValidation";
 
 type StorageConfig = {
   setProjectStatus: (state: "saved" | "dirty") => void;
@@ -124,8 +125,17 @@ const loadProjectFromStorage = (state: StorageState, config: StorageConfig) => {
     window.localStorage.getItem(PROJECT_STORAGE_KEY_LOCAL);
   if (!raw) return;
   try {
-    const snapshot = JSON.parse(raw);
-    void config.applyProjectSnapshot(snapshot);
+    const parsed = JSON.parse(raw);
+    const validation = validateProjectSnapshot(parsed);
+    if (!validation.ok) {
+      console.warn("Stored project snapshot failed validation.", validation.error);
+      config.setProjectError("Saved project could not be loaded.");
+      return;
+    }
+    void Promise.resolve(config.applyProjectSnapshot(validation.snapshot)).catch((error) => {
+      console.warn("Unable to apply stored project snapshot.", error);
+      config.setProjectError("Saved project could not be loaded.");
+    });
   } catch (error) {
     console.warn("Unable to parse stored project.", error);
     config.setProjectError("Saved project could not be loaded.");

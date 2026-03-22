@@ -19,8 +19,10 @@ export interface AnimationSettingsSnapshot {
     animations: LayerAnimation[];
     pointKeyframes?: PointKeyframe[];
     pointStyle?: PointStyle;
+    pointFollowTerrain3D?: boolean;
     lineStyle?: LineStyle;
     polygonStyle?: PolygonStyle;
+    polygonZOffset?: number;
     textContent?: string;
     textSize?: number;
     textColor?: string;
@@ -50,8 +52,10 @@ export function buildAnimationSettingsSnapshot(
       animations: layer.animations.map((anim) => ({ ...anim })),
       pointKeyframes: layer.pointKeyframes?.map((frame) => ({ ...frame })),
       pointStyle: layer.pointStyle ? { ...layer.pointStyle } : undefined,
+      pointFollowTerrain3D: layer.pointFollowTerrain3D,
       lineStyle: layer.lineStyle ? { ...layer.lineStyle } : undefined,
       polygonStyle: layer.polygonStyle ? { ...layer.polygonStyle } : undefined,
+      polygonZOffset: layer.polygonZOffset,
       textContent: layer.textContent,
       textSize: layer.textSize,
       textColor: layer.textColor,

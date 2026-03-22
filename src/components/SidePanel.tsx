@@ -56,7 +56,7 @@ function SidePanel({ themeMode }: SidePanelProps) {
 
             <div id="animation-settings-stash" style={{ display: "none" }}>
               <div id="animation-settings-panel" className="animation-settings-panel">
-                <div className="animation-type-row">
+                <div id="animation-type-base-section" className="animation-type-row">
                   <div className="animation-type-inline">
                     <div id="animation-type-options" className="animation-type-options"></div>
                   </div>
@@ -106,6 +106,18 @@ function SidePanel({ themeMode }: SidePanelProps) {
                   >
                     Feature Style
                   </calcite-button>
+                </div>
+
+                <div id="camera-animation-settings" style={{ display: "none" }}>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Camera blend mode
+                    <calcite-select id="camera-keyframe-easing" scale="m">
+                      <calcite-option value="linear">Linear</calcite-option>
+                      <calcite-option value="ease-in">Ease In</calcite-option>
+                      <calcite-option value="ease-out">Ease Out</calcite-option>
+                      <calcite-option value="ease-in-out">Ease In/Out</calcite-option>
+                    </calcite-select>
+                  </calcite-label>
                 </div>
               </div>
             </div>

@@ -9,7 +9,7 @@ function Modals() {
               Point Style
               <calcite-input
                 id="point-style-search"
-                placeholder="Search pins"
+                placeholder="Search styles (e.g. 3D, car, boat)"
                 scale="s"
                 clearable
               ></calcite-input>
@@ -19,6 +19,32 @@ function Modals() {
                 role="group"
                 aria-label="Point style"
               >
+                <div id="point-3d-models-title" className="style-option-section-title">
+                  3D Scene Models
+                </div>
+                <button type="button" className="style-option-btn" data-value="model-car">
+                  <span className="point-style-swatch point-style-swatch--square"></span>
+                  3D Car
+                </button>
+                <button type="button" className="style-option-btn" data-value="model-bus">
+                  <span className="point-style-swatch point-style-swatch--square"></span>
+                  3D Bus
+                </button>
+                <button type="button" className="style-option-btn" data-value="model-train">
+                  <span className="point-style-swatch point-style-swatch--square"></span>
+                  3D Train
+                </button>
+                <button type="button" className="style-option-btn" data-value="model-boat">
+                  <span className="point-style-swatch point-style-swatch--triangle"></span>
+                  3D Boat
+                </button>
+                <button type="button" className="style-option-btn" data-value="model-airplane">
+                  <span className="point-style-swatch point-style-swatch--triangle"></span>
+                  3D Airplane
+                </button>
+                <div id="point-webstyle-dynamic-title" className="style-option-section-title" style={{ display: "none" }}>
+                  ArcGIS 3D WebSymbols
+                </div>
                 <div className="style-option-section-title">Basic</div>
                 <button type="button" className="style-option-btn" data-value="circle">
                   <span className="point-style-swatch point-style-swatch--circle"></span>
@@ -759,6 +785,22 @@ function Modals() {
                   <span className="polygon-style-swatch polygon-style-swatch--none"></span>
                   None
                 </button>
+                <button type="button" className="style-option-btn" data-value="water-calm">
+                  <span className="polygon-style-swatch polygon-style-swatch--water-calm"></span>
+                  Water Calm (3D)
+                </button>
+                <button type="button" className="style-option-btn" data-value="water-rippled">
+                  <span className="polygon-style-swatch polygon-style-swatch--water-rippled"></span>
+                  Water Rippled (3D)
+                </button>
+                <button type="button" className="style-option-btn" data-value="water-slight">
+                  <span className="polygon-style-swatch polygon-style-swatch--water-slight"></span>
+                  Water Slight (3D)
+                </button>
+                <button type="button" className="style-option-btn" data-value="water-moderate">
+                  <span className="polygon-style-swatch polygon-style-swatch--water-moderate"></span>
+                  Water Moderate (3D)
+                </button>
               </div>
             </calcite-label>
 
@@ -833,6 +875,18 @@ function Modals() {
                 scale="m"
               ></calcite-slider>
             </calcite-label>
+
+            <calcite-label id="polygon-zoffset-row" style={{ marginTop: 12 }}>
+              Z Offset (m, 3D)
+              <calcite-input-number
+                id="polygon-zoffset-input"
+                value="0"
+                min="-10000"
+                max="10000"
+                step="0.5"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
           </div>
 
           <div id="layer-effects-section">
@@ -881,6 +935,11 @@ function Modals() {
                     step="1"
                     scale="m"
                   ></calcite-input-number>
+                </calcite-label>
+
+                <calcite-label id="point-follow-terrain-row" style={{ marginTop: 12 }}>
+                  Follow terrain in 3D
+                  <calcite-switch id="point-follow-terrain-toggle" checked></calcite-switch>
                 </calcite-label>
               </div>
               <calcite-label style={{ marginTop: 12 }}>
@@ -1111,6 +1170,17 @@ function Modals() {
               placeholder="Enter text"
               scale="m"
             ></calcite-input>
+          </calcite-label>
+          <calcite-label style={{ marginTop: 12 }}>
+            Text Type
+            <calcite-select id="text-render-mode-select" scale="m">
+              <calcite-option value="scene-3d">Scene text (3D)</calcite-option>
+              <calcite-option value="flat">Flat text (2D style)</calcite-option>
+            </calcite-select>
+          </calcite-label>
+          <calcite-label id="text-3d-callout-row" style={{ marginTop: 12 }}>
+            Callout line (3D)
+            <calcite-switch id="text-3d-callout-toggle"></calcite-switch>
           </calcite-label>
           <calcite-label style={{ marginTop: 12 }}>
             Font Family

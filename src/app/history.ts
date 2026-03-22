@@ -1,4 +1,5 @@
 import { HISTORY_LIMIT } from "./constants";
+import { validateProjectSnapshot } from "./projectSnapshotValidation";
 
 type HistoryState = {
   historyStack: string[];
@@ -53,9 +54,13 @@ const applyHistorySnapshot = async (
   payload: string
 ) => {
   try {
-    const snapshot = JSON.parse(payload);
+    const parsed = JSON.parse(payload);
+    const validation = validateProjectSnapshot(parsed);
+    if (!validation.ok) {
+      throw new Error(validation.error);
+    }
     state.isApplyingHistory = true;
-    await config.applyProjectSnapshot(snapshot);
+    await config.applyProjectSnapshot(validation.snapshot);
   } catch (error) {
     console.warn("Unable to restore history snapshot.", error);
     config.setProjectError("Undo/redo failed to restore the project.");
