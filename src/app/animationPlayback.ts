@@ -38,6 +38,7 @@ import {
   triangleWave
 } from "./animationPlaybackHelpers";
 import { defaultLineStyle, defaultPolygonStyle } from "./constants";
+import { syncTextMeshOverlay } from "./textMesh";
 
 type AnimationPlaybackConfig = {
   getView: () => any;
@@ -205,6 +206,8 @@ const applyPolygonOutlineWidth = (graphic: any, width: number) => {
 };
 
 const applyTextSymbolState = (graphic: any, layerData: LayerData, text: string, size: number) => {
+  graphic.__pulseTextCurrentText = text;
+  graphic.__pulseTextCurrentSize = size;
   const symbol = cloneSymbol(graphic?.symbol);
   if (!symbol) return false;
   if (symbol.type === "text") {
@@ -775,6 +778,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         layerData.layer.graphics.forEach((graphic: any) => {
           applyTextSymbolState(graphic, layerData, baseText, baseSize);
         });
+        syncTextMeshOverlay(layerData, config.getView?.());
       }
       if (pointKeyframe) {
         applyPointKeyframes(layerData, pointKeyframe);
@@ -3833,6 +3837,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       layerData.layer.blendMode = blendOverride ?? baseBlend;
     } else {
       applyBaseLayerEffect(layerData);
+    }
+    if (layerData.type === "text") {
+      syncTextMeshOverlay(layerData, config.getView?.());
     }
   });
 };

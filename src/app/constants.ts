@@ -44,6 +44,7 @@ export const defaultPolygonStyle: PolygonStyle = {
   outlineWidth: 2,
   outlineStyle: "solid"
 };
+export const DEFAULT_TEXT_MESH_DEPTH_PERCENT = 22;
 
 export const PROJECT_STORAGE_KEY_LOCAL = "pulse.project.local";
 export const PROJECT_STORAGE_KEY_SESSION = "pulse.project.session";
@@ -98,6 +99,10 @@ export type ProjectLayerSnapshot = {
   textUnderline?: boolean;
   textRenderMode?: TextRenderMode;
   textCalloutLine?: boolean;
+  textDepth?: number;
+  textFixedToWorld?: boolean;
+  textWorldHeight?: number;
+  textWorldRotation?: number;
   featureLayerUrl?: string;
   featureFields?: Array<{ name: string; type: string }>;
   featureField?: string;

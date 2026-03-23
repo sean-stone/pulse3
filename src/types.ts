@@ -1,6 +1,6 @@
 export type LayerType = "point" | "polyline" | "polygon" | "text" | "feature";
 export type PointKeyframeEasing = "linear" | "ease-in" | "ease-out" | "ease-in-out";
-export type TextRenderMode = "flat" | "scene-3d";
+export type TextRenderMode = "flat" | "scene-3d" | "mesh-3d";
 
 export interface LayerAnimation {
   type: string;
@@ -79,6 +79,10 @@ export interface LayerData {
   textUnderline?: boolean;
   textRenderMode?: TextRenderMode;
   textCalloutLine?: boolean;
+  textDepth?: number;
+  textFixedToWorld?: boolean;
+  textWorldHeight?: number;
+  textWorldRotation?: number;
   pointStyle?: PointStyle;
   pointFollowTerrain3D?: boolean;
   lineStyle?: LineStyle;

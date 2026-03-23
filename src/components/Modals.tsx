@@ -1183,6 +1183,7 @@ function Modals() {
           <calcite-label style={{ marginTop: 12 }}>
             Text Type
             <calcite-select id="text-render-mode-select" scale="m">
+              <calcite-option value="mesh-3d">True 3D text</calcite-option>
               <calcite-option value="scene-3d">Scene text (3D)</calcite-option>
               <calcite-option value="flat">Flat text (2D style)</calcite-option>
             </calcite-select>
@@ -1190,6 +1191,22 @@ function Modals() {
           <calcite-label id="text-3d-callout-row" style={{ marginTop: 12 }}>
             Callout line (3D)
             <calcite-switch id="text-3d-callout-toggle"></calcite-switch>
+          </calcite-label>
+          <calcite-label id="text-3d-depth-row" style={{ marginTop: 12 }}>
+            Depth (True 3D)
+            <calcite-slider
+              id="text-3d-depth-slider"
+              min="5"
+              max="60"
+              value="22"
+              step="1"
+              label-handles="true"
+              scale="m"
+            ></calcite-slider>
+          </calcite-label>
+          <calcite-label id="text-3d-fixed-world-row" style={{ marginTop: 12 }}>
+            Fix to world
+            <calcite-switch id="text-3d-fixed-world-toggle"></calcite-switch>
           </calcite-label>
           <calcite-label style={{ marginTop: 12 }}>
             Font Family

@@ -27,6 +27,15 @@ export interface AnimationSettingsSnapshot {
     textContent?: string;
     textSize?: number;
     textColor?: string;
+    textFontFamily?: string;
+    textItalic?: boolean;
+    textUnderline?: boolean;
+    textRenderMode?: "flat" | "scene-3d" | "mesh-3d";
+    textCalloutLine?: boolean;
+    textDepth?: number;
+    textFixedToWorld?: boolean;
+    textWorldHeight?: number;
+    textWorldRotation?: number;
     featureLayerUrl?: string;
     featureFields?: Array<{ name: string; type: string }>;
     featureField?: string;
@@ -61,6 +70,15 @@ export function buildAnimationSettingsSnapshot(
       textContent: layer.textContent,
       textSize: layer.textSize,
       textColor: layer.textColor,
+      textFontFamily: layer.textFontFamily,
+      textItalic: layer.textItalic,
+      textUnderline: layer.textUnderline,
+      textRenderMode: layer.textRenderMode,
+      textCalloutLine: layer.textCalloutLine,
+      textDepth: layer.textDepth,
+      textFixedToWorld: layer.textFixedToWorld,
+      textWorldHeight: layer.textWorldHeight,
+      textWorldRotation: layer.textWorldRotation,
       featureLayerUrl: layer.featureLayerUrl,
       featureFields: layer.featureFields?.map((field) => ({ ...field })),
       featureField: layer.featureField,

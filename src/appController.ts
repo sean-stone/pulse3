@@ -35,6 +35,7 @@ import {
   DEFAULT_CIRCLE_SIZE,
   DEFAULT_PIN_Y_OFFSET,
   DEFAULT_PIN_SIZE,
+  DEFAULT_TEXT_MESH_DEPTH_PERCENT,
   ENABLE_PROJECT_STORAGE,
   EXPORT_WARNING_ANIMATIONS,
   EXPORT_WARNING_DURATION,
@@ -57,6 +58,15 @@ import {
   toGeographicGeometry,
   toViewGeometry
 } from "./app/geometryInterop";
+import {
+  buildTextMeshAnchorSymbol,
+  destroyTextMeshOverlay,
+  isMeshTextRenderMode,
+  measureTextMeshWorldHeight,
+  measureTextMeshRotation,
+  resolveTextMeshHitGraphic,
+  syncTextMeshOverlay
+} from "./app/textMesh";
 import "jszip/dist/jszip.min.js";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
@@ -359,6 +369,7 @@ let isAddingFeatureLayer = false;
 let isRestoringProject = false;
 let projectSaveTimer: number | null = null;
 let thumbtackParallaxRafId: number | null = null;
+let textMeshOverlayRefreshRafId: number | null = null;
 let pendingTextPlacement: { layerIndex: number } | null = null;
 let textPlacementHandle: { remove: () => void } | null = null;
 let activeTextLayerIndex: number | null = null;
@@ -414,6 +425,7 @@ let mapContextMenuSuppressUntil = 0;
 let viewExtentWatchHandle: { remove: () => void } | null = null;
 let viewClickHandle: { remove: () => void } | null = null;
 let viewDoubleClickHandle: { remove: () => void } | null = null;
+let textMeshViewWatchHandle: { remove: () => void } | null = null;
 let isStorageQuotaWarningActive = false;
 let worldCountriesLayer: FeatureLayer | null = null;
 let worldCountriesLayerPromise: Promise<FeatureLayer> | null = null;
@@ -1983,11 +1995,11 @@ function getViewScreenPoint(event: MouseEvent) {
 async function getHitLayerIndex(screenPoint: { x: number; y: number }) {
   if (!view) return -1;
   const response = await view.hitTest(screenPoint as any);
-  const hit = response.results.find((result: any) =>
-    graphicsLayers.some((layerData) => layerData.layer === result.graphic?.layer)
-  );
-  if (!hit?.graphic?.layer) return -1;
-  return graphicsLayers.findIndex((layerData) => layerData.layer === hit.graphic.layer);
+  const hit = response.results
+    .map((result: any) => resolveInteractiveLayerHit(result.graphic))
+    .find(Boolean);
+  if (!hit?.layerData) return -1;
+  return graphicsLayers.findIndex((layerData) => layerData === hit.layerData);
 }
 
 function renderMapContextMenu(title: string, entries: MapContextMenuEntry[]) {
@@ -2293,12 +2305,34 @@ function bindActiveViewHandlers() {
     viewDoubleClickHandle.remove();
     viewDoubleClickHandle = null;
   }
+  if (textMeshViewWatchHandle) {
+    textMeshViewWatchHandle.remove();
+    textMeshViewWatchHandle = null;
+  }
   viewClickHandle = view.on("click", handleMapClick);
   viewDoubleClickHandle = view.on("double-click", handleMapDoubleClick);
+  textMeshViewWatchHandle = reactiveUtils.watch(
+    () => {
+      const camera = (view as any)?.camera;
+      return [
+        Number(camera?.position?.x) || 0,
+        Number(camera?.position?.y) || 0,
+        Number(camera?.position?.z) || 0,
+        Number(camera?.heading) || 0,
+        Number(camera?.tilt) || 0,
+        Number(camera?.fov) || 0,
+        Number((view as any)?.height) || 0
+      ];
+    },
+    () => {
+      scheduleTextMeshOverlayRefresh();
+    }
+  );
   setupCompassWatcher(true);
   initMapContextMenu();
   updateSnappingOptions();
   updateExportResolutionLabel(view as any);
+  scheduleTextMeshOverlayRefresh();
 }
 
 function applyLayerModeProperties(layerData: LayerData) {
@@ -2469,6 +2503,7 @@ async function applyProjectSnapshot(snapshot: unknown) {
       view.map.removeMany(overlayLayers);
     }
     graphicsLayers.forEach((layerData) => {
+      delete (layerData as any).__textMeshLayer;
       delete (layerData as any).__arrowLayer;
       delete (layerData as any).__barrageLayer;
       delete (layerData as any).__dartLayer;
@@ -4339,8 +4374,67 @@ function setDeleteLayerButtonVisible(visible: boolean) {
   button.classList.toggle("show", visible);
 }
 
+function normalizeTextRenderMode(value: unknown): "flat" | "scene-3d" | "mesh-3d" {
+  const normalized = String(value || "");
+  if (normalized === "flat" || normalized === "mesh-3d") {
+    return normalized;
+  }
+  return "scene-3d";
+}
+
+function refreshTextMeshOverlays() {
+  if (!view) return;
+  graphicsLayers.forEach((layerData) => {
+    if (layerData.type !== "text") return;
+    syncTextMeshOverlay(layerData, view);
+  });
+}
+
+function scheduleTextMeshOverlayRefresh() {
+  if (textMeshOverlayRefreshRafId !== null) {
+    return;
+  }
+  textMeshOverlayRefreshRafId = requestAnimationFrame(() => {
+    textMeshOverlayRefreshRafId = null;
+    refreshTextMeshOverlays();
+  });
+}
+
+function getPrimaryLayerGraphic(layerData: LayerData) {
+  return (
+    (layerData.layer.graphics as any)?.getItemAt?.(0) ??
+    layerData.layer.graphics?.items?.[0] ??
+    null
+  );
+}
+
+function captureTextWorldHeight(layerData: LayerData, size: number) {
+  const graphic = getPrimaryLayerGraphic(layerData);
+  return measureTextMeshWorldHeight(view, graphic?.geometry ?? null, size);
+}
+
+function captureTextWorldRotation(layerData: LayerData) {
+  const graphic = getPrimaryLayerGraphic(layerData);
+  return measureTextMeshRotation(view, graphic?.geometry ?? null);
+}
+
+function resolveInteractiveLayerHit(graphic: any) {
+  if (!graphic) return null;
+  const meshHit = resolveTextMeshHitGraphic(graphic);
+  if (meshHit) {
+    return meshHit;
+  }
+  const layerData = graphicsLayers.find((entry) => entry.layer === graphic.layer);
+  if (!layerData) return null;
+  return {
+    layerData,
+    graphic
+  };
+}
+
 function getLayerOverlayLayers(layerData: LayerData) {
   return [
+    (layerData as any).__textMeshLayer,
     (layerData as any).__arrowLayer,
     (layerData as any).__barrageLayer,
     (layerData as any).__dartLayer,
@@ -4357,6 +4451,7 @@ function clearLayerOverlayLayers(layerData: LayerData) {
   if (overlays.length) {
     view.map.removeMany(overlays);
   }
+  delete (layerData as any).__textMeshLayer;
   delete (layerData as any).__arrowLayer;
   delete (layerData as any).__barrageLayer;
   delete (layerData as any).__dartLayer;
@@ -4397,6 +4492,7 @@ async function resetProject() {
     view.map.removeMany(overlayLayers);
   }
   graphicsLayers.forEach((layerData) => {
+    delete (layerData as any).__textMeshLayer;
     delete (layerData as any).__arrowLayer;
     delete (layerData as any).__barrageLayer;
     delete (layerData as any).__dartLayer;
@@ -5447,11 +5543,13 @@ export function getAnimationSettingsSnapshot() {
   getEl("text-content-input").addEventListener("input", handleTextContentInput);
   getEl("text-render-mode-select").addEventListener("calciteSelectChange", () => {
     const renderModeSelect = getEl("text-render-mode-select") as any;
-    updateTextCalloutControlVisibility(String(renderModeSelect?.value || "scene-3d"));
+    updateTextModeControlVisibility(String(renderModeSelect?.value || "scene-3d"));
     applyTextSettings(false);
   });
   getEl("text-font-select").addEventListener("calciteSelectChange", () => applyTextSettings(false));
   getEl("text-size-slider").addEventListener("calciteSliderInput", () => applyTextSettings(false));
+  getEl("text-3d-depth-slider").addEventListener("calciteSliderInput", () => applyTextSettings(false));
+  getEl("text-3d-fixed-world-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
   getEl("text-color-input").addEventListener("input", () => applyTextSettings(false));
   getEl("text-color-input").addEventListener("change", () => applyTextSettings(false));
   getEl("text-italic-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
@@ -6114,6 +6212,20 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.polygonStyle = { ...defaultPolygonStyle };
     layerData.polygonZOffset = 0;
     layerData.layerEffectsEnabled = true;
+  } else if (type === "text") {
+    layerData.textContent = "Text";
+    layerData.textSize = 14;
+    layerData.textColor = "#22323a";
+    layerData.textFontFamily = "sans-serif";
+    layerData.textItalic = false;
+    layerData.textUnderline = false;
+    layerData.textRenderMode = "mesh-3d";
+    layerData.textCalloutLine = false;
+    layerData.textDepth = DEFAULT_TEXT_MESH_DEPTH_PERCENT;
+    layerData.textFixedToWorld = false;
+    layerData.textWorldHeight = undefined;
+    layerData.textWorldRotation = undefined;
+    layerData.layerEffectsEnabled = true;
   }
 
   applyLayerModeProperties(layerData);
@@ -6169,6 +6281,7 @@ function beginTextPlacement(layerIndex: number) {
     });
 
     layerData.layer.add(graphic);
+    applyTextSymbols(layerData);
     isDrawing = false;
     setDrawInfoBoxVisible(false);
     pendingTextPlacement = null;
@@ -6239,8 +6352,12 @@ async function startDrawing(type: LayerType) {
     layerData.textFontFamily = "sans-serif";
     layerData.textItalic = false;
     layerData.textUnderline = false;
-    layerData.textRenderMode = "scene-3d";
+    layerData.textRenderMode = "mesh-3d";
     layerData.textCalloutLine = false;
+    layerData.textDepth = DEFAULT_TEXT_MESH_DEPTH_PERCENT;
+    layerData.textFixedToWorld = false;
+    layerData.textWorldHeight = undefined;
+    layerData.textWorldRotation = undefined;
     pendingTextPlacement = { layerIndex };
     selectLayer(layerIndex, false);
     openTextSettingsModal();
@@ -6664,6 +6781,10 @@ async function duplicateLayer(index: number) {
     textUnderline: layerData.textUnderline,
     textRenderMode: layerData.textRenderMode,
     textCalloutLine: layerData.textCalloutLine,
+    textDepth: layerData.textDepth,
+    textFixedToWorld: layerData.textFixedToWorld,
+    textWorldHeight: layerData.textWorldHeight,
+    textWorldRotation: layerData.textWorldRotation,
     layerBlendMode: layerData.layerBlendMode,
     layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
     layerEffectsEnabled: layerData.layerEffectsEnabled
@@ -6696,9 +6817,9 @@ async function handleMapClick(event: any) {
   if (event?.button === 2 || event?.native?.button === 2) return;
   closeMapContextMenu();
   const response = await view.hitTest(event);
-  const hit = response.results.find((result: any) =>
-    graphicsLayers.some((layerData) => layerData.layer === result.graphic?.layer)
-  );
+  const hit = response.results
+    .map((result: any) => resolveInteractiveLayerHit(result.graphic))
+    .find(Boolean);
 
   if (!hit) {
     selectedLayerIndex = -1;
@@ -6711,7 +6832,7 @@ async function handleMapClick(event: any) {
   }
 
   const layerIndex = graphicsLayers.findIndex(
-    (layerData) => layerData.layer === hit.graphic.layer
+    (layerData) => layerData === hit.layerData
   );
 
   if (layerIndex >= 0) {
@@ -6732,15 +6853,12 @@ async function handleMapDoubleClick(event: any) {
   event.preventDefault?.();
 
   const response = await view.hitTest(event);
-  const hit = response.results.find((result: any) => {
-    const graphic = result.graphic;
-    return graphic?.symbol?.type === "text";
-  });
+  const hit = response.results
+    .map((result: any) => resolveInteractiveLayerHit(result.graphic))
+    .find((result: any) => result?.layerData?.type === "text");
 
   if (!hit) return;
-  const layerIndex = graphicsLayers.findIndex(
-    (layerData) => layerData.layer === hit.graphic.layer
-  );
+  const layerIndex = graphicsLayers.findIndex((layerData) => layerData === hit.layerData);
   if (layerIndex < 0) return;
 
   selectLayer(layerIndex, false, hit.graphic);
@@ -6883,9 +7001,15 @@ function applyLayerEffects(layerData: LayerData) {
   const enabled = layerData.layerEffectsEnabled !== false;
   if (!enabled || isDefaultEffectSettings(settings)) {
     layerData.layer.effect = "";
+    if (layerData.type === "text") {
+      syncTextMeshOverlay(layerData, view);
+    }
     return;
   }
   layerData.layer.effect = buildLayerEffectString(settings);
+  if (layerData.type === "text") {
+    syncTextMeshOverlay(layerData, view);
+  }
 }
 
 function applyStyleSettings(shouldClose: boolean) {
@@ -7398,15 +7522,33 @@ function buildTextSymbolForCurrentView(layerData: LayerData) {
   if (currentViewMode !== "3d") {
     return buildTextSymbol2D(layerData);
   }
-  return layerData.textRenderMode === "flat" ? buildTextSymbol2D(layerData) : buildTextSymbol3D(layerData);
+  const renderMode = normalizeTextRenderMode(layerData.textRenderMode);
+  if (renderMode === "flat") {
+    return buildTextSymbol2D(layerData);
+  }
+  if (renderMode === "mesh-3d") {
+    return buildTextMeshAnchorSymbol();
+  }
+  return buildTextSymbol3D(layerData);
 }
 
 function applyTextSymbols(layerData: LayerData) {
   if (layerData.type !== "text") return;
   applyLayerModeProperties(layerData);
+  const renderMode = normalizeTextRenderMode(layerData.textRenderMode);
   layerData.layer.graphics.forEach((graphic: any) => {
-    graphic.symbol = buildTextSymbolForCurrentView(layerData);
+    graphic.__pulseTextCurrentText = layerData.textContent || "Text";
+    graphic.__pulseTextCurrentSize = layerData.textSize ?? 14;
+    graphic.symbol =
+      currentViewMode === "3d" && renderMode === "mesh-3d"
+        ? buildTextMeshAnchorSymbol()
+        : buildTextSymbolForCurrentView(layerData);
   });
+  if (currentViewMode === "3d" && renderMode === "mesh-3d") {
+    syncTextMeshOverlay(layerData, view);
+    return;
+  }
+  destroyTextMeshOverlay(layerData, view);
 }
 
 function applyThumbtackParallaxToLayer(layerData: LayerData) {
@@ -7551,6 +7693,10 @@ function handleSketchUpdate(event: any) {
   });
   touchedLayers.forEach((layerData) => {
     applyLayerModeProperties(layerData);
+    if (layerData.type === "text") {
+      applyTextSymbols(layerData);
+      return;
+    }
     clearLayerOverlayLayers(layerData);
   });
   graphicsLayers.forEach((layerData) => {
@@ -8253,33 +8399,46 @@ function openTextSettingsModal() {
   setTimeout(() => (getEl("text-content-input") as any)?.focus?.(), 0);
 }
 
-function updateTextCalloutControlVisibility(renderMode: string) {
+function updateTextModeControlVisibility(renderMode: string) {
   const calloutRow = document.getElementById("text-3d-callout-row") as HTMLElement | null;
-  if (!calloutRow) return;
-  calloutRow.style.display = renderMode === "scene-3d" ? "" : "none";
+  const depthRow = document.getElementById("text-3d-depth-row") as HTMLElement | null;
+  const fixedWorldRow = document.getElementById("text-3d-fixed-world-row") as HTMLElement | null;
+  if (calloutRow) {
+    calloutRow.style.display = renderMode === "scene-3d" ? "" : "none";
+  }
+  if (depthRow) {
+    depthRow.style.display = renderMode === "mesh-3d" ? "" : "none";
+  }
+  if (fixedWorldRow) {
+    fixedWorldRow.style.display = renderMode === "mesh-3d" ? "" : "none";
+  }
 }
 
 function syncTextPanelFromLayer(layerData: LayerData) {
   const contentInput = document.getElementById("text-content-input") as any;
   if (!contentInput) return;
   const sizeSlider = document.getElementById("text-size-slider") as any;
+  const depthSlider = document.getElementById("text-3d-depth-slider") as any;
   const colorInput = document.getElementById("text-color-input") as HTMLInputElement | null;
   const renderModeSelect = document.getElementById("text-render-mode-select") as any;
   const fontSelect = document.getElementById("text-font-select") as any;
   const italicToggle = document.getElementById("text-italic-toggle") as any;
   const underlineToggle = document.getElementById("text-underline-toggle") as any;
   const calloutToggle = document.getElementById("text-3d-callout-toggle") as any;
+  const fixedWorldToggle = document.getElementById("text-3d-fixed-world-toggle") as any;
 
   contentInput.value = layerData.textContent || "Text";
   if (sizeSlider) sizeSlider.value = layerData.textSize || 14;
+  if (depthSlider) depthSlider.value = layerData.textDepth ?? DEFAULT_TEXT_MESH_DEPTH_PERCENT;
   if (colorInput) colorInput.value = layerData.textColor || "#22323a";
-  const renderMode = layerData.textRenderMode || "scene-3d";
+  const renderMode = normalizeTextRenderMode(layerData.textRenderMode);
   if (renderModeSelect) renderModeSelect.value = renderMode;
   if (fontSelect) fontSelect.value = layerData.textFontFamily || "sans-serif";
   if (italicToggle) italicToggle.checked = Boolean(layerData.textItalic);
   if (underlineToggle) underlineToggle.checked = Boolean(layerData.textUnderline);
   if (calloutToggle) calloutToggle.checked = Boolean(layerData.textCalloutLine);
-  updateTextCalloutControlVisibility(renderMode);
+  if (fixedWorldToggle) fixedWorldToggle.checked = Boolean(layerData.textFixedToWorld);
+  updateTextModeControlVisibility(renderMode);
 }
 
 function openAiModal() {
@@ -8421,19 +8580,25 @@ function applyTextSettings(
   const content = sanitizePlainText(rawContent, "Text");
   const sizeInput = getEl("text-size-slider") as any;
   const size = overrides?.size ?? Number(sizeInput?.value);
+  const depthInput = getEl("text-3d-depth-slider") as any;
+  const depth = Number(depthInput?.value);
   const colorInput = getEl("text-color-input") as HTMLInputElement;
   const color = overrides?.color ?? colorInput.value;
   const renderModeSelect = getEl("text-render-mode-select") as any;
-  const renderModeRaw = String(renderModeSelect?.value || layerData.textRenderMode || "scene-3d");
-  const renderMode = renderModeRaw === "flat" ? "flat" : "scene-3d";
+  const previousRenderMode = normalizeTextRenderMode(layerData.textRenderMode);
+  const previousSize = Number(layerData.textSize ?? 14);
+  const previousFixedToWorld = Boolean(layerData.textFixedToWorld);
+  const renderMode = normalizeTextRenderMode(renderModeSelect?.value || layerData.textRenderMode || "scene-3d");
   const fontSelect = getEl("text-font-select") as any;
   const fontFamily = String(fontSelect?.value || layerData.textFontFamily || "sans-serif");
   const italicToggle = getEl("text-italic-toggle") as any;
   const underlineToggle = getEl("text-underline-toggle") as any;
   const calloutToggle = getEl("text-3d-callout-toggle") as any;
+  const fixedWorldToggle = getEl("text-3d-fixed-world-toggle") as any;
   const isItalic = Boolean(italicToggle?.checked);
   const isUnderline = Boolean(underlineToggle?.checked);
   const hasCalloutLine = Boolean(calloutToggle?.checked);
+  const fixedToWorld = Boolean(fixedWorldToggle?.checked);
 
   layerData.textContent = content;
   layerData.textSize = Number.isFinite(size) ? size : layerData.textSize;
@@ -8443,8 +8608,19 @@ function applyTextSettings(
   layerData.textItalic = isItalic;
   layerData.textUnderline = isUnderline;
   layerData.textCalloutLine = hasCalloutLine;
+  layerData.textDepth = Number.isFinite(depth) ? depth : DEFAULT_TEXT_MESH_DEPTH_PERCENT;
+  layerData.textFixedToWorld = fixedToWorld;
+  if (renderMode === "mesh-3d" && fixedToWorld) {
+    const sizeChanged = Math.abs((Number.isFinite(size) ? size : previousSize) - previousSize) > 0.001;
+    if (!previousFixedToWorld || previousRenderMode !== "mesh-3d" || sizeChanged) {
+      layerData.textWorldHeight = captureTextWorldHeight(layerData, Number.isFinite(size) ? size : previousSize);
+    }
+    if (!previousFixedToWorld || previousRenderMode !== "mesh-3d") {
+      layerData.textWorldRotation = captureTextWorldRotation(layerData);
+    }
+  }
 
-  updateTextCalloutControlVisibility(renderMode);
+  updateTextModeControlVisibility(renderMode);
 
   applyTextSymbols(layerData);
 
