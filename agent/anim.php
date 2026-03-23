@@ -418,6 +418,52 @@ $schema = [
                                 "basemap" => ["type" => "string"],
                                 "basemapVisible" => ["type" => "boolean"],
                                 "basemapLabelsVisible" => ["type" => ["boolean", "null"]],
+                                "google3DTilesEnabled" => ["type" => ["boolean", "null"]],
+                                "viewTrackKeyframes" => [
+                                    "anyOf" => [
+                                        [
+                                            "type" => "array",
+                                            "items" => [
+                                                "type" => "object",
+                                                "additionalProperties" => false,
+                                                "properties" => [
+                                                    "time" => ["type" => "number"],
+                                                    "x" => ["type" => "number"],
+                                                    "y" => ["type" => "number"],
+                                                    "z" => ["type" => ["number", "null"]],
+                                                    "heading" => ["type" => ["number", "null"]],
+                                                    "tilt" => ["type" => ["number", "null"]],
+                                                    "fov" => ["type" => ["number", "null"]],
+                                                    "rotation" => ["type" => ["number", "null"]],
+                                                    "scale" => ["type" => ["number", "null"]],
+                                                    "easing" => [
+                                                        "type" => ["string", "null"],
+                                                        "enum" => ["linear", "ease-in", "ease-out", "ease-in-out", null]
+                                                    ],
+                                                    "spatialReference" => [
+                                                        "anyOf" => [
+                                                            [
+                                                                "type" => "object",
+                                                                "additionalProperties" => false,
+                                                                "properties" => [
+                                                                    "wkid" => ["type" => ["integer", "null"]],
+                                                                    "latestWkid" => ["type" => ["integer", "null"]]
+                                                                ]
+                                                            ],
+                                                            [
+                                                                "type" => "null"
+                                                            ]
+                                                        ]
+                                                    ]
+                                                ],
+                                                "required" => ["time", "x", "y"]
+                                            ]
+                                        ],
+                                        [
+                                            "type" => "null"
+                                        ]
+                                    ]
+                                ],
                                 "backgroundColor" => ["type" => ["string", "null"]],
                                 "backgroundTransparent" => ["type" => ["boolean", "null"]],
                                 "mode" => [
@@ -425,6 +471,74 @@ $schema = [
                                         [
                                             "type" => "string",
                                             "enum" => ["2d", "3d"]
+                                        ],
+                                        [
+                                            "type" => "null"
+                                        ]
+                                    ]
+                                ],
+                                "scene" => [
+                                    "anyOf" => [
+                                        [
+                                            "type" => "object",
+                                            "additionalProperties" => false,
+                                            "properties" => [
+                                                "cameraStudio" => [
+                                                    "anyOf" => [
+                                                        [
+                                                            "type" => "object",
+                                                            "additionalProperties" => false,
+                                                            "properties" => [
+                                                                "fov" => ["type" => ["number", "null"]],
+                                                                "qualityProfile" => [
+                                                                    "type" => ["string", "null"],
+                                                                    "enum" => ["low", "medium", "high", null]
+                                                                ],
+                                                                "atmosphereQuality" => [
+                                                                    "type" => ["string", "null"],
+                                                                    "enum" => ["low", "high", null]
+                                                                ],
+                                                                "glowEnabled" => ["type" => ["boolean", "null"]],
+                                                                "glowIntensity" => ["type" => ["number", "null"]],
+                                                                "cinematicFxEnabled" => ["type" => ["boolean", "null"]],
+                                                                "exposure" => ["type" => ["number", "null"]],
+                                                                "contrast" => ["type" => ["number", "null"]],
+                                                                "saturation" => ["type" => ["number", "null"]],
+                                                                "letterbox" => ["type" => ["number", "null"]],
+                                                                "noiseLevel" => ["type" => ["number", "null"]],
+                                                                "scanlineLevel" => ["type" => ["number", "null"]],
+                                                                "vignetteLevel" => ["type" => ["number", "null"]],
+                                                                "jitter" => ["type" => ["number", "null"]],
+                                                                "chromaticAberration" => ["type" => ["number", "null"]]
+                                                            ]
+                                                        ],
+                                                        [
+                                                            "type" => "null"
+                                                        ]
+                                                    ]
+                                                ],
+                                                "lighting" => [
+                                                    "anyOf" => [
+                                                        [
+                                                            "type" => "object",
+                                                            "additionalProperties" => false,
+                                                            "properties" => [
+                                                                "type" => [
+                                                                    "type" => ["string", "null"],
+                                                                    "enum" => ["sun", "virtual", null]
+                                                                ],
+                                                                "date" => ["type" => ["string", "null"]],
+                                                                "displayUTCOffset" => ["type" => ["number", "null"]],
+                                                                "directShadowsEnabled" => ["type" => ["boolean", "null"]],
+                                                                "glowIntensity" => ["type" => ["number", "null"]]
+                                                            ]
+                                                        ],
+                                                        [
+                                                            "type" => "null"
+                                                        ]
+                                                    ]
+                                                ]
+                                            ]
                                         ],
                                         [
                                             "type" => "null"
@@ -561,13 +675,22 @@ $schema = [
                                                         "time" => ["type" => "number"],
                                                         "x" => ["type" => "number"],
                                                         "y" => ["type" => "number"],
+                                                        "z" => ["type" => ["number", "null"]],
+                                                        "heading" => ["type" => ["number", "null"]],
+                                                        "tilt" => ["type" => ["number", "null"]],
+                                                        "fov" => ["type" => ["number", "null"]],
+                                                        "easing" => [
+                                                            "type" => ["string", "null"],
+                                                            "enum" => ["linear", "ease-in", "ease-out", "ease-in-out", null]
+                                                        ],
                                                         "spatialReference" => [
                                                             "anyOf" => [
                                                                 [
                                                                     "type" => "object",
                                                                     "additionalProperties" => false,
                                                                     "properties" => [
-                                                                        "wkid" => ["type" => ["integer", "null"]]
+                                                                        "wkid" => ["type" => ["integer", "null"]],
+                                                                        "latestWkid" => ["type" => ["integer", "null"]]
                                                                     ],
                                                                     "required" => ["wkid"]
                                                                 ],
@@ -798,6 +921,33 @@ $schema = [
                                     "textContent" => ["type" => ["string", "null"]],
                                     "textSize" => ["type" => ["number", "null"]],
                                     "textColor" => ["type" => ["string", "null"]],
+                                    "layerEffectsEnabled" => ["type" => ["boolean", "null"]],
+                                    "layerEffectSettings" => [
+                                        "anyOf" => [
+                                            [
+                                                "type" => "object",
+                                                "additionalProperties" => false,
+                                                "properties" => [
+                                                    "brightness" => ["type" => ["number", "null"]],
+                                                    "contrast" => ["type" => ["number", "null"]],
+                                                    "grayscale" => ["type" => ["number", "null"]],
+                                                    "hueRotate" => ["type" => ["number", "null"]],
+                                                    "invert" => ["type" => ["number", "null"]],
+                                                    "opacity" => ["type" => ["number", "null"]],
+                                                    "saturate" => ["type" => ["number", "null"]],
+                                                    "sepia" => ["type" => ["number", "null"]],
+                                                    "blur" => ["type" => ["number", "null"]],
+                                                    "dropShadowColor" => ["type" => ["string", "null"]],
+                                                    "dropShadowBlur" => ["type" => ["number", "null"]],
+                                                    "dropShadowOffsetX" => ["type" => ["number", "null"]],
+                                                    "dropShadowOffsetY" => ["type" => ["number", "null"]]
+                                                ]
+                                            ],
+                                            [
+                                                "type" => "null"
+                                            ]
+                                        ]
+                                    ],
                                     "layerBlendMode" => [
                                         "anyOf" => [
                                             [
@@ -915,8 +1065,9 @@ $instructions = trim(
     "For drop shadows, set layerEffectSettings.dropShadowOffsetX, dropShadowOffsetY, dropShadowBlur, dropShadowColor (hex or rgba). " .
     "Other effects in layerEffectSettings: brightness, contrast, grayscale, hueRotate, invert, opacity, saturate, sepia, blur. " .
     "Provide properties._pulse.app with layout, customWidth/customHeight (null unless layout is 'custom'), " .
-    "isRotated, basemap, basemapVisible, optional basemapLabelsVisible/backgroundColor/backgroundTransparent, mode (2d or 3d), " .
-    "optional camera for 3d (position x/y/z plus heading/tilt), and optional extent. " .
+    "isRotated, basemap, basemapVisible, optional basemapLabelsVisible/backgroundColor/backgroundTransparent/google3DTilesEnabled, mode (2d or 3d), " .
+    "optional camera for 3d (position x/y/z plus heading/tilt), optional viewTrackKeyframes, optional app.scene.cameraStudio " .
+    "(fov, qualityProfile, atmosphereQuality, glowEnabled, glowIntensity, cinematicFxEnabled, exposure, contrast, saturation, letterbox, noiseLevel, scanlineLevel, vignetteLevel, jitter, chromaticAberration), optional app.scene.lighting, and optional extent. " .
     "Provide properties._pulse.timeline.durationOverride (number or null). " .
     "Provide properties._pulse.layers[] with id, name, type, animations, and any needed style fields. " .
     "For each feature, set properties._pulse.layerId to a matching layer id."

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import { bootApp } from "./appController";
-import { APP_VERSION } from "./app/constants";
 import MapArea from "./components/MapArea";
 import SidePanel from "./components/SidePanel";
 import Timeline from "./components/Timeline";
@@ -191,7 +190,7 @@ export default function App() {
               </calcite-button>
             </div>
             <div className="menu-bar-title" style={menuTextStyle}>
-              Pulse {APP_VERSION}
+              Pulse
             </div>
             <div className="menu-bar-right">
               <calcite-button
@@ -209,7 +208,7 @@ export default function App() {
                 href="https://github.com/sean-stone/pulse3"
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Pulse ${APP_VERSION} on GitHub`}
+                aria-label="Pulse on GitHub"
                 title="View on GitHub"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">

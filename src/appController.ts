@@ -438,6 +438,10 @@ const CAMERA_FX_LEVEL_MIN = 0;
 const CAMERA_FX_LEVEL_MAX = 100;
 const CAMERA_FX_JITTER_MIN = 0;
 const CAMERA_FX_JITTER_MAX = 12;
+const CAMERA_FX_COLOR_GRADE_MIN = 0;
+const CAMERA_FX_COLOR_GRADE_MAX = 200;
+const CAMERA_FX_LETTERBOX_MIN = 0;
+const CAMERA_FX_LETTERBOX_MAX = 20;
 const SCENE_ALTITUDE_MIN = 0;
 const SCENE_ALTITUDE_MAX = 20_000_000;
 const SCENE_ONLY_BASEMAPS = new Set([
@@ -467,6 +471,10 @@ type CameraStudioSettings = {
   glowEnabled: boolean;
   glowIntensity: number;
   cinematicFxEnabled: boolean;
+  exposure: number;
+  contrast: number;
+  saturation: number;
+  letterbox: number;
   noiseLevel: number;
   scanlineLevel: number;
   vignetteLevel: number;
@@ -481,6 +489,10 @@ const cameraStudioSettings: CameraStudioSettings = {
   glowEnabled: true,
   glowIntensity: 1,
   cinematicFxEnabled: false,
+  exposure: 100,
+  contrast: 100,
+  saturation: 100,
+  letterbox: 0,
   noiseLevel: 42,
   scanlineLevel: 38,
   vignetteLevel: 44,
@@ -500,6 +512,26 @@ const SCENE_QUALITY_PROFILE_IDS = ["scene-quality-profile", "camera-layer-scene-
 const SCENE_ATMOSPHERE_QUALITY_IDS = ["scene-atmosphere-quality", "camera-layer-scene-atmosphere-quality"];
 const SCENE_GLOW_ENABLED_IDS = ["scene-glow-enabled", "camera-layer-scene-glow-enabled"];
 const SCENE_CAMERA_FX_ENABLED_IDS = ["scene-camera-fx-enabled", "camera-layer-scene-camera-fx-enabled"];
+const SCENE_CAMERA_FX_EXPOSURE_IDS = ["scene-camera-fx-exposure", "camera-layer-scene-camera-fx-exposure"];
+const SCENE_CAMERA_FX_EXPOSURE_READOUT_IDS = [
+  "scene-camera-fx-exposure-value",
+  "camera-layer-scene-camera-fx-exposure-value"
+];
+const SCENE_CAMERA_FX_CONTRAST_IDS = ["scene-camera-fx-contrast", "camera-layer-scene-camera-fx-contrast"];
+const SCENE_CAMERA_FX_CONTRAST_READOUT_IDS = [
+  "scene-camera-fx-contrast-value",
+  "camera-layer-scene-camera-fx-contrast-value"
+];
+const SCENE_CAMERA_FX_SATURATION_IDS = ["scene-camera-fx-saturation", "camera-layer-scene-camera-fx-saturation"];
+const SCENE_CAMERA_FX_SATURATION_READOUT_IDS = [
+  "scene-camera-fx-saturation-value",
+  "camera-layer-scene-camera-fx-saturation-value"
+];
+const SCENE_CAMERA_FX_LETTERBOX_IDS = ["scene-camera-fx-letterbox", "camera-layer-scene-camera-fx-letterbox"];
+const SCENE_CAMERA_FX_LETTERBOX_READOUT_IDS = [
+  "scene-camera-fx-letterbox-value",
+  "camera-layer-scene-camera-fx-letterbox-value"
+];
 const SCENE_CAMERA_FX_NOISE_IDS = ["scene-camera-fx-noise", "camera-layer-scene-camera-fx-noise"];
 const SCENE_CAMERA_FX_NOISE_READOUT_IDS = [
   "scene-camera-fx-noise-value",
@@ -981,6 +1013,26 @@ function createSeededRandom(seed: number) {
   };
 }
 
+function getSceneCameraFxColorGradeFactors() {
+  const exposure = clamp(cameraStudioSettings.exposure, CAMERA_FX_COLOR_GRADE_MIN, CAMERA_FX_COLOR_GRADE_MAX) / 100;
+  const contrast = clamp(cameraStudioSettings.contrast, CAMERA_FX_COLOR_GRADE_MIN, CAMERA_FX_COLOR_GRADE_MAX) / 100;
+  const saturation =
+    clamp(cameraStudioSettings.saturation, CAMERA_FX_COLOR_GRADE_MIN, CAMERA_FX_COLOR_GRADE_MAX) / 100;
+  return {
+    exposure,
+    contrast,
+    saturation,
+    isNeutral:
+      Math.abs(exposure - 1) < 0.001 && Math.abs(contrast - 1) < 0.001 && Math.abs(saturation - 1) < 0.001
+  };
+}
+
+function getSceneCameraFxCssFilter() {
+  const factors = getSceneCameraFxColorGradeFactors();
+  if (factors.isNeutral) return "";
+  return `brightness(${factors.exposure.toFixed(3)}) contrast(${factors.contrast.toFixed(3)}) saturate(${factors.saturation.toFixed(3)})`;
+}
+
 function shouldRenderSceneCameraFxOverlay() {
   return currentViewMode === "3d" && cameraStudioSettings.cinematicFxEnabled;
 }
@@ -1020,6 +1072,7 @@ function drawSceneCameraFxArtifacts(
   const scanlineStrength = clamp(cameraStudioSettings.scanlineLevel / CAMERA_FX_LEVEL_MAX, 0, 1);
   const vignetteStrength = clamp(cameraStudioSettings.vignetteLevel / CAMERA_FX_LEVEL_MAX, 0, 1);
   const jitterStrength = clamp(cameraStudioSettings.jitter, CAMERA_FX_JITTER_MIN, CAMERA_FX_JITTER_MAX);
+  const letterboxStrength = clamp(cameraStudioSettings.letterbox, CAMERA_FX_LETTERBOX_MIN, CAMERA_FX_LETTERBOX_MAX);
 
   if (noiseStrength > 0.001) {
     const tileSize = 96;
@@ -1100,6 +1153,21 @@ function drawSceneCameraFxArtifacts(
     ctx.fillRect(0, 0, width, height);
     ctx.restore();
   }
+
+  if (letterboxStrength > 0.001) {
+    const barHeight = Math.min(Math.floor(height * 0.24), Math.max(0, Math.round((height * letterboxStrength) / 100)));
+    if (barHeight > 0) {
+      ctx.save();
+      ctx.fillStyle = "rgba(0, 0, 0, 0.98)";
+      ctx.fillRect(0, 0, width, barHeight);
+      ctx.fillRect(0, height - barHeight, width, barHeight);
+      const lineAlpha = Math.min(0.25, 0.05 + letterboxStrength * 0.008);
+      ctx.fillStyle = `rgba(255, 255, 255, ${lineAlpha.toFixed(3)})`;
+      ctx.fillRect(0, barHeight, width, 1);
+      ctx.fillRect(0, height - barHeight - 1, width, 1);
+      ctx.restore();
+    }
+  }
 }
 
 function applySceneCameraStudioPostFxToCanvas(
@@ -1121,13 +1189,28 @@ function applySceneCameraStudioPostFxToCanvas(
   if (!sourceContext) return;
   sourceContext.drawImage(ctx.canvas, 0, 0, width, height);
 
+  let sourceFrame: HTMLCanvasElement = sourceCanvas;
+  const colorGrade = getSceneCameraFxColorGradeFactors();
+  if (!colorGrade.isNeutral) {
+    const gradedCanvas = document.createElement("canvas");
+    gradedCanvas.width = width;
+    gradedCanvas.height = height;
+    const gradedContext = gradedCanvas.getContext("2d");
+    if (gradedContext) {
+      gradedContext.filter = getSceneCameraFxCssFilter();
+      gradedContext.drawImage(sourceCanvas, 0, 0, width, height);
+      gradedContext.filter = "none";
+      sourceFrame = gradedCanvas;
+    }
+  }
+
   ctx.save();
   ctx.clearRect(0, 0, width, height);
 
   const jitterStrength = clamp(cameraStudioSettings.jitter, CAMERA_FX_JITTER_MIN, CAMERA_FX_JITTER_MAX);
   const baseShiftX = jitterStrength > 0.001 ? (random() * 2 - 1) * jitterStrength : 0;
   const baseShiftY = jitterStrength > 0.001 ? (random() * 2 - 1) * jitterStrength * 0.18 : 0;
-  ctx.drawImage(sourceCanvas, baseShiftX, baseShiftY, width, height);
+  ctx.drawImage(sourceFrame, baseShiftX, baseShiftY, width, height);
 
   if (jitterStrength > 0.001) {
     const tearCount = Math.max(1, Math.round(jitterStrength * 0.45 + random() * 2));
@@ -1136,7 +1219,7 @@ function applySceneCameraStudioPostFxToCanvas(
       const maxY = Math.max(0, height - bandHeight - 1);
       const y = Math.floor(random() * (maxY + 1));
       const shift = (random() * 2 - 1) * (0.8 + jitterStrength * 1.7);
-      ctx.drawImage(sourceCanvas, 0, y, width, bandHeight, shift, y, width, bandHeight);
+      ctx.drawImage(sourceFrame, 0, y, width, bandHeight, shift, y, width, bandHeight);
     }
   }
 
@@ -1147,9 +1230,9 @@ function applySceneCameraStudioPostFxToCanvas(
     ctx.globalCompositeOperation = "screen";
     ctx.globalAlpha = colorAlpha;
     ctx.filter = "sepia(1) saturate(6) hue-rotate(-22deg)";
-    ctx.drawImage(sourceCanvas, -shift, 0, width, height);
+    ctx.drawImage(sourceFrame, -shift, 0, width, height);
     ctx.filter = "sepia(1) saturate(6) hue-rotate(210deg)";
-    ctx.drawImage(sourceCanvas, shift, 0, width, height);
+    ctx.drawImage(sourceFrame, shift, 0, width, height);
     ctx.filter = "none";
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -1198,7 +1281,12 @@ function tickSceneCameraFxOverlayLoop() {
 }
 
 function updateSceneCameraFxOverlayState() {
-  if (!shouldRenderSceneCameraFxOverlay()) {
+  const shouldRender = shouldRenderSceneCameraFxOverlay();
+  const mapWrapper = document.getElementById("map-wrapper") as HTMLElement | null;
+  if (mapWrapper) {
+    mapWrapper.style.filter = shouldRender ? getSceneCameraFxCssFilter() : "";
+  }
+  if (!shouldRender) {
     stopSceneCameraFxOverlayLoop();
     renderSceneCameraFxOverlayFrame();
     return;
@@ -1222,6 +1310,10 @@ function updateSceneCameraStudioReadouts() {
     });
   };
   setReadoutText(SCENE_CAMERA_FOV_READOUT_IDS, `${Math.round(cameraStudioSettings.fov)}deg`);
+  setReadoutText(SCENE_CAMERA_FX_EXPOSURE_READOUT_IDS, `${Math.round(cameraStudioSettings.exposure)}%`);
+  setReadoutText(SCENE_CAMERA_FX_CONTRAST_READOUT_IDS, `${Math.round(cameraStudioSettings.contrast)}%`);
+  setReadoutText(SCENE_CAMERA_FX_SATURATION_READOUT_IDS, `${Math.round(cameraStudioSettings.saturation)}%`);
+  setReadoutText(SCENE_CAMERA_FX_LETTERBOX_READOUT_IDS, `${Math.round(cameraStudioSettings.letterbox)}%`);
   setReadoutText(SCENE_CAMERA_FX_NOISE_READOUT_IDS, `${Math.round(cameraStudioSettings.noiseLevel)}%`);
   setReadoutText(SCENE_CAMERA_FX_SCANLINE_READOUT_IDS, `${Math.round(cameraStudioSettings.scanlineLevel)}%`);
   setReadoutText(SCENE_CAMERA_FX_VIGNETTE_READOUT_IDS, `${Math.round(cameraStudioSettings.vignetteLevel)}%`);
@@ -1241,6 +1333,10 @@ function syncSceneCameraStudioControlValues() {
   setElementsValue(SCENE_CAMERA_FOV_IDS, Math.round(cameraStudioSettings.fov));
   setElementsValue(SCENE_QUALITY_PROFILE_IDS, cameraStudioSettings.qualityProfile);
   setElementsValue(SCENE_ATMOSPHERE_QUALITY_IDS, cameraStudioSettings.atmosphereQuality);
+  setElementsValue(SCENE_CAMERA_FX_EXPOSURE_IDS, Math.round(cameraStudioSettings.exposure));
+  setElementsValue(SCENE_CAMERA_FX_CONTRAST_IDS, Math.round(cameraStudioSettings.contrast));
+  setElementsValue(SCENE_CAMERA_FX_SATURATION_IDS, Math.round(cameraStudioSettings.saturation));
+  setElementsValue(SCENE_CAMERA_FX_LETTERBOX_IDS, Math.round(cameraStudioSettings.letterbox));
   setElementsValue(SCENE_CAMERA_FX_NOISE_IDS, Math.round(cameraStudioSettings.noiseLevel));
   setElementsValue(SCENE_CAMERA_FX_SCANLINE_IDS, Math.round(cameraStudioSettings.scanlineLevel));
   setElementsValue(SCENE_CAMERA_FX_VIGNETTE_IDS, Math.round(cameraStudioSettings.vignetteLevel));
@@ -1262,6 +1358,10 @@ function syncSceneCameraStudioControlValues() {
 function updateSceneCameraFxControlsVisibility() {
   const isVisible = cameraStudioSettings.cinematicFxEnabled;
   const fxControlIds = [
+    ...SCENE_CAMERA_FX_EXPOSURE_IDS,
+    ...SCENE_CAMERA_FX_CONTRAST_IDS,
+    ...SCENE_CAMERA_FX_SATURATION_IDS,
+    ...SCENE_CAMERA_FX_LETTERBOX_IDS,
     ...SCENE_CAMERA_FX_NOISE_IDS,
     ...SCENE_CAMERA_FX_SCANLINE_IDS,
     ...SCENE_CAMERA_FX_VIGNETTE_IDS,
@@ -1422,6 +1522,26 @@ function applySceneSettingsSnapshot(sceneSettings: any, sceneViewOverride?: any)
     if (typeof cameraStudio.cinematicFxEnabled === "boolean") {
       cameraStudioSettings.cinematicFxEnabled = cameraStudio.cinematicFxEnabled;
     }
+    cameraStudioSettings.exposure = clamp(
+      readNumber(cameraStudio.exposure, cameraStudioSettings.exposure),
+      CAMERA_FX_COLOR_GRADE_MIN,
+      CAMERA_FX_COLOR_GRADE_MAX
+    );
+    cameraStudioSettings.contrast = clamp(
+      readNumber(cameraStudio.contrast, cameraStudioSettings.contrast),
+      CAMERA_FX_COLOR_GRADE_MIN,
+      CAMERA_FX_COLOR_GRADE_MAX
+    );
+    cameraStudioSettings.saturation = clamp(
+      readNumber(cameraStudio.saturation, cameraStudioSettings.saturation),
+      CAMERA_FX_COLOR_GRADE_MIN,
+      CAMERA_FX_COLOR_GRADE_MAX
+    );
+    cameraStudioSettings.letterbox = clamp(
+      readNumber(cameraStudio.letterbox, cameraStudioSettings.letterbox),
+      CAMERA_FX_LETTERBOX_MIN,
+      CAMERA_FX_LETTERBOX_MAX
+    );
     cameraStudioSettings.noiseLevel = clamp(
       readNumber(cameraStudio.noiseLevel, cameraStudioSettings.noiseLevel),
       CAMERA_FX_LEVEL_MIN,
@@ -1492,6 +1612,10 @@ function bindSceneCameraStudioControls() {
   const atmosphereQualitySelects = getElementsByIds<any>(SCENE_ATMOSPHERE_QUALITY_IDS);
   const glowSwitches = getElementsByIds<any>(SCENE_GLOW_ENABLED_IDS);
   const cinematicFxSwitches = getElementsByIds<any>(SCENE_CAMERA_FX_ENABLED_IDS);
+  const exposureSliders = getElementsByIds<any>(SCENE_CAMERA_FX_EXPOSURE_IDS);
+  const contrastSliders = getElementsByIds<any>(SCENE_CAMERA_FX_CONTRAST_IDS);
+  const saturationSliders = getElementsByIds<any>(SCENE_CAMERA_FX_SATURATION_IDS);
+  const letterboxSliders = getElementsByIds<any>(SCENE_CAMERA_FX_LETTERBOX_IDS);
   const noiseSliders = getElementsByIds<any>(SCENE_CAMERA_FX_NOISE_IDS);
   const scanlineSliders = getElementsByIds<any>(SCENE_CAMERA_FX_SCANLINE_IDS);
   const vignetteSliders = getElementsByIds<any>(SCENE_CAMERA_FX_VIGNETTE_IDS);
@@ -1500,7 +1624,16 @@ function bindSceneCameraStudioControls() {
   if (!fovSliders.length || !qualitySelects.length || !atmosphereQualitySelects.length || !glowSwitches.length) {
     return;
   }
-  if (!cinematicFxSwitches.length || !noiseSliders.length || !scanlineSliders.length || !vignetteSliders.length) {
+  if (
+    !cinematicFxSwitches.length ||
+    !exposureSliders.length ||
+    !contrastSliders.length ||
+    !saturationSliders.length ||
+    !letterboxSliders.length ||
+    !noiseSliders.length ||
+    !scanlineSliders.length ||
+    !vignetteSliders.length
+  ) {
     return;
   }
   if (!jitterSliders.length || !chromaticSliders.length) return;
@@ -1514,6 +1647,54 @@ function bindSceneCameraStudioControls() {
       readNumber(target?.value, cameraStudioSettings.fov),
       CAMERA_FOV_MIN,
       CAMERA_FOV_MAX
+    );
+    syncSceneCameraStudioControlValues();
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
+  const handleExposureUpdate = (event?: Event) => {
+    const target = event?.target as any;
+    cameraStudioSettings.exposure = clamp(
+      readNumber(target?.value, cameraStudioSettings.exposure),
+      CAMERA_FX_COLOR_GRADE_MIN,
+      CAMERA_FX_COLOR_GRADE_MAX
+    );
+    syncSceneCameraStudioControlValues();
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
+  const handleContrastUpdate = (event?: Event) => {
+    const target = event?.target as any;
+    cameraStudioSettings.contrast = clamp(
+      readNumber(target?.value, cameraStudioSettings.contrast),
+      CAMERA_FX_COLOR_GRADE_MIN,
+      CAMERA_FX_COLOR_GRADE_MAX
+    );
+    syncSceneCameraStudioControlValues();
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
+  const handleSaturationUpdate = (event?: Event) => {
+    const target = event?.target as any;
+    cameraStudioSettings.saturation = clamp(
+      readNumber(target?.value, cameraStudioSettings.saturation),
+      CAMERA_FX_COLOR_GRADE_MIN,
+      CAMERA_FX_COLOR_GRADE_MAX
+    );
+    syncSceneCameraStudioControlValues();
+    applySceneCameraStudioSettings();
+    scheduleProjectSave();
+  };
+
+  const handleLetterboxUpdate = (event?: Event) => {
+    const target = event?.target as any;
+    cameraStudioSettings.letterbox = clamp(
+      readNumber(target?.value, cameraStudioSettings.letterbox),
+      CAMERA_FX_LETTERBOX_MIN,
+      CAMERA_FX_LETTERBOX_MAX
     );
     syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
@@ -1631,6 +1812,22 @@ function bindSceneCameraStudioControls() {
   });
   glowSwitches.forEach((toggle) => {
     toggle.addEventListener("calciteSwitchChange", handleGlowToggle);
+  });
+  exposureSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleExposureUpdate);
+    slider.addEventListener("calciteSliderChange", handleExposureUpdate);
+  });
+  contrastSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleContrastUpdate);
+    slider.addEventListener("calciteSliderChange", handleContrastUpdate);
+  });
+  saturationSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleSaturationUpdate);
+    slider.addEventListener("calciteSliderChange", handleSaturationUpdate);
+  });
+  letterboxSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleLetterboxUpdate);
+    slider.addEventListener("calciteSliderChange", handleLetterboxUpdate);
   });
   noiseSliders.forEach((slider) => {
     slider.addEventListener("calciteSliderInput", handleNoiseUpdate);

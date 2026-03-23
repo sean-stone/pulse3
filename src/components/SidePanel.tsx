@@ -158,6 +158,66 @@ function SidePanel({ themeMode }: SidePanelProps) {
                       <calcite-switch id="camera-layer-scene-camera-fx-enabled" scale="s"></calcite-switch>
                     </calcite-label>
                     <calcite-label className="scene-camera-studio-control">
+                      Exposure
+                      <calcite-slider
+                        id="camera-layer-scene-camera-fx-exposure"
+                        min="0"
+                        max="200"
+                        step="1"
+                        value="100"
+                        min-label="0%"
+                        max-label="200%"
+                      ></calcite-slider>
+                      <span id="camera-layer-scene-camera-fx-exposure-value" className="scene-camera-studio-readout">
+                        100%
+                      </span>
+                    </calcite-label>
+                    <calcite-label className="scene-camera-studio-control">
+                      Contrast
+                      <calcite-slider
+                        id="camera-layer-scene-camera-fx-contrast"
+                        min="0"
+                        max="200"
+                        step="1"
+                        value="100"
+                        min-label="0%"
+                        max-label="200%"
+                      ></calcite-slider>
+                      <span id="camera-layer-scene-camera-fx-contrast-value" className="scene-camera-studio-readout">
+                        100%
+                      </span>
+                    </calcite-label>
+                    <calcite-label className="scene-camera-studio-control">
+                      Saturation
+                      <calcite-slider
+                        id="camera-layer-scene-camera-fx-saturation"
+                        min="0"
+                        max="200"
+                        step="1"
+                        value="100"
+                        min-label="0%"
+                        max-label="200%"
+                      ></calcite-slider>
+                      <span id="camera-layer-scene-camera-fx-saturation-value" className="scene-camera-studio-readout">
+                        100%
+                      </span>
+                    </calcite-label>
+                    <calcite-label className="scene-camera-studio-control">
+                      Letterbox
+                      <calcite-slider
+                        id="camera-layer-scene-camera-fx-letterbox"
+                        min="0"
+                        max="20"
+                        step="1"
+                        value="0"
+                        min-label="0%"
+                        max-label="20%"
+                      ></calcite-slider>
+                      <span id="camera-layer-scene-camera-fx-letterbox-value" className="scene-camera-studio-readout">
+                        0%
+                      </span>
+                    </calcite-label>
+                    <calcite-label className="scene-camera-studio-control">
                       Noise
                       <calcite-slider
                         id="camera-layer-scene-camera-fx-noise"
