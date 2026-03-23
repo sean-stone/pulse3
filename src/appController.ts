@@ -59,6 +59,15 @@ import {
   toViewGeometry
 } from "./app/geometryInterop";
 import {
+  applyPointOrientationToSymbol,
+  getPointOrientationAngle,
+  getPointOrientationHeading,
+  mergePointSymbolOrientations,
+  readPointStyleOrientation,
+  readPointSymbolOrientation,
+  toFiniteNumber
+} from "./app/pointOrientation";
+import {
   buildTextMeshAnchorSymbol,
   destroyTextMeshOverlay,
   isMeshTextRenderMode,
@@ -1583,34 +1592,45 @@ function applySceneSettingsSnapshot(sceneSettings: any, sceneViewOverride?: any)
 
   const sceneView = sceneViewOverride ?? getSceneView3D();
   if (sceneView && String(sceneView.type) === "3d") {
-    const lighting = sceneView.environment?.lighting as any;
     const savedLighting = sceneSettings.lighting;
+    const lighting = sceneView.environment?.lighting as any;
     if (lighting && savedLighting && typeof savedLighting === "object") {
-      const savedType = String(savedLighting.type || "");
-      if (savedType === "sun" || savedType === "virtual") {
-        lighting.type = savedType;
-      }
+      const savedType = String(savedLighting.type || lighting?.type || "");
       const savedGlowIntensity = Number(savedLighting.glowIntensity);
       if (Number.isFinite(savedGlowIntensity)) {
         cameraStudioSettings.glowIntensity = clamp(savedGlowIntensity, 0, 20);
       }
-      if (typeof savedLighting.directShadowsEnabled === "boolean") {
-        lighting.directShadowsEnabled = Boolean(savedLighting.directShadowsEnabled);
+      const nextLighting: Record<string, unknown> = {
+        type: savedType === "virtual" ? "virtual" : "sun",
+        directShadowsEnabled:
+          typeof savedLighting.directShadowsEnabled === "boolean"
+            ? Boolean(savedLighting.directShadowsEnabled)
+            : Boolean(lighting.directShadowsEnabled)
+      };
+      if ("cameraTrackingEnabled" in lighting) {
+        nextLighting.cameraTrackingEnabled = Boolean(lighting.cameraTrackingEnabled);
       }
       if ("displayUTCOffset" in savedLighting && "displayUTCOffset" in lighting) {
         const offset = Number(savedLighting.displayUTCOffset);
         if (Number.isFinite(offset)) {
-          lighting.displayUTCOffset = offset;
+          nextLighting.displayUTCOffset = offset;
+        }
+      } else if ("displayUTCOffset" in lighting) {
+        const offset = Number(lighting.displayUTCOffset);
+        if (Number.isFinite(offset)) {
+          nextLighting.displayUTCOffset = offset;
         }
       }
-      const effectiveLightingType = String(lighting?.type || savedType || "");
-      if (effectiveLightingType !== "virtual") {
+      if (String(nextLighting.type) !== "virtual") {
         const savedDateRaw = savedLighting.date;
         const savedDate = savedDateRaw ? new Date(String(savedDateRaw)) : null;
-        if (savedDate && Number.isFinite(savedDate.getTime()) && "date" in lighting) {
-          lighting.date = savedDate;
+        if (savedDate && Number.isFinite(savedDate.getTime())) {
+          nextLighting.date = savedDate;
+        } else if ("date" in lighting && lighting.date) {
+          nextLighting.date = lighting.date;
         }
       }
+      sceneView.environment.lighting = nextLighting as any;
     }
   }
   syncSceneCameraStudioControlValues();
@@ -4950,17 +4970,22 @@ function upsertLayerKeyframeAtCurrentTime(layerData: LayerData) {
   const firstPointGraphic = graphics.find((graphic: any) => Boolean(toKeyframePoint(graphic?.geometry)));
   const pointGeometry = toKeyframePoint(firstPointGraphic?.geometry);
   if (pointGeometry) {
-    const symbolRotation = getPointSymbolRotation(firstPointGraphic?.symbol);
-    const styleRotation = Number(layerData.pointStyle?.angle);
-    const keyframeRotation = Number.isFinite(symbolRotation)
-      ? symbolRotation
-      : Number.isFinite(styleRotation)
-        ? styleRotation
-        : undefined;
+    const orientation = mergePointSymbolOrientations(
+      readPointStyleOrientation(layerData.pointStyle ?? defaultPointStyle),
+      readPointSymbolOrientation(firstPointGraphic?.symbol)
+    );
+    const keyframeHeading = getPointOrientationHeading(orientation);
+    const keyframeAngle = getPointOrientationAngle(orientation);
     upsertPointKeyframe(layerData, pointGeometry, currentTime, {
       z: Number.isFinite(Number((pointGeometry as any)?.z)) ? Number((pointGeometry as any).z) : undefined,
-      heading: Number.isFinite(Number(keyframeRotation)) ? Number(keyframeRotation) : undefined,
-      rotation: Number.isFinite(Number(keyframeRotation)) ? Number(keyframeRotation) : undefined
+      heading: Number.isFinite(Number(keyframeHeading)) ? Number(keyframeHeading) : undefined,
+      tilt: Number.isFinite(Number(orientation.tilt)) ? Number(orientation.tilt) : undefined,
+      roll: Number.isFinite(Number(orientation.roll)) ? Number(orientation.roll) : undefined,
+      rotation: Number.isFinite(Number(keyframeAngle))
+        ? Number(keyframeAngle)
+        : Number.isFinite(Number(keyframeHeading))
+          ? Number(keyframeHeading)
+          : undefined
     });
   }
 }
@@ -5089,6 +5114,7 @@ function upsertPointKeyframe(
     z: Number.isFinite(Number(extras?.z)) ? Number(extras?.z) : undefined,
     heading: Number.isFinite(Number(extras?.heading)) ? Number(extras?.heading) : undefined,
     tilt: Number.isFinite(Number(extras?.tilt)) ? Number(extras?.tilt) : undefined,
+    roll: Number.isFinite(Number(extras?.roll)) ? Number(extras?.roll) : undefined,
     fov: Number.isFinite(Number(extras?.fov)) ? Number(extras?.fov) : undefined,
     rotation: Number.isFinite(Number(extras?.rotation)) ? Number(extras?.rotation) : undefined,
     scale: Number.isFinite(Number(extras?.scale)) ? Number(extras?.scale) : undefined,
@@ -5189,6 +5215,7 @@ function getPointKeyframeAtTime(layerData: LayerData, time: number) {
         z: interpolateNumber(start.z, end.z, easedT),
         heading: interpolateAngleDegrees(start.heading, end.heading, easedT),
         tilt: interpolateNumber(start.tilt, end.tilt, easedT),
+        roll: interpolateAngleDegrees(start.roll, end.roll, easedT),
         fov: interpolateNumber(start.fov, end.fov, easedT),
         rotation: interpolateAngleDegrees(start.rotation, end.rotation, easedT),
         scale: interpolateNumber(start.scale, end.scale, easedT),
@@ -5457,6 +5484,9 @@ export function getAnimationSettingsSnapshot() {
   });
   getEl("point-outline-width").addEventListener("calciteSliderInput", () => applyStyleSettings(false));
   getEl("point-angle-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("point-heading-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("point-tilt-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("point-roll-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
   getEl("point-xoffset-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
   getEl("point-yoffset-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
   getEl("point-follow-terrain-toggle").addEventListener("calciteSwitchChange", () => applyStyleSettings(false));
@@ -6882,6 +6912,55 @@ function openStyleModal() {
   expandLayerAccordionSection(selectedLayerIndex, "style");
 }
 
+function pointStyleUses3DObjectLayer(styleValue?: string | null) {
+  if (currentViewMode !== "3d") return false;
+  const normalizedStyle = String(styleValue ?? "").trim();
+  if (!normalizedStyle) return false;
+  return Boolean(getPointWebStyleSymbolSpec({ style: normalizedStyle } as PointStyle));
+}
+
+function getLivePointLayerOrientation(layerData: LayerData) {
+  const styleOrientation = readPointStyleOrientation(layerData.pointStyle ?? defaultPointStyle);
+  if (layerData.type !== "point") {
+    return styleOrientation;
+  }
+  const collection = layerData.layer?.graphics as any;
+  const graphics: any[] = Array.isArray(collection?.items)
+    ? collection.items
+    : typeof collection?.toArray === "function"
+      ? collection.toArray()
+      : [];
+  const firstGraphicWithSymbol = graphics.find((graphic: any) => Boolean(graphic?.symbol));
+  const symbolOrientation = readPointSymbolOrientation(firstGraphicWithSymbol?.symbol);
+  return mergePointSymbolOrientations(styleOrientation, symbolOrientation);
+}
+
+function syncPointOrientationControlVisibility(styleValue?: string | null) {
+  const angleRow = document.getElementById("point-angle-row") as HTMLElement | null;
+  const headingRow = document.getElementById("point-heading-row") as HTMLElement | null;
+  const tiltRow = document.getElementById("point-tilt-row") as HTMLElement | null;
+  const rollRow = document.getElementById("point-roll-row") as HTMLElement | null;
+  const note = document.getElementById("point-rotation-model-note") as HTMLElement | null;
+  const is3D = currentViewMode === "3d";
+  const usesObjectLayer = pointStyleUses3DObjectLayer(styleValue ?? getSelectedPointStyle());
+
+  if (angleRow) {
+    angleRow.style.display = is3D ? "none" : "";
+  }
+  if (headingRow) {
+    headingRow.style.display = is3D ? "" : "none";
+  }
+  if (tiltRow) {
+    tiltRow.style.display = is3D && usesObjectLayer ? "" : "none";
+  }
+  if (rollRow) {
+    rollRow.style.display = is3D && usesObjectLayer ? "" : "none";
+  }
+  if (note) {
+    note.style.display = is3D && !usesObjectLayer ? "" : "none";
+  }
+}
+
 function syncStylePanelFromLayer(layerData: LayerData) {
   const effectsToggle = document.getElementById("style-effects-toggle");
   if (effectsToggle && !effectsToggle.dataset.listenerBound) {
@@ -6895,6 +6974,7 @@ function syncStylePanelFromLayer(layerData: LayerData) {
 
   if (styleType === "point") {
     const style = layerData.pointStyle ?? defaultPointStyle;
+    const orientation = getLivePointLayerOrientation(layerData);
     const followTerrainToggle = document.getElementById("point-follow-terrain-toggle") as any;
     setPointStyleSelection(style.style);
     setCalciteValue(getEl("point-size-input"), style.size);
@@ -6902,9 +6982,13 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     setColorPickerValue("point-fill-color", style.color, 1);
     setColorPickerValue("point-outline-color", style.outlineColor, 1);
     setCalciteValue(getEl("point-outline-width"), style.outlineWidth);
-    setCalciteValue(getEl("point-angle-input"), style.angle ?? 0);
+    setCalciteValue(getEl("point-angle-input"), getPointOrientationAngle(orientation) ?? 0);
+    setCalciteValue(getEl("point-heading-input"), getPointOrientationHeading(orientation) ?? 0);
+    setCalciteValue(getEl("point-tilt-input"), toFiniteNumber(orientation.tilt) ?? 0);
+    setCalciteValue(getEl("point-roll-input"), toFiniteNumber(orientation.roll) ?? 0);
     setCalciteValue(getEl("point-xoffset-input"), style.xoffset ?? 0);
     setCalciteValue(getEl("point-yoffset-input"), style.yoffset ?? 0);
+    syncPointOrientationControlVisibility(style.style);
     if (followTerrainToggle) {
       followTerrainToggle.checked = layerData.pointFollowTerrain3D !== false;
     }
@@ -7021,18 +7105,40 @@ function applyStyleSettings(shouldClose: boolean) {
     const selected = getSelectedPointStyle();
     const xOffsetInput = getEl("point-xoffset-input") as any;
     const yOffsetInput = getEl("point-yoffset-input") as any;
+    const angleInput = getEl("point-angle-input") as any;
+    const headingInput = getEl("point-heading-input") as any;
+    const tiltInput = getEl("point-tilt-input") as any;
+    const rollInput = getEl("point-roll-input") as any;
     const followTerrainToggle = document.getElementById("point-follow-terrain-toggle") as any;
     const followTerrainRow = document.getElementById("point-follow-terrain-row") as HTMLElement | null;
+    const existingStyle = layerData.pointStyle ?? defaultPointStyle;
+    const angleValue = readNumber(angleInput?.value, existingStyle.angle ?? 0);
+    const headingValue =
+      currentViewMode === "3d"
+        ? readNumber(headingInput?.value, existingStyle.heading ?? existingStyle.angle ?? 0)
+        : angleValue;
+    const tiltValue =
+      currentViewMode === "3d"
+        ? readNumber(tiltInput?.value, existingStyle.tilt ?? 0)
+        : readNumber(existingStyle.tilt, 0);
+    const rollValue =
+      currentViewMode === "3d"
+        ? readNumber(rollInput?.value, existingStyle.roll ?? 0)
+        : readNumber(existingStyle.roll, 0);
     layerData.pointStyle = {
       style: selected || defaultPointStyle.style,
       size: Number((getEl("point-size-input") as any).value) || defaultPointStyle.size,
       color: getColorFromPicker("point-fill-color", 1),
       outlineColor: getColorFromPicker("point-outline-color", 1),
       outlineWidth: readNumber((getEl("point-outline-width") as any).value, defaultPointStyle.outlineWidth),
-      angle: Number((getEl("point-angle-input") as any).value) || 0,
+      angle: headingValue,
+      heading: headingValue,
+      tilt: tiltValue,
+      roll: rollValue,
       xoffset: Number(xOffsetInput.value) || 0,
       yoffset: Number(yOffsetInput.value) || 0
     };
+    syncPointOrientationControlVisibility(layerData.pointStyle.style);
     if (
       currentViewMode === "3d" &&
       followTerrainToggle &&
@@ -7103,6 +7209,7 @@ function toggleStyleEffects() {
 
 function buildPointSymbol(style: PointStyle) {
   const resolvedStyle = resolvePointStyleKey(style.style);
+  const orientation = readPointStyleOrientation(style);
   const path = pointPathStyles[resolvedStyle];
   const outlineWidth = Number(style.outlineWidth) || 0;
   const outline =
@@ -7117,7 +7224,7 @@ function buildPointSymbol(style: PointStyle) {
     style: path ? "path" : resolvedStyle,
     color: style.color,
     size: style.size,
-    angle: style.angle ?? 0,
+    angle: getPointOrientationAngle(orientation) ?? 0,
     xoffset: style.xoffset ?? 0,
     yoffset: style.yoffset ?? 0,
     outline
@@ -7150,87 +7257,6 @@ function buildPointSymbolSvgHref(styleKey: string, style: PointStyle) {
       : "";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBoxSize} ${viewBoxSize}"><path d="${path}" fill="${colorToCssRgba(fillColor)}"${outlineAttrs}/></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-function getSymbolLayersArray(symbol: any): any[] {
-  const symbolLayers = symbol?.symbolLayers;
-  if (!symbolLayers) return [];
-  if (Array.isArray(symbolLayers)) return symbolLayers;
-  if (typeof symbolLayers.toArray === "function") {
-    try {
-      return symbolLayers.toArray();
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function setSymbolLayersCollection(symbol: any, nextLayers: any[]) {
-  try {
-    symbol.symbolLayers = nextLayers;
-    return;
-  } catch {
-    // fallback for Collection-backed symbolLayers
-  }
-  const collection = symbol?.symbolLayers;
-  if (!collection) return;
-  if (typeof collection.removeAll === "function") {
-    collection.removeAll();
-  }
-  if (typeof collection.addMany === "function") {
-    collection.addMany(nextLayers);
-  }
-}
-
-function getPointSymbolRotation(symbol: any) {
-  if (!symbol) return undefined;
-  if (symbol.type === "simple-marker") {
-    const angle = Number(symbol.angle);
-    return Number.isFinite(angle) ? angle : undefined;
-  }
-  if (symbol.type === "point-3d") {
-    const symbolLayers = getSymbolLayersArray(symbol);
-    for (const layer of symbolLayers) {
-      if (!layer) continue;
-      if (layer.type === "object") {
-        const heading = Number(layer.heading);
-        if (Number.isFinite(heading)) {
-          return heading;
-        }
-      }
-      if (layer.type === "icon") {
-        const angle = Number(layer.angle);
-        if (Number.isFinite(angle)) {
-          return angle;
-        }
-      }
-    }
-  }
-  const fallbackAngle = Number((symbol as any)?.angle);
-  return Number.isFinite(fallbackAngle) ? fallbackAngle : undefined;
-}
-
-function applyPoint3DSymbolRotation(symbol: any, angle: number) {
-  if (!symbol || symbol.type !== "point-3d") return symbol;
-  const rotation = Number.isFinite(angle) ? angle : 0;
-  const symbolLayers = getSymbolLayersArray(symbol);
-  if (!symbolLayers.length) return symbol;
-  const nextLayers = symbolLayers.map((layer: any) => {
-    if (!layer) return layer;
-    const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
-    if (nextLayer.type === "object") {
-      nextLayer.heading = rotation;
-      return nextLayer;
-    }
-    if (nextLayer.type === "icon") {
-      nextLayer.angle = rotation;
-      return nextLayer;
-    }
-    return nextLayer;
-  });
-  setSymbolLayersCollection(symbol, nextLayers);
-  return symbol;
 }
 
 function getPointWebStyleSymbolSpec(style: PointStyle) {
@@ -7279,11 +7305,11 @@ async function applyPointModelSymbolToLayer(layerData: LayerData, style: PointSt
   if (!resolvedBase || currentViewMode !== "3d") return;
   const latestStyle = layerData.pointStyle ?? defaultPointStyle;
   if (latestStyle.style !== styleKey) return;
-  const rotation = Number(latestStyle.angle) || 0;
+  const orientation = readPointStyleOrientation(latestStyle);
   layerData.layer.graphics.forEach((graphic: any) => {
     const symbolInstance =
       typeof resolvedBase.clone === "function" ? resolvedBase.clone() : { ...resolvedBase };
-    graphic.symbol = applyPoint3DSymbolRotation(symbolInstance, rotation);
+    graphic.symbol = applyPointOrientationToSymbol(symbolInstance, orientation);
   });
 }
 
@@ -7307,10 +7333,11 @@ function buildPointSymbol3D(style: PointStyle) {
     x: "x"
   };
   const size = Math.max(2, Number(style.size) || defaultPointStyle.size);
-  const angle = Number(style.angle) || 0;
+  const orientation = readPointStyleOrientation(style);
+  const angle = getPointOrientationAngle(orientation) ?? 0;
   const href = buildPointSymbolSvgHref(resolvedStyle, style);
   if (href) {
-    return {
+    return applyPointOrientationToSymbol({
       type: "point-3d",
       symbolLayers: [
         {
@@ -7320,10 +7347,10 @@ function buildPointSymbol3D(style: PointStyle) {
           angle
         }
       ]
-    } as any;
+    } as any, orientation);
   }
   const primitive = primitiveByStyle[resolvedStyle] ?? "circle";
-  return {
+  return applyPointOrientationToSymbol({
     type: "point-3d",
     symbolLayers: [
       {
@@ -7345,7 +7372,7 @@ function buildPointSymbol3D(style: PointStyle) {
         }
       }
     ]
-  } as any;
+  } as any, orientation);
 }
 
 function buildPointSymbolForCurrentView(style: PointStyle) {
@@ -7571,8 +7598,9 @@ function applyThumbtackParallaxToLayer(layerData: LayerData) {
     const ny = Math.max(-1, Math.min(1, (screen.y - centerY) / centerY));
     const depth = 1 + (-ny) * 0.08;
     const symbol = graphic.symbol.clone();
+    const baseAngle = getPointOrientationAngle(readPointStyleOrientation(style)) ?? 0;
     symbol.size = (style.size || defaultPointStyle.size) * depth;
-    symbol.angle = (style.angle ?? 0) + nx * 7;
+    symbol.angle = baseAngle + nx * 7;
     symbol.xoffset = (style.xoffset ?? 0) + nx * 2.6;
     symbol.yoffset = (style.yoffset ?? 0) + ny * 1.5;
     symbol.color = [
@@ -7769,6 +7797,7 @@ function setStyleSectionVisibility(
   }
   polygonOutlineStyle.style.display = showFeatureExtras && type === "polygon" ? "block" : "none";
   if (type === "point") {
+    syncPointOrientationControlVisibility(getSelectedPointStyle());
     filterPointStyles();
   }
 }
@@ -8150,6 +8179,7 @@ function setPointStyleSelection(value: string) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+  syncPointOrientationControlVisibility(value);
   filterPointStyles();
 }
 

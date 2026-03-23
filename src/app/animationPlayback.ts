@@ -1,4 +1,8 @@
-import * as geometryEngine from "@arcgis/core/geometry/geometryEngine";
+import * as bufferOperator from "@arcgis/core/geometry/operators/bufferOperator";
+import * as densifyOperator from "@arcgis/core/geometry/operators/densifyOperator";
+import * as geodeticDensifyOperator from "@arcgis/core/geometry/operators/geodeticDensifyOperator";
+import * as geodeticLengthOperator from "@arcgis/core/geometry/operators/geodeticLengthOperator";
+import * as lengthOperator from "@arcgis/core/geometry/operators/lengthOperator";
 import Point from "@arcgis/core/geometry/Point";
 import Polygon from "@arcgis/core/geometry/Polygon";
 import Polyline from "@arcgis/core/geometry/Polyline";
@@ -12,7 +16,7 @@ import {
   applyBaseLayerEffect,
   applyLineSymbolGlow,
   applyLineSymbolWidth,
-  applyPointSymbolScaleAngle,
+  applyPointSymbolScaleOrientation,
   arrowMarkerPath,
   buildBaseLayerEffect,
   buildWeldLineSymbol,
@@ -38,6 +42,12 @@ import {
   triangleWave
 } from "./animationPlaybackHelpers";
 import { defaultLineStyle, defaultPolygonStyle } from "./constants";
+import {
+  getPointOrientationAngle,
+  mergePointSymbolOrientations,
+  readPointKeyframeOrientation,
+  readPointStyleOrientation
+} from "./pointOrientation";
 import { syncTextMeshOverlay } from "./textMesh";
 
 type AnimationPlaybackConfig = {
@@ -50,6 +60,27 @@ type AnimationPlaybackConfig = {
   isPlaying: () => boolean;
   isScrubbingTimeline: () => boolean;
 };
+
+let geodeticOperatorsLoadPromise: Promise<void> | null = null;
+
+const ensureGeodeticOperatorsLoaded = () => {
+  if (geodeticLengthOperator.isLoaded() && geodeticDensifyOperator.isLoaded()) {
+    return true;
+  }
+  if (!geodeticOperatorsLoadPromise) {
+    geodeticOperatorsLoadPromise = Promise.all([
+      geodeticLengthOperator.isLoaded() ? Promise.resolve() : geodeticLengthOperator.load(),
+      geodeticDensifyOperator.isLoaded() ? Promise.resolve() : geodeticDensifyOperator.load()
+    ])
+      .then(() => undefined)
+      .catch(() => {
+        geodeticOperatorsLoadPromise = null;
+      });
+  }
+  return false;
+};
+
+void ensureGeodeticOperatorsLoaded();
 
 const updatePolylineDraw = (
   layerData: LayerData,
@@ -119,7 +150,7 @@ const updatePolygonFill = (
         graphic.geometry = original.clone();
         return;
       }
-      const buffered = geometryEngine.buffer(original, -inset) as Polygon | null;
+      const buffered = bufferOperator.execute(original, -inset) as Polygon | null;
       if (buffered && buffered.rings?.length) {
         graphic.geometry = buffered;
         return;
@@ -687,23 +718,27 @@ const densifyPolyline = (polyline: Polyline) => {
       path?.some((coord) => Array.isArray(coord) && Number.isFinite(Number(coord[2])))
     )
   );
-  // Avoid geometryEngine densify for Z-enabled lines because it may emit mixed/no-Z vertices,
+  // Avoid densify operators for Z-enabled lines because they may emit mixed/no-Z vertices,
   // which can pull path-following effects off the actual elevated geometry.
   if (hasAnyZ) {
     return polyline.clone();
   }
 
   const isGeographic = Boolean((polyline.spatialReference as any)?.isGeographic);
+  const geodeticReady = !isGeographic || ensureGeodeticOperatorsLoaded();
+  if (isGeographic && !geodeticReady) {
+    return polyline.clone();
+  }
   const totalLength = isGeographic
-    ? geometryEngine.geodesicLength(polyline) || 0
-    : geometryEngine.planarLength(polyline) || 0;
+    ? geodeticLengthOperator.execute(polyline) || 0
+    : lengthOperator.execute(polyline) || 0;
   if (totalLength <= 0) {
     return polyline.clone();
   }
   const maxSegmentLength = Math.max(totalLength / 400, totalLength / 2000, 0.00001);
   const densified = (isGeographic
-    ? geometryEngine.geodesicDensify(polyline, maxSegmentLength)
-    : geometryEngine.densify(polyline, maxSegmentLength)) as Polyline;
+    ? geodeticDensifyOperator.execute(polyline, maxSegmentLength)
+    : densifyOperator.execute(polyline, maxSegmentLength)) as Polyline | null | undefined;
   if (!densified?.paths?.length) {
     return polyline.clone();
   }
@@ -730,7 +765,13 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     const hasRealAnimations = layerData.animations?.some((anim) => anim.type !== "__placeholder__") ?? false;
     const hasLayerPointKeyframes = config.hasPointKeyframes(layerData);
     const pointKeyframe = hasLayerPointKeyframes ? config.getPointKeyframeAtTime(layerData, time) : null;
-    const keyframedPointAngle = getPointKeyframeAngle(pointKeyframe);
+    const basePointOrientation =
+      layerData.type === "point"
+        ? mergePointSymbolOrientations(
+            readPointStyleOrientation(layerData.pointStyle ?? config.defaultPointStyle),
+            readPointKeyframeOrientation(pointKeyframe)
+          )
+        : null;
     if (!hasRealAnimations && !hasLayerPointKeyframes) {
       layerData.layer.opacity = 1;
       return;
@@ -752,12 +793,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       clearFireworksLayer(layerData);
       if (layerData.type === "point") {
         const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
-        const baseAngle =
-          Number.isFinite(Number(keyframedPointAngle))
-            ? Number(keyframedPointAngle)
-            : layerData.pointStyle?.angle ?? 0;
         layerData.layer.graphics.forEach((graphic: any) => {
-          applyPointSymbolScaleAngle(graphic, baseSize, baseAngle);
+          applyPointSymbolScaleOrientation(graphic, baseSize, basePointOrientation ?? {});
         });
       }
       if (layerData.type === "polyline") {
@@ -1196,17 +1233,22 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     }
     if (layerData.type === "point") {
       const baseSize = layerData.pointStyle?.size ?? config.defaultPointStyle.size;
-      const baseAngle =
-        Number.isFinite(Number(keyframedPointAngle))
-          ? Number(keyframedPointAngle)
-          : layerData.pointStyle?.angle ?? 0;
+      const baseAngle = getPointOrientationAngle(basePointOrientation) ?? 0;
       const dartReveal = dartProgress !== null ? clamp((dartProgress - 0.78) / 0.22, 0, 1) : 1;
       const hideBasePoint = hasFireworksAnimation;
+      const spunOrientation =
+        activeSpinProgress !== null
+          ? {
+              ...(basePointOrientation ?? {}),
+              angle: baseAngle + activeSpinProgress * 360,
+              heading: baseAngle + activeSpinProgress * 360
+            }
+          : basePointOrientation ?? {};
       layerData.layer.graphics.forEach((graphic: any) => {
-        applyPointSymbolScaleAngle(
+        applyPointSymbolScaleOrientation(
           graphic,
           hideBasePoint ? 0 : baseSize * scale * dartReveal,
-          activeSpinProgress !== null ? baseAngle + activeSpinProgress * 360 : baseAngle
+          spunOrientation
         );
       });
       if (dartProgress !== null) {
@@ -3842,18 +3884,6 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       syncTextMeshOverlay(layerData, config.getView?.());
     }
   });
-};
-
-const getPointKeyframeAngle = (frame: PointKeyframe | null) => {
-  const heading = Number(frame?.heading);
-  if (Number.isFinite(heading)) {
-    return heading;
-  }
-  const rotation = Number(frame?.rotation);
-  if (Number.isFinite(rotation)) {
-    return rotation;
-  }
-  return undefined;
 };
 
 const applyPointKeyframes = (layerData: LayerData, frame: PointKeyframe | null) => {

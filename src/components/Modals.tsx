@@ -934,7 +934,7 @@ function Modals() {
                   ></calcite-input-number>
                 </calcite-label>
 
-                <calcite-label style={{ marginTop: 12 }}>
+                <calcite-label id="point-angle-row" style={{ marginTop: 12 }}>
                   Angle (degrees)
                   <calcite-input-number
                     id="point-angle-input"
@@ -945,6 +945,46 @@ function Modals() {
                     scale="m"
                   ></calcite-input-number>
                 </calcite-label>
+
+                <calcite-label id="point-heading-row" style={{ marginTop: 12, display: "none" }}>
+                  Heading (degrees)
+                  <calcite-input-number
+                    id="point-heading-input"
+                    value="0"
+                    min="-360"
+                    max="360"
+                    step="1"
+                    scale="m"
+                  ></calcite-input-number>
+                </calcite-label>
+
+                <calcite-label id="point-tilt-row" style={{ marginTop: 12, display: "none" }}>
+                  Tilt (degrees)
+                  <calcite-input-number
+                    id="point-tilt-input"
+                    value="0"
+                    min="-360"
+                    max="360"
+                    step="1"
+                    scale="m"
+                  ></calcite-input-number>
+                </calcite-label>
+
+                <calcite-label id="point-roll-row" style={{ marginTop: 12, display: "none" }}>
+                  Roll (degrees)
+                  <calcite-input-number
+                    id="point-roll-input"
+                    value="0"
+                    min="-360"
+                    max="360"
+                    step="1"
+                    scale="m"
+                  ></calcite-input-number>
+                </calcite-label>
+
+                <div id="point-rotation-model-note" className="style-helper-copy" style={{ display: "none" }}>
+                  Tilt and roll are available on 3D model symbols.
+                </div>
 
                 <calcite-label id="point-follow-terrain-row" style={{ marginTop: 12 }}>
                   Follow terrain in 3D

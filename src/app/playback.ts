@@ -1,6 +1,12 @@
 import Point from "@arcgis/core/geometry/Point";
 
 import type { LayerData, PointKeyframe, PointStyle } from "../types";
+import { applyPointSymbolScaleOrientation } from "./animationPlaybackHelpers";
+import {
+  mergePointSymbolOrientations,
+  readPointKeyframeOrientation,
+  readPointStyleOrientation
+} from "./pointOrientation";
 
 type PlaybackAccessors = {
   getIsPlaying: () => boolean;
@@ -153,27 +159,43 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
           animation.type === "crossetteShell" ||
           animation.type === "mineShellCombo"
         );
+      const pointStyle = layerData.type === "point" ? layerData.pointStyle ?? config.defaultPointStyle : null;
+      const pointFrame =
+        layerData.type === "point" && config.hasPointKeyframes(layerData)
+          ? config.getPointKeyframeAtTime(layerData, accessors.getCurrentTime())
+          : null;
+      const pointOrientation =
+        layerData.type === "point"
+          ? mergePointSymbolOrientations(
+              readPointStyleOrientation(pointStyle ?? config.defaultPointStyle),
+              readPointKeyframeOrientation(pointFrame)
+            )
+          : null;
       layerData.layer.opacity = 1;
       layerData.layer.graphics.forEach((graphic: any) => {
-        if (graphic.symbol) {
+        if (layerData.type === "point" && pointStyle) {
+          applyPointSymbolScaleOrientation(
+            graphic,
+            hideBasePointForFireworks ? 0 : pointStyle.size,
+            pointOrientation ?? {}
+          );
+        } else if (graphic.symbol) {
           const symbol = graphic.symbol.clone();
           if (symbol.size !== undefined) {
-            const pointStyle = layerData.pointStyle ?? config.defaultPointStyle;
-            symbol.size = hideBasePointForFireworks ? 0 : pointStyle.size;
+            symbol.size = hideBasePointForFireworks ? 0 : pointStyle?.size ?? config.defaultPointStyle.size;
           }
           graphic.symbol = symbol;
         }
         if (graphic.__originalGeometry) {
-          if (layerData.type === "point" && config.hasPointKeyframes(layerData)) {
-            const frame = config.getPointKeyframeAtTime(layerData, accessors.getCurrentTime());
-            if (frame) {
-              graphic.geometry = new Point({
-                x: frame.x,
-                y: frame.y,
-                spatialReference: frame.spatialReference
-              });
-              return;
-            }
+          if (layerData.type === "point" && pointFrame) {
+            const frameZ = Number(pointFrame.z);
+            graphic.geometry = new Point({
+              x: pointFrame.x,
+              y: pointFrame.y,
+              spatialReference: pointFrame.spatialReference,
+              ...(Number.isFinite(frameZ) ? { z: frameZ } : {})
+            });
+            return;
           }
           graphic.geometry = graphic.__originalGeometry.clone();
         }

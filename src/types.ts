@@ -15,6 +15,7 @@ export interface PointKeyframe {
   z?: number;
   heading?: number;
   tilt?: number;
+  roll?: number;
   fov?: number;
   rotation?: number;
   scale?: number;
@@ -29,6 +30,9 @@ export interface PointStyle {
   outlineColor: string;
   outlineWidth: number;
   angle?: number;
+  heading?: number;
+  tilt?: number;
+  roll?: number;
   xoffset?: number;
   yoffset?: number;
 }

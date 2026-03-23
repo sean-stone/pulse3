@@ -2,6 +2,12 @@ import Color from "@arcgis/core/Color";
 
 import type { LayerData } from "../types";
 import { buildLayerEffectString, defaultLayerEffectSettings, isDefaultEffectSettings } from "../utils/effects";
+import {
+  applyPointOrientationToSymbol,
+  getSymbolLayers,
+  setSymbolLayers
+} from "./pointOrientation";
+import type { PointSymbolOrientation } from "./pointOrientation";
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const TAU = Math.PI * 2;
@@ -277,41 +283,16 @@ const cloneSymbol = (symbol: any) => {
   };
 };
 
-const getSymbolLayers = (symbol: any): any[] => {
-  const layers = symbol?.symbolLayers;
-  if (!layers) return [];
-  if (Array.isArray(layers)) return layers;
-  if (typeof layers.toArray === "function") return layers.toArray();
-  try {
-    return Array.from(layers as Iterable<any>);
-  } catch {
-    return [];
-  }
-};
-
-const setSymbolLayers = (symbol: any, nextLayers: any[]) => {
-  try {
-    symbol.symbolLayers = nextLayers;
-    return;
-  } catch {
-    // fallback for Collection-backed symbolLayers
-  }
-  const collection = symbol?.symbolLayers;
-  if (!collection) return;
-  if (typeof collection.removeAll === "function") {
-    collection.removeAll();
-  }
-  if (typeof collection.addMany === "function") {
-    collection.addMany(nextLayers);
-  }
-};
-
-const applyPointSymbolScaleAngle = (graphic: any, size: number, angle: number) => {
+const applyPointSymbolScaleOrientation = (
+  graphic: any,
+  size: number,
+  orientation: Partial<PointSymbolOrientation>
+) => {
   const symbol = cloneSymbol(graphic?.symbol);
   if (!symbol) return false;
   if (symbol.type === "simple-marker") {
     symbol.size = size;
-    symbol.angle = angle;
+    applyPointOrientationToSymbol(symbol, orientation);
     graphic.symbol = symbol;
     return true;
   }
@@ -325,14 +306,12 @@ const applyPointSymbolScaleAngle = (graphic: any, size: number, angle: number) =
       const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
       if (nextLayer?.type === "icon") {
         nextLayer.size = size;
-        nextLayer.angle = angle;
-      } else {
-        nextLayer.heading = angle;
       }
       return nextLayer;
     });
     if (changed) {
       setSymbolLayers(symbol, nextLayers);
+      applyPointOrientationToSymbol(symbol, orientation);
       graphic.symbol = symbol;
       return true;
     }
@@ -408,7 +387,7 @@ export {
   applyBaseLayerEffect,
   applyLineSymbolGlow,
   applyLineSymbolWidth,
-  applyPointSymbolScaleAngle,
+  applyPointSymbolScaleOrientation,
   arrowMarkerPath,
   buildBaseLayerEffect,
   buildWeldLineSymbol,

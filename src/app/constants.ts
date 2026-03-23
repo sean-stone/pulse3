@@ -27,6 +27,9 @@ export const defaultPointStyle: PointStyle = {
   outlineColor: "#ffffff",
   outlineWidth: 2,
   angle: 0,
+  heading: 0,
+  tilt: 0,
+  roll: 0,
   xoffset: 0,
   yoffset: DEFAULT_PIN_Y_OFFSET
 };

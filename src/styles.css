@@ -1548,13 +1548,13 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
 }
 
 .scene-weather-warning {
-  margin: 10px;
+  margin: 20px;
   display: block;
   width: 100%;
   max-width: 260px;
   box-sizing: border-box;
   padding-inline: 20px;
-  width: calc(100% - 66px);
+  width: calc(100% - 110px);
   padding-bottom: 10px;
   --calcite-notice-border-color:
     rgb(from var(--calcite-color-status-warning) r g b / var(--calcite-opacity-half));
@@ -2278,6 +2278,13 @@ body.theme-dark #gif-download-btn::part(button) {
   letter-spacing: 0.08em;
   color: var(--color-muted);
   margin-top: 6px;
+}
+
+.style-helper-copy {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-muted);
 }
 
 .style-option-btn {
