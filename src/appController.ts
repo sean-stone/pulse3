@@ -5537,6 +5537,9 @@ export function getAnimationSettingsSnapshot() {
   });
   getEl("polygon-outline-width").addEventListener("calciteSliderInput", () => applyStyleSettings(false));
   getEl("polygon-zoffset-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("polygon-extrude-height-input").addEventListener("calciteInputNumberChange", () =>
+    applyStyleSettings(false)
+  );
 
   getEl("layer-blend-mode-select").addEventListener("calciteSelectChange", () =>
     applyStyleSettings(false)
@@ -6961,6 +6964,25 @@ function syncPointOrientationControlVisibility(styleValue?: string | null) {
   }
 }
 
+function polygonStyleSupportsExtrusion(styleValue?: string | null) {
+  const normalizedStyle = String(styleValue ?? "").trim();
+  if (!normalizedStyle) return true;
+  return !getPolygonWaterStyle3D(normalizedStyle);
+}
+
+function syncPolygonExtrusionControlVisibility(styleValue?: string | null) {
+  const extrudeRow = document.getElementById("polygon-extrude-height-row") as HTMLElement | null;
+  const note = document.getElementById("polygon-extrude-note") as HTMLElement | null;
+  const is3D = currentViewMode === "3d";
+  const supportsExtrusion = polygonStyleSupportsExtrusion(styleValue ?? getSelectedPolygonFillStyle());
+  if (extrudeRow) {
+    extrudeRow.style.display = is3D && supportsExtrusion ? "" : "none";
+  }
+  if (note) {
+    note.style.display = is3D && !supportsExtrusion ? "" : "none";
+  }
+}
+
 function syncStylePanelFromLayer(layerData: LayerData) {
   const effectsToggle = document.getElementById("style-effects-toggle");
   if (effectsToggle && !effectsToggle.dataset.listenerBound) {
@@ -7020,6 +7042,8 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     setCalciteValue(getEl("polygon-outline-style-select"), style.outlineStyle ?? "solid");
     setCalciteValue(getEl("polygon-outline-width"), style.outlineWidth);
     setCalciteValue(getEl("polygon-zoffset-input"), Number(layerData.polygonZOffset) || 0);
+    setCalciteValue(getEl("polygon-extrude-height-input"), Number(style.extrudeHeight) || 0);
+    syncPolygonExtrusionControlVisibility(style.style);
     updatePolygonStyleOptionColors(style.color, style.outlineColor);
   }
 
@@ -7173,14 +7197,19 @@ function applyStyleSettings(shouldClose: boolean) {
     updateLineAnimationPreview(layerData.lineStyle.color, layerData.lineStyle.style);
   } else if (styleType === "polygon") {
     const selectedFill = getSelectedPolygonFillStyle();
+    const supportsExtrusion = polygonStyleSupportsExtrusion(selectedFill);
     layerData.polygonStyle = {
       style: selectedFill || defaultPolygonStyle.style,
       color: getColorFromPicker("polygon-fill-color", 0.3),
       outlineColor: getColorFromPicker("polygon-outline-color", 1),
       outlineWidth: readNumber((getEl("polygon-outline-width") as any).value, defaultPolygonStyle.outlineWidth),
-      outlineStyle: String((getEl("polygon-outline-style-select") as any).value || "solid")
+      outlineStyle: String((getEl("polygon-outline-style-select") as any).value || "solid"),
+      extrudeHeight: supportsExtrusion
+        ? readNumber((getEl("polygon-extrude-height-input") as any).value, defaultPolygonStyle.extrudeHeight ?? 0)
+        : readNumber(layerData.polygonStyle?.extrudeHeight, defaultPolygonStyle.extrudeHeight ?? 0)
     };
     layerData.polygonZOffset = readNumber((getEl("polygon-zoffset-input") as any).value, 0);
+    syncPolygonExtrusionControlVisibility(layerData.polygonStyle.style);
     updatePolygonAnimationPreview(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
     updatePolygonStyleOptionColors(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
   }
@@ -7305,8 +7334,11 @@ async function applyPointModelSymbolToLayer(layerData: LayerData, style: PointSt
   if (!resolvedBase || currentViewMode !== "3d") return;
   const latestStyle = layerData.pointStyle ?? defaultPointStyle;
   if (latestStyle.style !== styleKey) return;
-  const orientation = readPointStyleOrientation(latestStyle);
   layerData.layer.graphics.forEach((graphic: any) => {
+    const orientation = mergePointSymbolOrientations(
+      readPointStyleOrientation(latestStyle),
+      readPointSymbolOrientation(graphic?.symbol)
+    );
     const symbolInstance =
       typeof resolvedBase.clone === "function" ? resolvedBase.clone() : { ...resolvedBase };
     graphic.symbol = applyPointOrientationToSymbol(symbolInstance, orientation);
@@ -7423,8 +7455,10 @@ function buildPolygonSymbol3D(style: any) {
   const fillPatternStyle = normalizeFillPatternStyle3D(selectedStyle);
   const outlinePatternStyle = normalizeLinePatternStyle3D(String(style.outlineStyle ?? "solid"));
   const waterStyle = getPolygonWaterStyle3D(selectedStyle);
+  const extrudeHeight = Number(style.extrudeHeight);
+  const shouldExtrude = !waterStyle && Number.isFinite(extrudeHeight) && Math.abs(extrudeHeight) > 0.001;
+  const outlineSize = Math.max(0, Number(style.outlineWidth) || 0);
   if (waterStyle) {
-    const outlineSize = Math.max(0.5, Number(style.outlineWidth) || 0);
     const waterLayer: any = {
       type: "water",
       color: [fillColor.r, fillColor.g, fillColor.b, Number.isFinite(fillColor.a) ? fillColor.a : 1],
@@ -7457,6 +7491,54 @@ function buildPolygonSymbol3D(style: any) {
       symbolLayers
     } as any;
   }
+  if (shouldExtrude) {
+    const extrudeLayer: any = {
+      type: "extrude",
+      size: extrudeHeight,
+      material: {
+        color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha]
+      }
+    };
+    if (outlineSize > 0) {
+      extrudeLayer.edges = {
+        type: "solid",
+        color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
+        size: Math.max(0.5, outlineSize)
+      };
+    }
+    const symbolLayers: any[] = [extrudeLayer];
+    if (fillPatternStyle !== "solid" || outlinePatternStyle !== "solid") {
+      const capLayer: any = {
+        type: "fill",
+        material: {
+          color: [fillColor.r, fillColor.g, fillColor.b, fillAlpha]
+        }
+      };
+      if (fillPatternStyle !== "solid") {
+        capLayer.pattern = {
+          type: "style",
+          style: fillPatternStyle
+        };
+      }
+      if (outlineSize > 0) {
+        capLayer.outline = {
+          color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
+          size: Math.max(0.5, outlineSize)
+        };
+        if (outlinePatternStyle !== "solid") {
+          capLayer.outline.pattern = {
+            type: "style",
+            style: outlinePatternStyle
+          };
+        }
+      }
+      symbolLayers.push(capLayer);
+    }
+    return {
+      type: "polygon-3d",
+      symbolLayers
+    } as any;
+  }
   const fillLayer: any = {
     type: "fill",
     material: {
@@ -7464,7 +7546,7 @@ function buildPolygonSymbol3D(style: any) {
     },
     outline: {
       color: [outlineColor.r, outlineColor.g, outlineColor.b, outlineAlpha],
-      size: Math.max(0.5, Number(style.outlineWidth) || 0)
+      size: Math.max(0.5, outlineSize)
     }
   };
   if (fillPatternStyle !== "solid") {
@@ -7776,6 +7858,8 @@ function setStyleSectionVisibility(
   const pointFollowTerrainRow = document.getElementById("point-follow-terrain-row") as HTMLElement | null;
   const lineFollowTerrainRow = document.getElementById("line-follow-terrain-row") as HTMLElement | null;
   const polygonZOffsetRow = document.getElementById("polygon-zoffset-row") as HTMLElement | null;
+  const polygonExtrudeRow = document.getElementById("polygon-extrude-height-row") as HTMLElement | null;
+  const polygonExtrudeNote = document.getElementById("polygon-extrude-note") as HTMLElement | null;
   const polygonOutlineStyle = getEl("polygon-outline-style-row");
   const effectsSection = getEl("layer-effects-section");
 
@@ -7795,10 +7879,18 @@ function setStyleSectionVisibility(
   if (polygonZOffsetRow) {
     polygonZOffsetRow.style.display = type === "polygon" && currentViewMode === "3d" ? "" : "none";
   }
+  if (polygonExtrudeRow) {
+    polygonExtrudeRow.style.display = "none";
+  }
+  if (polygonExtrudeNote) {
+    polygonExtrudeNote.style.display = "none";
+  }
   polygonOutlineStyle.style.display = showFeatureExtras && type === "polygon" ? "block" : "none";
   if (type === "point") {
     syncPointOrientationControlVisibility(getSelectedPointStyle());
     filterPointStyles();
+  } else if (type === "polygon") {
+    syncPolygonExtrusionControlVisibility(getSelectedPolygonFillStyle());
   }
 }
 
@@ -8201,6 +8293,7 @@ function setPolygonFillStyleSelection(value: string) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+  syncPolygonExtrusionControlVisibility(value);
 }
 
 function getSelectedPolygonFillStyle() {
@@ -8744,7 +8837,14 @@ function updateAnimationOptions() {
   optionsContainer.innerHTML = "";
   webglOptionsContainer.innerHTML = "";
 
-  const types = animationTypes[layerData.type] || animationTypes.point;
+  const types = (animationTypes[layerData.type] || animationTypes.point).filter((type) => {
+    if (type.value !== "extrude") return true;
+    return (
+      currentViewMode === "3d" &&
+      layerData.type === "polygon" &&
+      polygonStyleSupportsExtrusion(layerData.polygonStyle?.style)
+    );
+  });
   const baseTypes = types.filter((type) => !webglAnimationTypes.has(type.value));
   const webglTypes = types.filter((type) => webglAnimationTypes.has(type.value));
 

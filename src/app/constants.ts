@@ -45,7 +45,8 @@ export const defaultPolygonStyle: PolygonStyle = {
   color: "#7ac7b0",
   outlineColor: "#0a4c66",
   outlineWidth: 2,
-  outlineStyle: "solid"
+  outlineStyle: "solid",
+  extrudeHeight: 0
 };
 export const DEFAULT_TEXT_MESH_DEPTH_PERCENT = 22;
 

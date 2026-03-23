@@ -891,6 +891,22 @@ function Modals() {
                 scale="m"
               ></calcite-input-number>
             </calcite-label>
+
+            <calcite-label id="polygon-extrude-height-row" style={{ marginTop: 12, display: "none" }}>
+              Extrude Height (m, 3D)
+              <calcite-input-number
+                id="polygon-extrude-height-input"
+                value="0"
+                min="-10000"
+                max="10000"
+                step="1"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <div id="polygon-extrude-note" className="style-helper-copy" style={{ display: "none" }}>
+              Water styles stay flat in 3D.
+            </div>
           </div>
 
           <div id="layer-effects-section">

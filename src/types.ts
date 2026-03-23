@@ -49,6 +49,7 @@ export interface PolygonStyle {
   outlineColor: string;
   outlineWidth: number;
   outlineStyle?: string;
+  extrudeHeight?: number;
 }
 
 export interface LayerEffectSettings {

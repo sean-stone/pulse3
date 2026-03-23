@@ -1,7 +1,10 @@
 import Point from "@arcgis/core/geometry/Point";
 
 import type { LayerData, PointKeyframe, PointStyle } from "../types";
-import { applyPointSymbolScaleOrientation } from "./animationPlaybackHelpers";
+import {
+  applyPointSymbolScaleOrientation,
+  applyPolygonExtrusionHeight
+} from "./animationPlaybackHelpers";
 import {
   mergePointSymbolOrientations,
   readPointKeyframeOrientation,
@@ -171,6 +174,8 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
               readPointKeyframeOrientation(pointFrame)
             )
           : null;
+      const polygonExtrudeHeight =
+        layerData.type === "polygon" ? Number(layerData.polygonStyle?.extrudeHeight) || 0 : 0;
       layerData.layer.opacity = 1;
       layerData.layer.graphics.forEach((graphic: any) => {
         if (layerData.type === "point" && pointStyle) {
@@ -179,6 +184,8 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
             hideBasePointForFireworks ? 0 : pointStyle.size,
             pointOrientation ?? {}
           );
+        } else if (layerData.type === "polygon") {
+          applyPolygonExtrusionHeight(graphic, polygonExtrudeHeight);
         } else if (graphic.symbol) {
           const symbol = graphic.symbol.clone();
           if (symbol.size !== undefined) {

@@ -16,6 +16,7 @@ import {
   applyBaseLayerEffect,
   applyLineSymbolGlow,
   applyLineSymbolWidth,
+  applyPolygonExtrusionHeight,
   applyPointSymbolScaleOrientation,
   arrowMarkerPath,
   buildBaseLayerEffect,
@@ -211,9 +212,27 @@ const applyPolygonOutlineWidth = (graphic: any, width: number) => {
     if (!symbolLayers.length) return false;
     let changed = false;
     const nextLayers = symbolLayers.map((layer: any) => {
-      if (layer?.type !== "fill") return layer;
+      if (layer?.type !== "fill" && layer?.type !== "extrude") return layer;
       changed = true;
       const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+      if (nextLayer?.type === "extrude") {
+        if (width > 0) {
+          if (nextLayer?.edges && typeof nextLayer.edges.clone === "function") {
+            const nextEdges = nextLayer.edges.clone();
+            nextEdges.size = width;
+            nextLayer.edges = nextEdges;
+          } else {
+            nextLayer.edges = {
+              ...(nextLayer?.edges ?? {}),
+              type: "solid",
+              size: width
+            };
+          }
+        } else {
+          nextLayer.edges = null;
+        }
+        return nextLayer;
+      }
       if (nextLayer?.outline) {
         if (typeof nextLayer.outline.clone === "function") {
           const nextOutline = nextLayer.outline.clone();
@@ -297,7 +316,7 @@ const applyPolygonTimeGradient3D = (layerData: LayerData, progress: number) => {
 
     let changed = false;
     const nextLayers = symbolLayers.map((layer: any) => {
-      if (layer?.type !== "fill") return layer;
+      if (layer?.type !== "fill" && layer?.type !== "extrude") return layer;
       changed = true;
       const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
 
@@ -310,6 +329,20 @@ const applyPolygonTimeGradient3D = (layerData: LayerData, progress: number) => {
           ...(nextLayer?.material ?? {}),
           color: shiftedFill
         };
+      }
+
+      if (nextLayer?.type === "extrude") {
+        if (nextLayer?.edges && typeof nextLayer.edges.clone === "function") {
+          const nextEdges = nextLayer.edges.clone();
+          nextEdges.color = shiftedOutline;
+          nextLayer.edges = nextEdges;
+        } else if (nextLayer?.edges) {
+          nextLayer.edges = {
+            ...(nextLayer?.edges ?? {}),
+            color: shiftedOutline
+          };
+        }
+        return nextLayer;
       }
 
       if (nextLayer?.outline && typeof nextLayer.outline.clone === "function") {
@@ -805,8 +838,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       }
       if (layerData.type === "polygon") {
         const baseOutline = layerData.polygonStyle?.outlineWidth ?? defaultPolygonStyle.outlineWidth;
+        const baseExtrudeHeight = Number(layerData.polygonStyle?.extrudeHeight) || 0;
         layerData.layer.graphics.forEach((graphic: any) => {
           applyPolygonOutlineWidth(graphic, baseOutline);
+          applyPolygonExtrusionHeight(graphic, baseExtrudeHeight);
         });
       }
       if (layerData.type === "text") {
@@ -844,6 +879,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let hasActiveAnimation = false;
     let latestEndedAnimation: LayerAnimation | null = null;
     let latestEndedAnimationEnd = Number.NEGATIVE_INFINITY;
+    let extrudeProgress: number | null = null;
     let glowProgress: number | null = null;
     let glowMode: "soft" | "pulse" | null = null;
     let neonProgress: number | null = null;
@@ -954,6 +990,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           case "pulse":
             opacity = 0.5 + 0.5 * Math.sin(progress * Math.PI * 4);
             scale = 0.9 + 0.15 * Math.sin(progress * Math.PI * 4);
+            break;
+          case "extrude":
+            extrudeProgress = progress;
+            opacity = 1;
             break;
           case "grow":
             scale = 0.5 + progress * 0.5;
@@ -3735,8 +3775,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       }
 
       const baseOutline = layerData.polygonStyle?.outlineWidth ?? defaultPolygonStyle.outlineWidth;
+      const baseExtrudeHeight = Number(layerData.polygonStyle?.extrudeHeight) || 0;
+      const animatedExtrudeHeight =
+        extrudeProgress !== null ? baseExtrudeHeight * clamp(extrudeProgress, 0, 1) : baseExtrudeHeight;
       layerData.layer.graphics.forEach((graphic: any) => {
         applyPolygonOutlineWidth(graphic, baseOutline * outlineWidthScale);
+        applyPolygonExtrusionHeight(graphic, animatedExtrudeHeight);
       });
       if (hasTimeGradientAnimation) {
         applyPolygonTimeGradient3D(layerData, gradientProgress ?? 0);

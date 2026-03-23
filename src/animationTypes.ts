@@ -53,6 +53,7 @@
     { value: "fadeIn", label: "Fade In" },
     { value: "fadeOut", label: "Fade Out" },
     { value: "fill", label: "Fill Animation" },
+    { value: "extrude", label: "Extrude (3D)" },
     { value: "pulse", label: "Pulse" },
     { value: "glow", label: "Glow" },
     { value: "glowPulse", label: "Glow Pulse" },

@@ -3,9 +3,11 @@ import Color from "@arcgis/core/Color";
 import type { LayerData } from "../types";
 import { buildLayerEffectString, defaultLayerEffectSettings, isDefaultEffectSettings } from "../utils/effects";
 import {
-  applyPointOrientationToSymbol,
+  getPointOrientationAngle,
+  getPointOrientationHeading,
   getSymbolLayers,
-  setSymbolLayers
+  setSymbolLayers,
+  toFiniteNumber
 } from "./pointOrientation";
 import type { PointSymbolOrientation } from "./pointOrientation";
 
@@ -283,22 +285,100 @@ const cloneSymbol = (symbol: any) => {
   };
 };
 
+const EPSILON = 0.001;
+
+const normalizeDegrees = (value: number) => {
+  const normalized = value % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+};
+
+const anglesClose = (left: unknown, right: unknown, epsilon = EPSILON) => {
+  const a = Number(left);
+  const b = Number(right);
+  if (!Number.isFinite(a) && !Number.isFinite(b)) return true;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  const aNorm = normalizeDegrees(a);
+  const bNorm = normalizeDegrees(b);
+  let delta = Math.abs(aNorm - bNorm);
+  if (delta > 180) {
+    delta = 360 - delta;
+  }
+  return delta <= epsilon;
+};
+
+const numbersClose = (left: unknown, right: unknown, epsilon = EPSILON) => {
+  const a = Number(left);
+  const b = Number(right);
+  if (!Number.isFinite(a) && !Number.isFinite(b)) return true;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) <= epsilon;
+};
+
+const pointSymbolAlreadyMatchesState = (
+  symbol: any,
+  size: number,
+  orientation: Partial<PointSymbolOrientation>
+) => {
+  const angle = getPointOrientationAngle(orientation);
+  const heading = getPointOrientationHeading(orientation);
+  const tilt = toFiniteNumber(orientation.tilt);
+  const roll = toFiniteNumber(orientation.roll);
+  if (!symbol) return false;
+  if (symbol.type === "simple-marker") {
+    return numbersClose(symbol.size, size) && anglesClose(symbol.angle, angle);
+  }
+  if (symbol.type !== "point-3d") {
+    return false;
+  }
+  const symbolLayers = getSymbolLayers(symbol);
+  if (!symbolLayers.length) return false;
+  let hasComparableLayer = false;
+  for (const layer of symbolLayers) {
+    if (!layer) continue;
+    if (layer.type === "icon") {
+      hasComparableLayer = true;
+      if (!numbersClose(layer.size, size) || !anglesClose(layer.angle, angle)) {
+        return false;
+      }
+      continue;
+    }
+    if (layer.type === "object") {
+      hasComparableLayer = true;
+      if (!anglesClose(layer.heading, heading) || !numbersClose(layer.tilt, tilt) || !anglesClose(layer.roll, roll)) {
+        return false;
+      }
+    }
+  }
+  return hasComparableLayer;
+};
+
 const applyPointSymbolScaleOrientation = (
   graphic: any,
   size: number,
   orientation: Partial<PointSymbolOrientation>
 ) => {
+  const liveSymbol = graphic?.symbol;
+  if (pointSymbolAlreadyMatchesState(liveSymbol, size, orientation)) {
+    return true;
+  }
   const symbol = cloneSymbol(graphic?.symbol);
   if (!symbol) return false;
   if (symbol.type === "simple-marker") {
     symbol.size = size;
-    applyPointOrientationToSymbol(symbol, orientation);
+    const angle = getPointOrientationAngle(orientation);
+    if (Number.isFinite(angle)) {
+      symbol.angle = angle;
+    }
     graphic.symbol = symbol;
     return true;
   }
   if (symbol.type === "point-3d") {
     const symbolLayers = getSymbolLayers(symbol);
     if (!symbolLayers.length) return false;
+    const angle = getPointOrientationAngle(orientation);
+    const heading = getPointOrientationHeading(orientation);
+    const tilt = toFiniteNumber(orientation.tilt);
+    const roll = toFiniteNumber(orientation.roll);
     let changed = false;
     const nextLayers = symbolLayers.map((layer: any) => {
       if (layer?.type !== "icon" && layer?.type !== "object") return layer;
@@ -306,12 +386,24 @@ const applyPointSymbolScaleOrientation = (
       const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
       if (nextLayer?.type === "icon") {
         nextLayer.size = size;
+        if (Number.isFinite(angle)) {
+          nextLayer.angle = angle;
+        }
+      } else if (nextLayer?.type === "object") {
+        if (Number.isFinite(heading)) {
+          nextLayer.heading = heading;
+        }
+        if (Number.isFinite(tilt)) {
+          nextLayer.tilt = tilt;
+        }
+        if (Number.isFinite(roll)) {
+          nextLayer.roll = roll;
+        }
       }
       return nextLayer;
     });
     if (changed) {
       setSymbolLayers(symbol, nextLayers);
-      applyPointOrientationToSymbol(symbol, orientation);
       graphic.symbol = symbol;
       return true;
     }
@@ -352,6 +444,25 @@ const applyLineSymbolWidth = (graphic: any, width: number) => {
   return false;
 };
 
+const applyPolygonExtrusionHeight = (graphic: any, height: number) => {
+  const symbol = cloneSymbol(graphic?.symbol);
+  if (!symbol || symbol.type !== "polygon-3d") return false;
+  const symbolLayers = getSymbolLayers(symbol);
+  if (!symbolLayers.length) return false;
+  let changed = false;
+  const nextLayers = symbolLayers.map((layer: any) => {
+    if (layer?.type !== "extrude") return layer;
+    changed = true;
+    const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+    nextLayer.size = height;
+    return nextLayer;
+  });
+  if (!changed) return false;
+  setSymbolLayers(symbol, nextLayers);
+  graphic.symbol = symbol;
+  return true;
+};
+
 const applyLineSymbolGlow = (
   graphic: any,
   intensity: number,
@@ -387,6 +498,7 @@ export {
   applyBaseLayerEffect,
   applyLineSymbolGlow,
   applyLineSymbolWidth,
+  applyPolygonExtrusionHeight,
   applyPointSymbolScaleOrientation,
   arrowMarkerPath,
   buildBaseLayerEffect,
