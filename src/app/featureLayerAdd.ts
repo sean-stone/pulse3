@@ -88,7 +88,7 @@ const handleAddFeatureLayer = async (state: FeatureLayerState, config: FeatureLa
       layerData.polygonZOffset = 0;
     } else {
       layerData.pointStyle = { ...config.defaultPointStyle };
-      layerData.pointFollowTerrain3D = true;
+      layerData.pointFollowTerrain3D = false;
     }
     layerData.layerEffectsEnabled = true;
     config.applyLayerModeProperties?.(layerData);

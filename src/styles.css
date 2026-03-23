@@ -1498,6 +1498,13 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
   gap: 10px;
 }
 
+.camera-layer-studio-settings {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .scene-camera-studio-heading {
   font-size: 13px;
   font-weight: 700;
@@ -1535,6 +1542,27 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
   color: rgba(10, 76, 102, 0.82);
 }
 
+#scene-daylight-expand arcgis-weather {
+  display: block;
+  margin-top: 10px;
+}
+
+.scene-weather-warning {
+  margin: 10px;
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  max-height: none !important;
+  box-sizing: border-box;
+  padding: 2px 8px 0 0;
+  overflow: visible !important;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(10, 76, 102, 0.8);
+}
+
 body.theme-dark .scene-camera-studio-heading,
 body.theme-dark .scene-camera-studio-toggle,
 body.theme-dark .scene-camera-studio-control,
@@ -1551,6 +1579,12 @@ body.theme-dark .scene-camera-studio-readout,
 body.calcite-mode-dark .scene-camera-studio-readout,
 :root.calcite-mode-dark .scene-camera-studio-readout {
   color: rgba(243, 247, 251, 0.8);
+}
+
+body.theme-dark .scene-weather-warning,
+body.calcite-mode-dark .scene-weather-warning,
+:root.calcite-mode-dark .scene-weather-warning {
+  color: rgba(243, 247, 251, 0.82);
 }
 
 #rename-modal,

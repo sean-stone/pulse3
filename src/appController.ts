@@ -410,6 +410,7 @@ let mapContextMenuGlobalHandlersBound = false;
 let mapContextMenuScreenPoint: { x: number; y: number } | null = null;
 let mapContextMenuMapPoint: Point | null = null;
 let mapContextMenuLayerIndex: number | null = null;
+let mapContextMenuSuppressUntil = 0;
 let viewExtentWatchHandle: { remove: () => void } | null = null;
 let viewClickHandle: { remove: () => void } | null = null;
 let viewDoubleClickHandle: { remove: () => void } | null = null;
@@ -493,6 +494,37 @@ let sceneCameraFxOverlayCanvas: HTMLCanvasElement | null = null;
 let sceneCameraFxOverlayContext: CanvasRenderingContext2D | null = null;
 let sceneCameraFxAnimationFrame: number | null = null;
 let sceneDaylightPersistenceBound = false;
+const SCENE_CAMERA_FOV_IDS = ["scene-camera-fov", "camera-layer-scene-camera-fov"];
+const SCENE_CAMERA_FOV_READOUT_IDS = ["scene-camera-fov-value", "camera-layer-scene-camera-fov-value"];
+const SCENE_QUALITY_PROFILE_IDS = ["scene-quality-profile", "camera-layer-scene-quality-profile"];
+const SCENE_ATMOSPHERE_QUALITY_IDS = ["scene-atmosphere-quality", "camera-layer-scene-atmosphere-quality"];
+const SCENE_GLOW_ENABLED_IDS = ["scene-glow-enabled", "camera-layer-scene-glow-enabled"];
+const SCENE_CAMERA_FX_ENABLED_IDS = ["scene-camera-fx-enabled", "camera-layer-scene-camera-fx-enabled"];
+const SCENE_CAMERA_FX_NOISE_IDS = ["scene-camera-fx-noise", "camera-layer-scene-camera-fx-noise"];
+const SCENE_CAMERA_FX_NOISE_READOUT_IDS = [
+  "scene-camera-fx-noise-value",
+  "camera-layer-scene-camera-fx-noise-value"
+];
+const SCENE_CAMERA_FX_SCANLINE_IDS = ["scene-camera-fx-scanline", "camera-layer-scene-camera-fx-scanline"];
+const SCENE_CAMERA_FX_SCANLINE_READOUT_IDS = [
+  "scene-camera-fx-scanline-value",
+  "camera-layer-scene-camera-fx-scanline-value"
+];
+const SCENE_CAMERA_FX_VIGNETTE_IDS = ["scene-camera-fx-vignette", "camera-layer-scene-camera-fx-vignette"];
+const SCENE_CAMERA_FX_VIGNETTE_READOUT_IDS = [
+  "scene-camera-fx-vignette-value",
+  "camera-layer-scene-camera-fx-vignette-value"
+];
+const SCENE_CAMERA_FX_JITTER_IDS = ["scene-camera-fx-jitter", "camera-layer-scene-camera-fx-jitter"];
+const SCENE_CAMERA_FX_JITTER_READOUT_IDS = [
+  "scene-camera-fx-jitter-value",
+  "camera-layer-scene-camera-fx-jitter-value"
+];
+const SCENE_CAMERA_FX_CHROMATIC_IDS = ["scene-camera-fx-chromatic", "camera-layer-scene-camera-fx-chromatic"];
+const SCENE_CAMERA_FX_CHROMATIC_READOUT_IDS = [
+  "scene-camera-fx-chromatic-value",
+  "camera-layer-scene-camera-fx-chromatic-value"
+];
 
 async function handleAutoSaveAction() {
   await ensureStorageConsent(storageState, openConfirmDialog);
@@ -1177,75 +1209,71 @@ function updateSceneCameraFxOverlayState() {
   }
 }
 
+function getElementsByIds<T extends HTMLElement = HTMLElement>(ids: string[]) {
+  return ids
+    .map((id) => document.getElementById(id) as T | null)
+    .filter((element): element is T => Boolean(element));
+}
+
 function updateSceneCameraStudioReadouts() {
-  const fovReadout = document.getElementById("scene-camera-fov-value");
-  if (fovReadout) {
-    fovReadout.textContent = `${Math.round(cameraStudioSettings.fov)}deg`;
-  }
-  const noiseReadout = document.getElementById("scene-camera-fx-noise-value");
-  if (noiseReadout) {
-    noiseReadout.textContent = `${Math.round(cameraStudioSettings.noiseLevel)}%`;
-  }
-  const scanlineReadout = document.getElementById("scene-camera-fx-scanline-value");
-  if (scanlineReadout) {
-    scanlineReadout.textContent = `${Math.round(cameraStudioSettings.scanlineLevel)}%`;
-  }
-  const vignetteReadout = document.getElementById("scene-camera-fx-vignette-value");
-  if (vignetteReadout) {
-    vignetteReadout.textContent = `${Math.round(cameraStudioSettings.vignetteLevel)}%`;
-  }
-  const jitterReadout = document.getElementById("scene-camera-fx-jitter-value");
-  if (jitterReadout) {
-    jitterReadout.textContent = `${cameraStudioSettings.jitter.toFixed(1)} px`;
-  }
-  const chromaticReadout = document.getElementById("scene-camera-fx-chromatic-value");
-  if (chromaticReadout) {
-    chromaticReadout.textContent = `${cameraStudioSettings.chromaticAberration.toFixed(1)} px`;
-  }
+  const setReadoutText = (ids: string[], value: string) => {
+    getElementsByIds<HTMLElement>(ids).forEach((readout) => {
+      readout.textContent = value;
+    });
+  };
+  setReadoutText(SCENE_CAMERA_FOV_READOUT_IDS, `${Math.round(cameraStudioSettings.fov)}deg`);
+  setReadoutText(SCENE_CAMERA_FX_NOISE_READOUT_IDS, `${Math.round(cameraStudioSettings.noiseLevel)}%`);
+  setReadoutText(SCENE_CAMERA_FX_SCANLINE_READOUT_IDS, `${Math.round(cameraStudioSettings.scanlineLevel)}%`);
+  setReadoutText(SCENE_CAMERA_FX_VIGNETTE_READOUT_IDS, `${Math.round(cameraStudioSettings.vignetteLevel)}%`);
+  setReadoutText(SCENE_CAMERA_FX_JITTER_READOUT_IDS, `${cameraStudioSettings.jitter.toFixed(1)} px`);
+  setReadoutText(
+    SCENE_CAMERA_FX_CHROMATIC_READOUT_IDS,
+    `${cameraStudioSettings.chromaticAberration.toFixed(1)} px`
+  );
 }
 
 function syncSceneCameraStudioControlValues() {
-  const fovSlider = document.getElementById("scene-camera-fov") as HTMLElement | null;
-  if (fovSlider) {
-    setCalciteValue(fovSlider, Math.round(cameraStudioSettings.fov));
-  }
-  const qualitySelect = document.getElementById("scene-quality-profile") as HTMLElement | null;
-  if (qualitySelect) {
-    setCalciteValue(qualitySelect, cameraStudioSettings.qualityProfile);
-  }
-  const atmosphereQualitySelect = document.getElementById("scene-atmosphere-quality") as HTMLElement | null;
-  if (atmosphereQualitySelect) {
-    setCalciteValue(atmosphereQualitySelect, cameraStudioSettings.atmosphereQuality);
-  }
-  const noiseSlider = document.getElementById("scene-camera-fx-noise") as HTMLElement | null;
-  if (noiseSlider) {
-    setCalciteValue(noiseSlider, Math.round(cameraStudioSettings.noiseLevel));
-  }
-  const scanlineSlider = document.getElementById("scene-camera-fx-scanline") as HTMLElement | null;
-  if (scanlineSlider) {
-    setCalciteValue(scanlineSlider, Math.round(cameraStudioSettings.scanlineLevel));
-  }
-  const vignetteSlider = document.getElementById("scene-camera-fx-vignette") as HTMLElement | null;
-  if (vignetteSlider) {
-    setCalciteValue(vignetteSlider, Math.round(cameraStudioSettings.vignetteLevel));
-  }
-  const jitterSlider = document.getElementById("scene-camera-fx-jitter") as HTMLElement | null;
-  if (jitterSlider) {
-    setCalciteValue(jitterSlider, Number(cameraStudioSettings.jitter.toFixed(1)));
-  }
-  const chromaticSlider = document.getElementById("scene-camera-fx-chromatic") as HTMLElement | null;
-  if (chromaticSlider) {
-    setCalciteValue(chromaticSlider, Number(cameraStudioSettings.chromaticAberration.toFixed(1)));
-  }
-  const cinematicFxSwitch = document.getElementById("scene-camera-fx-enabled") as any;
-  if (cinematicFxSwitch) {
-    cinematicFxSwitch.checked = cameraStudioSettings.cinematicFxEnabled;
-  }
-  const glowSwitch = document.getElementById("scene-glow-enabled") as any;
-  if (glowSwitch) {
-    glowSwitch.checked = cameraStudioSettings.glowEnabled;
-  }
+  const setElementsValue = (ids: string[], value: string | number) => {
+    getElementsByIds<HTMLElement>(ids).forEach((element) => {
+      setCalciteValue(element, value);
+    });
+  };
+  setElementsValue(SCENE_CAMERA_FOV_IDS, Math.round(cameraStudioSettings.fov));
+  setElementsValue(SCENE_QUALITY_PROFILE_IDS, cameraStudioSettings.qualityProfile);
+  setElementsValue(SCENE_ATMOSPHERE_QUALITY_IDS, cameraStudioSettings.atmosphereQuality);
+  setElementsValue(SCENE_CAMERA_FX_NOISE_IDS, Math.round(cameraStudioSettings.noiseLevel));
+  setElementsValue(SCENE_CAMERA_FX_SCANLINE_IDS, Math.round(cameraStudioSettings.scanlineLevel));
+  setElementsValue(SCENE_CAMERA_FX_VIGNETTE_IDS, Math.round(cameraStudioSettings.vignetteLevel));
+  setElementsValue(SCENE_CAMERA_FX_JITTER_IDS, Number(cameraStudioSettings.jitter.toFixed(1)));
+  setElementsValue(
+    SCENE_CAMERA_FX_CHROMATIC_IDS,
+    Number(cameraStudioSettings.chromaticAberration.toFixed(1))
+  );
+  getElementsByIds<any>(SCENE_CAMERA_FX_ENABLED_IDS).forEach((toggle) => {
+    toggle.checked = cameraStudioSettings.cinematicFxEnabled;
+  });
+  getElementsByIds<any>(SCENE_GLOW_ENABLED_IDS).forEach((toggle) => {
+    toggle.checked = cameraStudioSettings.glowEnabled;
+  });
+  updateSceneCameraFxControlsVisibility();
   updateSceneCameraStudioReadouts();
+}
+
+function updateSceneCameraFxControlsVisibility() {
+  const isVisible = cameraStudioSettings.cinematicFxEnabled;
+  const fxControlIds = [
+    ...SCENE_CAMERA_FX_NOISE_IDS,
+    ...SCENE_CAMERA_FX_SCANLINE_IDS,
+    ...SCENE_CAMERA_FX_VIGNETTE_IDS,
+    ...SCENE_CAMERA_FX_JITTER_IDS,
+    ...SCENE_CAMERA_FX_CHROMATIC_IDS
+  ];
+  getElementsByIds<HTMLElement>(fxControlIds).forEach((control) => {
+    const row = control.closest("calcite-label") as HTMLElement | null;
+    if (row) {
+      row.style.display = isVisible ? "" : "none";
+    }
+  });
 }
 
 function applySceneCameraStudioSettings(sceneViewOverride?: any) {
@@ -1459,136 +1487,174 @@ function applySceneSettingsSnapshot(sceneSettings: any, sceneViewOverride?: any)
 
 function bindSceneCameraStudioControls() {
   if (sceneCameraStudioControlsBound) return;
-  const fovSlider = document.getElementById("scene-camera-fov") as any;
-  const qualitySelect = document.getElementById("scene-quality-profile") as any;
-  const atmosphereQualitySelect = document.getElementById("scene-atmosphere-quality") as any;
-  const glowSwitch = document.getElementById("scene-glow-enabled") as any;
-  const cinematicFxSwitch = document.getElementById("scene-camera-fx-enabled") as any;
-  const noiseSlider = document.getElementById("scene-camera-fx-noise") as any;
-  const scanlineSlider = document.getElementById("scene-camera-fx-scanline") as any;
-  const vignetteSlider = document.getElementById("scene-camera-fx-vignette") as any;
-  const jitterSlider = document.getElementById("scene-camera-fx-jitter") as any;
-  const chromaticSlider = document.getElementById("scene-camera-fx-chromatic") as any;
-  if (!fovSlider || !qualitySelect || !atmosphereQualitySelect || !glowSwitch) return;
-  if (!cinematicFxSwitch || !noiseSlider || !scanlineSlider || !vignetteSlider) return;
-  if (!jitterSlider || !chromaticSlider) return;
+  const fovSliders = getElementsByIds<any>(SCENE_CAMERA_FOV_IDS);
+  const qualitySelects = getElementsByIds<any>(SCENE_QUALITY_PROFILE_IDS);
+  const atmosphereQualitySelects = getElementsByIds<any>(SCENE_ATMOSPHERE_QUALITY_IDS);
+  const glowSwitches = getElementsByIds<any>(SCENE_GLOW_ENABLED_IDS);
+  const cinematicFxSwitches = getElementsByIds<any>(SCENE_CAMERA_FX_ENABLED_IDS);
+  const noiseSliders = getElementsByIds<any>(SCENE_CAMERA_FX_NOISE_IDS);
+  const scanlineSliders = getElementsByIds<any>(SCENE_CAMERA_FX_SCANLINE_IDS);
+  const vignetteSliders = getElementsByIds<any>(SCENE_CAMERA_FX_VIGNETTE_IDS);
+  const jitterSliders = getElementsByIds<any>(SCENE_CAMERA_FX_JITTER_IDS);
+  const chromaticSliders = getElementsByIds<any>(SCENE_CAMERA_FX_CHROMATIC_IDS);
+  if (!fovSliders.length || !qualitySelects.length || !atmosphereQualitySelects.length || !glowSwitches.length) {
+    return;
+  }
+  if (!cinematicFxSwitches.length || !noiseSliders.length || !scanlineSliders.length || !vignetteSliders.length) {
+    return;
+  }
+  if (!jitterSliders.length || !chromaticSliders.length) return;
   sceneCameraStudioControlsBound = true;
 
   syncSceneCameraStudioControlValues();
 
-  const handleFovUpdate = () => {
+  const handleFovUpdate = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.fov = clamp(
-      readNumber(fovSlider.value, cameraStudioSettings.fov),
+      readNumber(target?.value, cameraStudioSettings.fov),
       CAMERA_FOV_MIN,
       CAMERA_FOV_MAX
     );
-    updateSceneCameraStudioReadouts();
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleNoiseUpdate = () => {
+  const handleNoiseUpdate = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.noiseLevel = clamp(
-      readNumber(noiseSlider.value, cameraStudioSettings.noiseLevel),
+      readNumber(target?.value, cameraStudioSettings.noiseLevel),
       CAMERA_FX_LEVEL_MIN,
       CAMERA_FX_LEVEL_MAX
     );
-    updateSceneCameraStudioReadouts();
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleScanlineUpdate = () => {
+  const handleScanlineUpdate = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.scanlineLevel = clamp(
-      readNumber(scanlineSlider.value, cameraStudioSettings.scanlineLevel),
+      readNumber(target?.value, cameraStudioSettings.scanlineLevel),
       CAMERA_FX_LEVEL_MIN,
       CAMERA_FX_LEVEL_MAX
     );
-    updateSceneCameraStudioReadouts();
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleVignetteUpdate = () => {
+  const handleVignetteUpdate = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.vignetteLevel = clamp(
-      readNumber(vignetteSlider.value, cameraStudioSettings.vignetteLevel),
+      readNumber(target?.value, cameraStudioSettings.vignetteLevel),
       CAMERA_FX_LEVEL_MIN,
       CAMERA_FX_LEVEL_MAX
     );
-    updateSceneCameraStudioReadouts();
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleJitterUpdate = () => {
+  const handleJitterUpdate = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.jitter = clamp(
-      readNumber(jitterSlider.value, cameraStudioSettings.jitter),
+      readNumber(target?.value, cameraStudioSettings.jitter),
       CAMERA_FX_JITTER_MIN,
       CAMERA_FX_JITTER_MAX
     );
-    updateSceneCameraStudioReadouts();
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleChromaticUpdate = () => {
+  const handleChromaticUpdate = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.chromaticAberration = clamp(
-      readNumber(chromaticSlider.value, cameraStudioSettings.chromaticAberration),
+      readNumber(target?.value, cameraStudioSettings.chromaticAberration),
       CAMERA_FX_JITTER_MIN,
       CAMERA_FX_JITTER_MAX
     );
-    updateSceneCameraStudioReadouts();
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleQualityChange = () => {
+  const handleQualityChange = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.qualityProfile = readSceneQualityProfile(
-      qualitySelect.value,
+      target?.value,
       cameraStudioSettings.qualityProfile
     );
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleAtmosphereQualityChange = () => {
+  const handleAtmosphereQualityChange = (event?: Event) => {
+    const target = event?.target as any;
     cameraStudioSettings.atmosphereQuality = readSceneAtmosphereQuality(
-      atmosphereQualitySelect.value,
+      target?.value,
       cameraStudioSettings.atmosphereQuality
     );
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleGlowToggle = () => {
-    cameraStudioSettings.glowEnabled = Boolean(glowSwitch.checked);
+  const handleGlowToggle = (event?: Event) => {
+    const target = event?.target as any;
+    cameraStudioSettings.glowEnabled = Boolean(target?.checked);
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     scheduleProjectSave();
   };
 
-  const handleCinematicFxToggle = () => {
-    cameraStudioSettings.cinematicFxEnabled = Boolean(cinematicFxSwitch.checked);
+  const handleCinematicFxToggle = (event?: Event) => {
+    const target = event?.target as any;
+    cameraStudioSettings.cinematicFxEnabled = Boolean(target?.checked);
+    syncSceneCameraStudioControlValues();
     applySceneCameraStudioSettings();
     updatePrimaryActionsState();
     scheduleProjectSave();
   };
 
-  fovSlider.addEventListener("calciteSliderInput", handleFovUpdate);
-  fovSlider.addEventListener("calciteSliderChange", handleFovUpdate);
-  qualitySelect.addEventListener("calciteSelectChange", handleQualityChange);
-  atmosphereQualitySelect.addEventListener("calciteSelectChange", handleAtmosphereQualityChange);
-  glowSwitch.addEventListener("calciteSwitchChange", handleGlowToggle);
-  noiseSlider.addEventListener("calciteSliderInput", handleNoiseUpdate);
-  noiseSlider.addEventListener("calciteSliderChange", handleNoiseUpdate);
-  scanlineSlider.addEventListener("calciteSliderInput", handleScanlineUpdate);
-  scanlineSlider.addEventListener("calciteSliderChange", handleScanlineUpdate);
-  vignetteSlider.addEventListener("calciteSliderInput", handleVignetteUpdate);
-  vignetteSlider.addEventListener("calciteSliderChange", handleVignetteUpdate);
-  jitterSlider.addEventListener("calciteSliderInput", handleJitterUpdate);
-  jitterSlider.addEventListener("calciteSliderChange", handleJitterUpdate);
-  chromaticSlider.addEventListener("calciteSliderInput", handleChromaticUpdate);
-  chromaticSlider.addEventListener("calciteSliderChange", handleChromaticUpdate);
-  cinematicFxSwitch.addEventListener("calciteSwitchChange", handleCinematicFxToggle);
+  fovSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleFovUpdate);
+    slider.addEventListener("calciteSliderChange", handleFovUpdate);
+  });
+  qualitySelects.forEach((select) => {
+    select.addEventListener("calciteSelectChange", handleQualityChange);
+  });
+  atmosphereQualitySelects.forEach((select) => {
+    select.addEventListener("calciteSelectChange", handleAtmosphereQualityChange);
+  });
+  glowSwitches.forEach((toggle) => {
+    toggle.addEventListener("calciteSwitchChange", handleGlowToggle);
+  });
+  noiseSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleNoiseUpdate);
+    slider.addEventListener("calciteSliderChange", handleNoiseUpdate);
+  });
+  scanlineSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleScanlineUpdate);
+    slider.addEventListener("calciteSliderChange", handleScanlineUpdate);
+  });
+  vignetteSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleVignetteUpdate);
+    slider.addEventListener("calciteSliderChange", handleVignetteUpdate);
+  });
+  jitterSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleJitterUpdate);
+    slider.addEventListener("calciteSliderChange", handleJitterUpdate);
+  });
+  chromaticSliders.forEach((slider) => {
+    slider.addEventListener("calciteSliderInput", handleChromaticUpdate);
+    slider.addEventListener("calciteSliderChange", handleChromaticUpdate);
+  });
+  cinematicFxSwitches.forEach((toggle) => {
+    toggle.addEventListener("calciteSwitchChange", handleCinematicFxToggle);
+  });
 }
 
 function bindSceneDaylightPersistence() {
@@ -1702,6 +1768,10 @@ function closeMapContextMenu() {
   mapContextMenuScreenPoint = null;
 }
 
+function suppressMapContextMenuFor(ms: number) {
+  mapContextMenuSuppressUntil = Math.max(mapContextMenuSuppressUntil, Date.now() + Math.max(0, ms));
+}
+
 function getViewScreenPoint(event: MouseEvent) {
   if (!view) return null;
   const container = view.container as HTMLElement | null;
@@ -1793,9 +1863,16 @@ function openMapContextMenu(
 }
 
 async function handleMapContextMenu(event: MouseEvent) {
-  if (!view || isDrawing || isVertexEditing) return;
   event.preventDefault();
   event.stopPropagation();
+  if (!view || isDrawing || isVertexEditing) return;
+  const viewAny = view as any;
+  const isInteracting = Boolean(viewAny?.interacting);
+  const isStationary = viewAny?.stationary !== false;
+  if (Date.now() < mapContextMenuSuppressUntil || isInteracting || !isStationary) {
+    closeMapContextMenu();
+    return;
+  }
   const screenPoint = getViewScreenPoint(event);
   if (!screenPoint) return;
 
@@ -1949,8 +2026,16 @@ function initMapContextMenu() {
     mapContextMenuWheelHandle.remove();
     mapContextMenuWheelHandle = null;
   }
-  mapContextMenuDragHandle = view.on("drag", closeMapContextMenu);
-  mapContextMenuWheelHandle = view.on("mouse-wheel", closeMapContextMenu);
+  mapContextMenuDragHandle = view.on("drag", (dragEvent: any) => {
+    closeMapContextMenu();
+    const action = String(dragEvent?.action || "");
+    // Prevent context menu from opening on right-drag release after camera movement.
+    suppressMapContextMenuFor(action === "end" ? 400 : 250);
+  });
+  mapContextMenuWheelHandle = view.on("mouse-wheel", () => {
+    closeMapContextMenu();
+    suppressMapContextMenuFor(300);
+  });
 }
 
 function updateSnappingOptions() {
@@ -2045,10 +2130,7 @@ function applyLayerModeProperties(layerData: LayerData) {
     return;
   }
   if (geometryType === "point" || geometryType === "multipoint") {
-    const followTerrain = layerData.pointFollowTerrain3D !== false;
-    layerAny.elevationInfo = followTerrain
-      ? { mode: "relative-to-ground", offset: 0.5 }
-      : { mode: "absolute-height" };
+    layerAny.elevationInfo = { mode: "absolute-height" };
     return;
   }
   layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0.5 };
@@ -3736,7 +3818,7 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
 }
 
 function collapseSceneExpandPanelsForExport() {
-  const panelIds = ["scene-camera-studio-expand", "scene-daylight-expand"];
+  const panelIds = ["scene-daylight-expand"];
   const states = panelIds
     .map((id) => {
       const el = document.getElementById(id) as any;
@@ -4266,6 +4348,7 @@ function updatePrimaryActionsState() {
     const count = graphics?.length ?? graphics?.items?.length ?? 0;
     return count > 0;
   });
+  const hasCameraLayer = Boolean(getViewTrackLayerData());
   const hasCameraKeyframes = hasCameraMotionKeyframes();
   const selectedLayer = selectedLayerIndex >= 0 ? graphicsLayers[selectedLayerIndex] : null;
   const hasSelection =
@@ -4314,6 +4397,10 @@ function updatePrimaryActionsState() {
     if (hasStyleableContent) {
       setStepperState(onboardingStep, { selected: false, complete: true, disabled: true });
       setStepperState(onboardingStyleStep, { selected: true, disabled: false, complete: hasAnimations });
+      setStepperState(onboardingExportStep, { selected: false, disabled: !exportEnabled });
+    } else if (hasCameraLayer) {
+      setStepperState(onboardingStep, { selected: true, complete: false, disabled: false });
+      setStepperState(onboardingStyleStep, { selected: false, disabled: false, complete: false });
       setStepperState(onboardingExportStep, { selected: false, disabled: !exportEnabled });
     } else {
       setStepperState(onboardingStep, { selected: true, complete: false, disabled: false });
@@ -5816,7 +5903,7 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
 
   if (type === "point") {
     layerData.pointStyle = { ...defaultPointStyle };
-    layerData.pointFollowTerrain3D = true;
+    layerData.pointFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
@@ -5927,7 +6014,7 @@ async function startDrawing(type: LayerType) {
 
   if (type === "point") {
     layerData.pointStyle = { ...defaultPointStyle };
-    layerData.pointFollowTerrain3D = true;
+    layerData.pointFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
@@ -6598,7 +6685,6 @@ function applyStyleSettings(shouldClose: boolean) {
     const selected = getSelectedPointStyle();
     const xOffsetInput = getEl("point-xoffset-input") as any;
     const yOffsetInput = getEl("point-yoffset-input") as any;
-    const followTerrainToggle = document.getElementById("point-follow-terrain-toggle") as any;
     layerData.pointStyle = {
       style: selected || defaultPointStyle.style,
       size: Number((getEl("point-size-input") as any).value) || defaultPointStyle.size,
@@ -6609,7 +6695,7 @@ function applyStyleSettings(shouldClose: boolean) {
       xoffset: Number(xOffsetInput.value) || 0,
       yoffset: Number(yOffsetInput.value) || 0
     };
-    layerData.pointFollowTerrain3D = Boolean(followTerrainToggle?.checked ?? true);
+    layerData.pointFollowTerrain3D = false;
     updatePointAnimationPreview(
       layerData.pointStyle.color,
       layerData.pointStyle.outlineColor,
@@ -7294,7 +7380,7 @@ function setStyleSectionVisibility(
 
   pointAdvanced.style.display = type === "point" ? "block" : "none";
   if (pointFollowTerrainRow) {
-    pointFollowTerrainRow.style.display = type === "point" && currentViewMode === "3d" ? "" : "none";
+    pointFollowTerrainRow.style.display = "none";
   }
   if (polygonZOffsetRow) {
     polygonZOffsetRow.style.display = type === "polygon" && currentViewMode === "3d" ? "" : "none";
@@ -8156,6 +8242,7 @@ function updateAnimationOptions() {
   const webglSection = document.getElementById("webgl-animation-section");
   const featureSettings = document.getElementById("feature-animation-settings");
   const cameraSettings = document.getElementById("camera-animation-settings");
+  const cameraStudioInlineSettings = document.getElementById("camera-layer-studio-settings");
 
   if (isViewTrackLayer(layerData)) {
     attachStylePanelTo();
@@ -8172,7 +8259,11 @@ function updateAnimationOptions() {
     if (cameraSettings) {
       cameraSettings.style.display = "block";
     }
+    if (cameraStudioInlineSettings) {
+      cameraStudioInlineSettings.style.display = currentViewMode === "3d" ? "block" : "none";
+    }
     syncCameraAnimationEasingControl(layerData);
+    syncSceneCameraStudioControlValues();
     updateAnimationsList();
     return;
   }
