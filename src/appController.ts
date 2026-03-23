@@ -2320,10 +2320,13 @@ function applyLayerModeProperties(layerData: LayerData) {
     return;
   }
   if (geometryType === "polyline") {
-    layerAny.elevationInfo =
-      layerData.type === "polyline"
-        ? { mode: "relative-to-ground", offset: 1 }
-        : { mode: "on-the-ground" };
+    const shouldFollowTerrain =
+      layerData.lineFollowTerrain3D !== undefined
+        ? layerData.lineFollowTerrain3D
+        : layerData.type !== "polyline";
+    layerAny.elevationInfo = shouldFollowTerrain
+      ? { mode: "on-the-ground" }
+      : { mode: "relative-to-ground", offset: 1 };
     return;
   }
   if (geometryType === "point" || geometryType === "multipoint") {
@@ -5380,6 +5383,7 @@ export function getAnimationSettingsSnapshot() {
     updateColorPickerSwatch("line-color-input", event?.target?.value || "");
     applyStyleSettings(false);
   });
+  getEl("line-follow-terrain-toggle").addEventListener("calciteSwitchChange", () => applyStyleSettings(false));
 
   getEl("polygon-fill-style-options").addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null;
@@ -6104,6 +6108,7 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.layerEffectsEnabled = true;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
+    layerData.lineFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
   } else if (type === "polygon") {
     layerData.polygonStyle = { ...defaultPolygonStyle };
@@ -6215,6 +6220,7 @@ async function startDrawing(type: LayerType) {
     layerData.layerEffectsEnabled = true;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
+    layerData.lineFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
   } else if (type === "polygon") {
     layerData.polygonStyle = { ...defaultPolygonStyle };
@@ -6606,6 +6612,7 @@ async function duplicateLayer(index: number) {
       pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
       pointFollowTerrain3D: layerData.pointFollowTerrain3D,
       lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
+      lineFollowTerrain3D: layerData.lineFollowTerrain3D,
       polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
       polygonZOffset: layerData.polygonZOffset,
       layerBlendMode: layerData.layerBlendMode,
@@ -6646,6 +6653,7 @@ async function duplicateLayer(index: number) {
     pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
     pointFollowTerrain3D: layerData.pointFollowTerrain3D,
     lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
+    lineFollowTerrain3D: layerData.lineFollowTerrain3D,
     polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
     polygonZOffset: layerData.polygonZOffset,
     textContent: layerData.textContent,
@@ -6791,9 +6799,16 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     }
   } else if (styleType === "polyline") {
     const style = layerData.lineStyle ?? defaultLineStyle;
+    const followTerrainToggle = document.getElementById("line-follow-terrain-toggle") as any;
     setLineStyleSelection(style.style);
     setCalciteValue(getEl("line-width-input"), style.width);
     setColorPickerValue("line-color-input", style.color, 1);
+    if (followTerrainToggle) {
+      followTerrainToggle.checked =
+        layerData.lineFollowTerrain3D !== undefined
+          ? layerData.lineFollowTerrain3D
+          : layerData.type !== "polyline";
+    }
     updateLineAnimationPreview(style.color, style.style);
   } else if (styleType === "polygon") {
     const style = layerData.polygonStyle ?? defaultPolygonStyle;
@@ -6882,6 +6897,8 @@ function applyStyleSettings(shouldClose: boolean) {
     const selected = getSelectedPointStyle();
     const xOffsetInput = getEl("point-xoffset-input") as any;
     const yOffsetInput = getEl("point-yoffset-input") as any;
+    const followTerrainToggle = document.getElementById("point-follow-terrain-toggle") as any;
+    const followTerrainRow = document.getElementById("point-follow-terrain-row") as HTMLElement | null;
     layerData.pointStyle = {
       style: selected || defaultPointStyle.style,
       size: Number((getEl("point-size-input") as any).value) || defaultPointStyle.size,
@@ -6892,7 +6909,14 @@ function applyStyleSettings(shouldClose: boolean) {
       xoffset: Number(xOffsetInput.value) || 0,
       yoffset: Number(yOffsetInput.value) || 0
     };
-    layerData.pointFollowTerrain3D = false;
+    if (
+      currentViewMode === "3d" &&
+      followTerrainToggle &&
+      followTerrainRow &&
+      followTerrainRow.style.display !== "none"
+    ) {
+      layerData.pointFollowTerrain3D = Boolean(followTerrainToggle.checked);
+    }
     updatePointAnimationPreview(
       layerData.pointStyle.color,
       layerData.pointStyle.outlineColor,
@@ -6901,11 +6925,21 @@ function applyStyleSettings(shouldClose: boolean) {
     updatePointStyleOptionColors(layerData.pointStyle.color, layerData.pointStyle.outlineColor);
   } else if (styleType === "polyline") {
     const selected = getSelectedLineStyle();
+    const followTerrainToggle = document.getElementById("line-follow-terrain-toggle") as any;
+    const followTerrainRow = document.getElementById("line-follow-terrain-row") as HTMLElement | null;
     layerData.lineStyle = {
       style: selected || defaultLineStyle.style,
       width: readNumber((getEl("line-width-input") as any).value, defaultLineStyle.width),
       color: getColorFromPicker("line-color-input", 1)
     };
+    if (
+      currentViewMode === "3d" &&
+      followTerrainToggle &&
+      followTerrainRow &&
+      followTerrainRow.style.display !== "none"
+    ) {
+      layerData.lineFollowTerrain3D = Boolean(followTerrainToggle.checked);
+    }
     updateLineAnimationPreview(layerData.lineStyle.color, layerData.lineStyle.style);
   } else if (styleType === "polygon") {
     const selectedFill = getSelectedPolygonFillStyle();
@@ -7566,6 +7600,7 @@ function setStyleSectionVisibility(
   const polygonSection = getEl("polygon-style-section");
   const pointAdvanced = getEl("point-advanced-section");
   const pointFollowTerrainRow = document.getElementById("point-follow-terrain-row") as HTMLElement | null;
+  const lineFollowTerrainRow = document.getElementById("line-follow-terrain-row") as HTMLElement | null;
   const polygonZOffsetRow = document.getElementById("polygon-zoffset-row") as HTMLElement | null;
   const polygonOutlineStyle = getEl("polygon-outline-style-row");
   const effectsSection = getEl("layer-effects-section");
@@ -7578,6 +7613,10 @@ function setStyleSectionVisibility(
   pointAdvanced.style.display = type === "point" ? "block" : "none";
   if (pointFollowTerrainRow) {
     pointFollowTerrainRow.style.display = "none";
+  }
+  if (lineFollowTerrainRow) {
+    lineFollowTerrainRow.style.display =
+      type === "polyline" && currentViewMode === "3d" && !showFeatureExtras ? "" : "none";
   }
   if (polygonZOffsetRow) {
     polygonZOffsetRow.style.display = type === "polygon" && currentViewMode === "3d" ? "" : "none";
@@ -8108,6 +8147,25 @@ function buildLineSymbol3D(style: LineStyle) {
   const color = parseColorToRgba(style.color);
   const alpha = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
   const lineSize = Math.max(1, Number(style.width) || defaultLineStyle.width);
+  if (style.style === "tube-3d") {
+    const tubeSize = Math.max(0.8, lineSize);
+    return {
+      type: "line-3d",
+      symbolLayers: [
+        {
+          type: "path",
+          profile: "circle",
+          width: tubeSize,
+          height: tubeSize,
+          cap: "round",
+          join: "round",
+          material: {
+            color: [color.r, color.g, color.b, alpha]
+          }
+        }
+      ]
+    } as any;
+  }
   const patternStyle = normalizeLinePatternStyle3D(style.style);
   const marker = buildLineMarker3D(style.style, [color.r, color.g, color.b, alpha]);
   const layer: any = {
@@ -8146,7 +8204,7 @@ function applyLineStyle(symbol: any, style: LineStyle) {
 }
 
 function normalizeLineStyle(style: string) {
-  if (style.startsWith("arrow-")) {
+  if (style.startsWith("arrow-") || style === "tube-3d") {
     return "solid";
   }
   return style;

@@ -21,6 +21,7 @@ export interface AnimationSettingsSnapshot {
     pointStyle?: PointStyle;
     pointFollowTerrain3D?: boolean;
     lineStyle?: LineStyle;
+    lineFollowTerrain3D?: boolean;
     polygonStyle?: PolygonStyle;
     polygonZOffset?: number;
     textContent?: string;
@@ -54,6 +55,7 @@ export function buildAnimationSettingsSnapshot(
       pointStyle: layer.pointStyle ? { ...layer.pointStyle } : undefined,
       pointFollowTerrain3D: layer.pointFollowTerrain3D,
       lineStyle: layer.lineStyle ? { ...layer.lineStyle } : undefined,
+      lineFollowTerrain3D: layer.lineFollowTerrain3D,
       polygonStyle: layer.polygonStyle ? { ...layer.polygonStyle } : undefined,
       polygonZOffset: layer.polygonZOffset,
       textContent: layer.textContent,

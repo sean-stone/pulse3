@@ -1552,39 +1552,14 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
   display: block;
   width: 100%;
   max-width: 260px;
-  max-height: none !important;
   box-sizing: border-box;
-  padding: 2px 8px 0 0;
-  overflow: visible !important;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  font-size: 11px;
-  line-height: 1.35;
-  color: rgba(10, 76, 102, 0.8);
-}
-
-body.theme-dark .scene-camera-studio-heading,
-body.theme-dark .scene-camera-studio-toggle,
-body.theme-dark .scene-camera-studio-control,
-body.calcite-mode-dark .scene-camera-studio-heading,
-body.calcite-mode-dark .scene-camera-studio-toggle,
-body.calcite-mode-dark .scene-camera-studio-control,
-:root.calcite-mode-dark .scene-camera-studio-heading,
-:root.calcite-mode-dark .scene-camera-studio-toggle,
-:root.calcite-mode-dark .scene-camera-studio-control {
-  color: #f3f7fb;
-}
-
-body.theme-dark .scene-camera-studio-readout,
-body.calcite-mode-dark .scene-camera-studio-readout,
-:root.calcite-mode-dark .scene-camera-studio-readout {
-  color: rgba(243, 247, 251, 0.8);
-}
-
-body.theme-dark .scene-weather-warning,
-body.calcite-mode-dark .scene-weather-warning,
-:root.calcite-mode-dark .scene-weather-warning {
-  color: rgba(243, 247, 251, 0.82);
+  padding-inline: 20px;
+  width: calc(100% - 66px);
+  padding-bottom: 10px;
+  --calcite-notice-border-color:
+    rgb(from var(--calcite-color-status-warning) r g b / var(--calcite-opacity-half));
+  --calcite-notice-background-color:
+    color-mix(in srgb, var(--calcite-color-status-warning) 5%, var(--calcite-color-foreground-1));
 }
 
 #rename-modal,
@@ -2810,6 +2785,18 @@ body.theme-dark #gif-download-btn::part(button) {
   );
 }
 
+.line-style-swatch--tube-3d {
+  height: 6px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72) 0%,
+    rgba(255, 255, 255, 0.26) 34%,
+    var(--color-primary) 35%,
+    var(--color-primary) 100%
+  );
+  box-shadow: 0 1px 3px rgba(10, 76, 102, 0.28);
+}
+
 .line-style-swatch--arrow-start::before,
 .line-style-swatch--arrow-end::after,
 .line-style-swatch--arrow-both::before,
@@ -3654,6 +3641,18 @@ calcite-accordion-item::part(toggle-icon) {
     transparent 16px,
     transparent 20px
   );
+}
+
+.animation-type-preview--polyline.line-style-tube-3d {
+  height: 4px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72) 0%,
+    rgba(255, 255, 255, 0.24) 34%,
+    var(--preview-color, var(--color-primary)) 35%,
+    var(--preview-color, var(--color-primary)) 100%
+  );
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
 }
 
 .animation-type-preview--polyline.line-style-arrow-start::before,

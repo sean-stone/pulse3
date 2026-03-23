@@ -82,6 +82,7 @@ export interface LayerData {
   pointStyle?: PointStyle;
   pointFollowTerrain3D?: boolean;
   lineStyle?: LineStyle;
+  lineFollowTerrain3D?: boolean;
   polygonStyle?: PolygonStyle;
   polygonZOffset?: number;
   featureLayerUrl?: string;

@@ -448,7 +448,8 @@ $schema = [
                                                                 "properties" => [
                                                                     "wkid" => ["type" => ["integer", "null"]],
                                                                     "latestWkid" => ["type" => ["integer", "null"]]
-                                                                ]
+                                                                ],
+                                                                "required" => ["wkid", "latestWkid"]
                                                             ],
                                                             [
                                                                 "type" => "null"
@@ -456,7 +457,19 @@ $schema = [
                                                         ]
                                                     ]
                                                 ],
-                                                "required" => ["time", "x", "y"]
+                                                "required" => [
+                                                    "time",
+                                                    "x",
+                                                    "y",
+                                                    "z",
+                                                    "heading",
+                                                    "tilt",
+                                                    "fov",
+                                                    "rotation",
+                                                    "scale",
+                                                    "easing",
+                                                    "spatialReference"
+                                                ]
                                             ]
                                         ],
                                         [
@@ -510,6 +523,23 @@ $schema = [
                                                                 "vignetteLevel" => ["type" => ["number", "null"]],
                                                                 "jitter" => ["type" => ["number", "null"]],
                                                                 "chromaticAberration" => ["type" => ["number", "null"]]
+                                                            ],
+                                                            "required" => [
+                                                                "fov",
+                                                                "qualityProfile",
+                                                                "atmosphereQuality",
+                                                                "glowEnabled",
+                                                                "glowIntensity",
+                                                                "cinematicFxEnabled",
+                                                                "exposure",
+                                                                "contrast",
+                                                                "saturation",
+                                                                "letterbox",
+                                                                "noiseLevel",
+                                                                "scanlineLevel",
+                                                                "vignetteLevel",
+                                                                "jitter",
+                                                                "chromaticAberration"
                                                             ]
                                                         ],
                                                         [
@@ -531,6 +561,13 @@ $schema = [
                                                                 "displayUTCOffset" => ["type" => ["number", "null"]],
                                                                 "directShadowsEnabled" => ["type" => ["boolean", "null"]],
                                                                 "glowIntensity" => ["type" => ["number", "null"]]
+                                                            ],
+                                                            "required" => [
+                                                                "type",
+                                                                "date",
+                                                                "displayUTCOffset",
+                                                                "directShadowsEnabled",
+                                                                "glowIntensity"
                                                             ]
                                                         ],
                                                         [
@@ -538,7 +575,8 @@ $schema = [
                                                         ]
                                                     ]
                                                 ]
-                                            ]
+                                            ],
+                                            "required" => ["cameraStudio", "lighting"]
                                         ],
                                         [
                                             "type" => "null"
@@ -566,7 +604,8 @@ $schema = [
                                                                     "properties" => [
                                                                         "wkid" => ["type" => ["integer", "null"]],
                                                                         "latestWkid" => ["type" => ["integer", "null"]]
-                                                                    ]
+                                                                    ],
+                                                                    "required" => ["wkid", "latestWkid"]
                                                                 ],
                                                                 [
                                                                     "type" => "null"
@@ -574,7 +613,7 @@ $schema = [
                                                             ]
                                                         ]
                                                     ],
-                                                    "required" => ["x", "y", "z"]
+                                                    "required" => ["x", "y", "z", "spatialReference"]
                                                 ],
                                                 "heading" => ["type" => "number"],
                                                 "tilt" => ["type" => "number"]
@@ -613,6 +652,14 @@ $schema = [
                                 "isRotated",
                                 "basemap",
                                 "basemapVisible",
+                                "basemapLabelsVisible",
+                                "google3DTilesEnabled",
+                                "viewTrackKeyframes",
+                                "backgroundColor",
+                                "backgroundTransparent",
+                                "mode",
+                                "scene",
+                                "camera",
                                 "extent"
                             ]
                         ],
@@ -692,7 +739,7 @@ $schema = [
                                                                         "wkid" => ["type" => ["integer", "null"]],
                                                                         "latestWkid" => ["type" => ["integer", "null"]]
                                                                     ],
-                                                                    "required" => ["wkid"]
+                                                                    "required" => ["wkid", "latestWkid"]
                                                                 ],
                                                                 [
                                                                     "type" => "null"
@@ -700,7 +747,17 @@ $schema = [
                                                             ]
                                                         ]
                                                     ],
-                                                    "required" => ["time", "x", "y", "spatialReference"]
+                                                    "required" => [
+                                                        "time",
+                                                        "x",
+                                                        "y",
+                                                        "z",
+                                                        "heading",
+                                                        "tilt",
+                                                        "fov",
+                                                        "easing",
+                                                        "spatialReference"
+                                                    ]
                                                 ]
                                             ],
                                             [
@@ -854,7 +911,8 @@ $schema = [
                                                             "short-dash-dot",
                                                             "short-dash-dot-dot",
                                                             "long-dash",
-                                                            "long-dash-dot"
+                                                            "long-dash-dot",
+                                                            "tube-3d"
                                                         ]
                                                     ],
                                                     "width" => ["type" => "number"],
@@ -941,6 +999,21 @@ $schema = [
                                                     "dropShadowBlur" => ["type" => ["number", "null"]],
                                                     "dropShadowOffsetX" => ["type" => ["number", "null"]],
                                                     "dropShadowOffsetY" => ["type" => ["number", "null"]]
+                                                ],
+                                                "required" => [
+                                                    "brightness",
+                                                    "contrast",
+                                                    "grayscale",
+                                                    "hueRotate",
+                                                    "invert",
+                                                    "opacity",
+                                                    "saturate",
+                                                    "sepia",
+                                                    "blur",
+                                                    "dropShadowColor",
+                                                    "dropShadowBlur",
+                                                    "dropShadowOffsetX",
+                                                    "dropShadowOffsetY"
                                                 ]
                                             ],
                                             [
@@ -1001,6 +1074,8 @@ $schema = [
                                     "textContent",
                                     "textSize",
                                     "textColor",
+                                    "layerEffectsEnabled",
+                                    "layerEffectSettings",
                                     "layerBlendMode"
                                 ]
                             ]
@@ -1055,7 +1130,7 @@ $instructions = trim(
     "phosphor-number-circle-four, phosphor-number-circle-five, phosphor-number-circle-six, phosphor-number-circle-seven, " .
     "phosphor-number-circle-eight, phosphor-number-circle-nine]. " .
     "Valid line styles: [solid, arrow-start, arrow-end, arrow-both, dash, dot, dash-dot, short-dash, short-dot, short-dash-dot, " .
-    "short-dash-dot-dot, long-dash, long-dash-dot]. " .
+    "short-dash-dot-dot, long-dash, long-dash-dot, tube-3d]. " .
     "Valid polygon fill styles: [solid, backward-diagonal, forward-diagonal, diagonal-cross, cross, horizontal, vertical, none]. " .
     "Valid polygon outline styles: [solid, dash, dot, dash-dot, short-dash, short-dot, short-dash-dot, short-dash-dot-dot, long-dash, long-dash-dot]. " .
     "Valid blend modes: [normal, average, color-burn, color-dodge, color, darken, destination-atop, destination-in, destination-out, destination-over, " .
@@ -1714,7 +1789,8 @@ function validate_snapshot(array $data): ?string {
         "short-dash-dot",
         "short-dash-dot-dot",
         "long-dash",
-        "long-dash-dot"
+        "long-dash-dot",
+        "tube-3d"
     ];
     $allowedPolygonStyles = [
         "solid",

@@ -705,6 +705,10 @@ function Modals() {
                   <span className="line-style-swatch line-style-swatch--long-dash-dot"></span>
                   Long Dash Dot
                 </button>
+                <button type="button" className="style-option-btn" data-value="tube-3d">
+                  <span className="line-style-swatch line-style-swatch--tube-3d"></span>
+                  3D Line
+                </button>
               </div>
             </calcite-label>
 
@@ -900,6 +904,11 @@ function Modals() {
             </button>
 
             <div id="style-effects-advanced" className="style-effects-advanced">
+              <calcite-label id="line-follow-terrain-row" style={{ marginTop: 12 }}>
+                Along the ground in 3D
+                <calcite-switch id="line-follow-terrain-toggle"></calcite-switch>
+              </calcite-label>
+
               <div id="point-advanced-section">
                 <calcite-label style={{ marginTop: 12 }}>
                   X Offset (px)

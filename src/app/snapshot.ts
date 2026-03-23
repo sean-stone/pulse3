@@ -172,6 +172,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
     pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
     pointFollowTerrain3D: layerData.pointFollowTerrain3D,
     lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
+    lineFollowTerrain3D: layerData.lineFollowTerrain3D,
     polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
     polygonZOffset: layerData.polygonZOffset,
     textContent: layerData.textContent,
@@ -471,7 +472,9 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
           featureKeepVisible: layerSnapshot.featureKeepVisible,
           customAttribution: layerSnapshot.customAttribution,
           pointStyle: layerSnapshot.pointStyle ? { ...layerSnapshot.pointStyle } : undefined,
+          pointFollowTerrain3D: layerSnapshot.pointFollowTerrain3D,
           lineStyle: layerSnapshot.lineStyle ? { ...layerSnapshot.lineStyle } : undefined,
+          lineFollowTerrain3D: layerSnapshot.lineFollowTerrain3D,
           polygonStyle: layerSnapshot.polygonStyle ? { ...layerSnapshot.polygonStyle } : undefined,
           polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
             ? Number(layerSnapshot.polygonZOffset)
@@ -543,6 +546,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         pointStyle: layerSnapshot.pointStyle ? { ...layerSnapshot.pointStyle } : undefined,
         pointFollowTerrain3D: layerSnapshot.pointFollowTerrain3D,
         lineStyle: layerSnapshot.lineStyle ? { ...layerSnapshot.lineStyle } : undefined,
+        lineFollowTerrain3D: layerSnapshot.lineFollowTerrain3D,
         polygonStyle: layerSnapshot.polygonStyle ? { ...layerSnapshot.polygonStyle } : undefined,
         polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
           ? Number(layerSnapshot.polygonZOffset)
