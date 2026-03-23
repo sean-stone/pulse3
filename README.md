@@ -145,6 +145,8 @@ npm run test
 
 Pulse includes an AI prompt flow that generates a `ProjectSnapshot` via `agent/anim.php` (OpenAI Responses API).
 
+Pulse also includes a native route tool in the `More` menu. It posts to `route.php` and adds the result as a standard polyline layer with a default draw animation.
+
 ### ChatGPT model usage
 - Server-side only (PHP); no API keys in the browser.
 - Model is configured in `agent/anim.php` or via `OPENAI_MODEL`.
@@ -152,6 +154,7 @@ Pulse includes an AI prompt flow that generates a `ProjectSnapshot` via `agent/a
 
 Environment variables:
 - `OPENAI_API_KEY` (required)
+- `ARCGIS_API_KEY` (required for native routing and AI-assisted routing)
 - `OPENAI_MODEL` (optional, defaults to `gpt-4.1-mini`)
 - `PULSE_ALLOWED_ORIGIN` (optional, for CORS during dev)
 - `PULSE_SHARED_SECRET` (optional, shared-secret header gate)

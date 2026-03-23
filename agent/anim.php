@@ -2,9 +2,15 @@
 declare(strict_types=1);
 
 // Load optional local/server environment overrides.
-$envPath = __DIR__ . "/config.php";
-if (is_file($envPath)) {
-    require $envPath;
+$envCandidates = [
+    dirname(__DIR__) . "/config.php",
+    __DIR__ . "/config.php"
+];
+foreach ($envCandidates as $envPath) {
+    if (is_file($envPath)) {
+        require $envPath;
+        break;
+    }
 }
 
 // Extend script execution time for slow upstream calls.

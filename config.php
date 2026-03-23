@@ -6,3 +6,4 @@
 // putenv('PULSE_ALLOWED_ORIGIN=https://seanst.one');
 // putenv('PULSE_SHARED_SECRET=your_long_random_string');
 // putenv('ARCGIS_API_KEY=your_arcgis_key_here');
+// putenv('PULSE_ROUTE_DAILY_LIMIT=1000');

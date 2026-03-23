@@ -289,6 +289,16 @@ export default function App() {
                         CSV
                       </calcite-button>
                     </div>
+                    <calcite-button
+                      id="add-route-btn"
+                      icon-start="layer-route"
+                      scale="s"
+                      appearance="outline"
+                      width="full"
+                      style={{ marginBottom: 12, ...(darkOutlineButtonStyle ?? {}) }}
+                    >
+                      Route
+                    </calcite-button>
                     <calcite-label style={{ marginTop: 12 }}>
                       FeatureLayer URL
                       <calcite-input

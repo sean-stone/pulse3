@@ -1514,6 +1514,70 @@ function Modals() {
       </calcite-dialog>
 
       <calcite-dialog
+        id="route-create-modal"
+        heading="Add Route"
+        scale="s"
+        overlay-positioning="absolute"
+        placement="center"
+        embedded
+        >
+          <div className="ai-dialog-body">
+            <p className="ai-dialog-help">
+              Create a real drive or walk route and add it as a line layer with a default draw animation.
+            </p>
+            <calcite-label>
+              From
+              <calcite-input
+                id="route-from-input"
+              placeholder="Start address, place, or postcode"
+              scale="s"
+            ></calcite-input>
+          </calcite-label>
+          <calcite-label>
+            To
+            <calcite-input
+              id="route-to-input"
+              placeholder="End address, place, or postcode"
+              scale="s"
+            ></calcite-input>
+          </calcite-label>
+          <calcite-label>
+            Travel mode
+            <calcite-select id="route-mode-select" scale="s">
+              <calcite-option value="drive">Drive</calcite-option>
+              <calcite-option value="walk">Walk</calcite-option>
+            </calcite-select>
+          </calcite-label>
+          <calcite-label>
+            Layer name (optional)
+            <calcite-input
+              id="route-name-input"
+              placeholder="Defaults to From to To"
+              scale="s"
+            ></calcite-input>
+          </calcite-label>
+          <div id="route-error" className="ai-error" role="status" aria-live="polite"></div>
+        </div>
+        <div slot="footer" className="dialog-footer">
+          <calcite-button
+            id="route-cancel-btn"
+            appearance="outline"
+          >
+            Cancel
+          </calcite-button>
+          <calcite-button
+            id="route-create-btn"
+            style={{
+              "--calcite-button-text-color": "#ffffff",
+              "--calcite-button-icon-color": "#ffffff",
+            }}
+          >
+            Add Route
+          </calcite-button>
+        </div>
+      </calcite-dialog>
+
+      <calcite-dialog
         id="confirm-dialog"
         heading="Confirm"
         scale="s"

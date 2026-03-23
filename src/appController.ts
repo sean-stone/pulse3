@@ -86,6 +86,23 @@ let ffmpegCoreBaseUrl: string | null = null;
 const THUMBTACK_3D_STYLE = "thumbtack3d";
 const PULSE_SELECTION_HIGHLIGHT_NAME = "pulse-selection";
 const DYNAMIC_WEBSTYLE_STYLE_PREFIX = "model-webstyle::";
+type RouteMode = "drive" | "walk";
+type RouteCreateResponse = {
+  name?: string;
+  mode?: RouteMode;
+  resolvedModeName?: string | null;
+  geometry?: {
+    type?: string;
+    coordinates?: number[][];
+  };
+  extent?: {
+    xmin?: number;
+    ymin?: number;
+    xmax?: number;
+    ymax?: number;
+    wkid?: number;
+  } | null;
+};
 const POINT_WEBSTYLE_PRESET_STYLES = [
   "EsriRealisticTransportationStyle",
   "EsriRealisticStreetSceneStyle",
@@ -3117,6 +3134,13 @@ function promptForGoogle3DTilesByokApiKey() {
   return apiKey;
 }
 
+function resolveServerPhpEndpoint(fileName: string) {
+  if ((import.meta as any).env?.DEV) {
+    return `http://localhost:8000/${fileName}`;
+  }
+  return new URL(fileName, window.location.href).toString();
+}
+
 function getGoogle3DTilesToggle() {
   return document.getElementById("basemap-google-3d-tiles-toggle") as any;
 }
@@ -5336,6 +5360,7 @@ export function getAnimationSettingsSnapshot() {
 
   getEl("add-feature-layer-btn").addEventListener("click", handleAddFeatureLayer);
   getEl("feature-layer-url").addEventListener("calciteInputInput", () => setFeatureLayerError(null));
+  getEl("add-route-btn").addEventListener("click", openRouteModal);
 
     getEl("basemap-select").addEventListener("calciteSelectChange", handleBasemapChange as EventListener);
     const basemapBgInput = document.getElementById("basemap-bg-color");
@@ -5391,6 +5416,21 @@ export function getAnimationSettingsSnapshot() {
       event.preventDefault();
       void handleAiGenerate();
     }
+  });
+  getEl("route-cancel-btn").addEventListener("click", closeRouteModal);
+  getEl("route-create-btn").addEventListener("click", handleRouteCreate);
+  getEl("route-from-input").addEventListener("calciteInputInput", () => setRouteError(null));
+  getEl("route-to-input").addEventListener("calciteInputInput", () => setRouteError(null));
+  getEl("route-name-input").addEventListener("calciteInputInput", () => setRouteError(null));
+  getEl("route-mode-select").addEventListener("calciteSelectChange", () => setRouteError(null));
+  ["route-from-input", "route-to-input", "route-name-input"].forEach((id) => {
+    getEl(id).addEventListener("keydown", (event: Event) => {
+      const keyboardEvent = event as KeyboardEvent;
+      if (keyboardEvent.key === "Enter" && !keyboardEvent.shiftKey) {
+        keyboardEvent.preventDefault();
+        void handleRouteCreate();
+      }
+    });
   });
 
   const styleConfirm = document.getElementById("style-confirm");
@@ -8637,10 +8677,7 @@ async function handleAiGenerate() {
   setAiLoading(true);
 
   try {
-    const base = (import.meta as any).env?.BASE_URL || "/";
-    const endpoint = (import.meta as any).env?.DEV
-      ? "http://localhost:8000/agent/anim.php"
-      : `${base.replace(/\/?$/, "/")}anim.php`;
+    const endpoint = resolveServerPhpEndpoint("anim.php");
     const sharedToken = (import.meta as any).env?.VITE_PULSE_SHARED_SECRET;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (sharedToken) {
@@ -8669,6 +8706,145 @@ async function handleAiGenerate() {
     setAiError("Request failed. Please try again.");
   } finally {
     setAiLoading(false);
+  }
+}
+
+function openRouteModal() {
+  setRouteError(null);
+  const modal = getEl("route-create-modal") as any;
+  const modeSelect = getEl("route-mode-select") as any;
+  if (!String(modeSelect?.value || "").trim()) {
+    modeSelect.value = "drive";
+  }
+  modal.open = true;
+  setTimeout(() => (getEl("route-from-input") as any)?.focus?.(), 0);
+}
+
+function closeRouteModal() {
+  closeModal("route-create-modal");
+}
+
+function setRouteError(message: string | null) {
+  const errorEl = getEl("route-error");
+  errorEl.textContent = message || "";
+}
+
+function setRouteLoading(loading: boolean) {
+  const createBtn = getEl("route-create-btn");
+  const cancelBtn = getEl("route-cancel-btn");
+  const fromInput = getEl("route-from-input");
+  const toInput = getEl("route-to-input");
+  const modeSelect = getEl("route-mode-select");
+  const nameInput = getEl("route-name-input");
+  const action = loading ? "setAttribute" : "removeAttribute";
+  [createBtn, cancelBtn, fromInput, toInput, modeSelect, nameInput].forEach((element) => {
+    (element as any)[action]("disabled", "");
+  });
+  createBtn.textContent = loading ? "Adding..." : "Add Route";
+}
+
+function getRouteRequestHeaders() {
+  const sharedToken = (import.meta as any).env?.VITE_PULSE_SHARED_SECRET;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (sharedToken) {
+    headers["X-Pulse-Token"] = String(sharedToken);
+  }
+  return headers;
+}
+
+function formatRouteRequestError(data: any, response: Response) {
+    const message = String(data?.error || "").trim();
+    const hint = String(data?.details?.hint || "").trim();
+    if (/missing\s+ARCGIS_API_KEY/i.test(message) || /ARCGIS_API_KEY/i.test(message)) {
+      return "Route request failed. Check the PHP server and ARCGIS_API_KEY.";
+    }
+    if (message && hint) {
+      return `${message} ${hint}`;
+    }
+    if (message) {
+      return message;
+  }
+  return `Route request failed (${response.status}).`;
+}
+
+async function handleRouteCreate() {
+  const fromInput = getEl("route-from-input") as any;
+  const toInput = getEl("route-to-input") as any;
+  const modeSelect = getEl("route-mode-select") as any;
+  const nameInput = getEl("route-name-input") as any;
+  const from = String(fromInput?.value || "").trim();
+  const to = String(toInput?.value || "").trim();
+  const mode = String(modeSelect?.value || "drive").trim().toLowerCase() === "walk" ? "walk" : "drive";
+  const layerNameInput = String(nameInput?.value || "").trim();
+
+  if (!from || !to) {
+    setRouteError("Enter a start and end location.");
+    return;
+  }
+  if (!view) {
+    setRouteError("Map view is not ready yet.");
+    return;
+  }
+
+  setRouteError(null);
+  setRouteLoading(true);
+
+  try {
+    const response = await fetch(resolveServerPhpEndpoint("route.php"), {
+      method: "POST",
+      headers: getRouteRequestHeaders(),
+      body: JSON.stringify({
+        from,
+        to,
+        mode,
+        name: layerNameInput || undefined
+      })
+    });
+    const data = (await response.json().catch(() => null)) as RouteCreateResponse | any;
+    if (!response.ok) {
+      setRouteError(formatRouteRequestError(data, response));
+      return;
+    }
+
+    const geometry = geoJSONToArcGISGeometry(data?.geometry, { wkid: 4326 });
+    if (!geometry || String((geometry as any).type || "") !== "polyline") {
+      setRouteError("Route service returned invalid geometry.");
+      return;
+    }
+
+    const safeLayerName = sanitizePlainText(
+      String(data?.name || layerNameInput || `${from} to ${to}`),
+      "Route Layer"
+    );
+    const graphic = createGraphicForType("polyline", geometry, {
+      routeFrom: from,
+      routeTo: to,
+      routeMode: mode,
+      routeResolvedMode: data?.resolvedModeName ?? null
+    });
+    const layerData = createImportedLayer("polyline", safeLayerName, [graphic]);
+    if (!layerData) {
+      setRouteError("Could not add the route to the map.");
+      return;
+    }
+
+    layerData.animations = [
+      {
+        type: "draw",
+        start: 0,
+        duration: 6
+      }
+    ];
+    updateLayersList();
+    updateTimeline();
+    updateAnimationOptions();
+    zoomToLayersRef([layerData]);
+    scheduleProjectSave();
+    closeRouteModal();
+  } catch (error) {
+    setRouteError("Route request failed. Check the PHP server.");
+  } finally {
+    setRouteLoading(false);
   }
 }
 

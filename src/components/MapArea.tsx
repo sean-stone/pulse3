@@ -77,10 +77,6 @@ function MapArea() {
               time-slider-position="600"
             ></arcgis-daylight>
             <arcgis-weather id="scene-weather"></arcgis-weather>
-            <calcite-notice className="scene-weather-warning" kind="warning" icon open scale="s">
-              <div slot="title">Export note</div>
-              <div slot="message">Rain and snow can appear faster in complex scenes.</div>
-            </calcite-notice>
           </arcgis-expand>
         </arcgis-scene>
       </div>
