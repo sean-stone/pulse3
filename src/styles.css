@@ -1500,6 +1500,7 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
 
 .camera-layer-studio-settings {
   margin-top: 12px;
+  padding-inline: 4px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1540,6 +1541,81 @@ body.calcite-mode-dark #scene-mode-btn::part(icon),
   margin-top: 4px;
   font-size: 11px;
   color: rgba(10, 76, 102, 0.82);
+}
+
+.scene-camera-fx-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scene-camera-fx-preview-status {
+  margin-top: -2px;
+  font-size: 11px;
+  color: rgba(10, 76, 102, 0.72);
+}
+
+.scene-camera-fx-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scene-camera-fx-preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(10, 76, 102, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(10, 76, 102, 0.08);
+  color: #0a4c66;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+
+.scene-camera-fx-preset-card:hover {
+  border-color: rgba(10, 76, 102, 0.34);
+  box-shadow: 0 10px 22px rgba(10, 76, 102, 0.12);
+  transform: translateY(-1px);
+}
+
+.scene-camera-fx-preset-card.is-selected {
+  border-color: rgba(10, 76, 102, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(10, 76, 102, 0.22),
+    0 10px 24px rgba(10, 76, 102, 0.14);
+}
+
+.scene-camera-fx-preset-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 160 / 92;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(10, 76, 102, 0.12), rgba(10, 76, 102, 0.22)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.04));
+}
+
+.scene-camera-fx-preset-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.scene-camera-fx-custom-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(10, 76, 102, 0.12);
 }
 
 #scene-daylight-expand {

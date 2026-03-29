@@ -1284,14 +1284,14 @@ function Modals() {
           </calcite-label>
           <calcite-label style={{ marginTop: 12 }}>
             Font Size
-            <calcite-slider
-              id="text-size-slider"
-              min="8"
-              max="48"
-              value="14"
-              step="1"
-              label-handles="true"
-              scale="m"
+              <calcite-slider
+                id="text-size-slider"
+                min="8"
+                max="200"
+                value="14"
+                step="1"
+                label-handles="true"
+                scale="m"
             ></calcite-slider>
           </calcite-label>
           <div className="style-compact-colors" role="group" aria-label="Text color" style={{ marginTop: 12 }}>

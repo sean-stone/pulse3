@@ -13,7 +13,7 @@ import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
 import { FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
 
 import type { LayerData } from "../types";
-import { DEFAULT_TEXT_MESH_DEPTH_PERCENT } from "./constants";
+import { DEFAULT_TEXT_MESH_DEPTH_PERCENT, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "./constants";
 
 type FontKey = "sans" | "serif" | "mono";
 
@@ -265,7 +265,7 @@ const toMeterPoint = (point: any) => {
 };
 
 const getWorldTextHeight = (view: any, point: any, size: number) => {
-  const sizeValue = clamp(Number.isFinite(Number(size)) ? Number(size) : 14, 8, 64);
+  const sizeValue = clamp(Number.isFinite(Number(size)) ? Number(size) : 14, MIN_TEXT_SIZE, MAX_TEXT_SIZE);
   const anchorPoint = toMeterPoint(point);
   const cameraPoint = toMeterPoint(view?.camera?.position);
   const viewHeight = Math.max(1, Number(view?.height) || 1);

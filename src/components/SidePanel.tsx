@@ -5,6 +5,16 @@ type SidePanelProps = {
 };
 
 function SidePanel({ themeMode }: SidePanelProps) {
+  const sceneLookPresets = [
+    { id: "off", label: "Off" },
+    { id: "cinematic", label: "Cinematic" },
+    { id: "bold-colours", label: "Bold Colours" },
+    { id: "sharp-tidy", label: "Sharp & Tidy" },
+    { id: "black-white", label: "Black & White" },
+    { id: "moody-bw", label: "Moody B&W" },
+    { id: "cctv", label: "CCTV" },
+    { id: "custom", label: "Custom" },
+  ] as const;
   const whereButtonStyle =
     themeMode === "dark"
       ? ({
@@ -126,172 +136,222 @@ function SidePanel({ themeMode }: SidePanelProps) {
                         min="20"
                         max="120"
                         step="1"
+                        ticks="100"
                         value="55"
-                        min-label="20deg"
-                        max-label="120deg"
+                        min-label="Minimum field of view"
+                        max-label="Maximum field of view"
+                        label-ticks
+                        label-handles
                       ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fov-value" className="scene-camera-studio-readout">
-                        55deg
-                      </span>
                     </calcite-label>
                     <calcite-label className="scene-camera-studio-control">
-                      WebScene quality
-                      <calcite-select id="camera-layer-scene-quality-profile" value="high">
-                        <calcite-option value="low">Low</calcite-option>
-                        <calcite-option value="medium">Medium</calcite-option>
-                        <calcite-option value="high">High</calcite-option>
-                      </calcite-select>
+                      Scene Quality
+                      <calcite-slider
+                        id="camera-layer-scene-quality-profile"
+                        min="0"
+                        max="2"
+                        step="1"
+                        ticks="1"
+                        value="2"
+                        min-label="Lowest scene quality"
+                        max-label="Highest scene quality"
+                        label-ticks
+                        label-handles
+                        snap
+                      ></calcite-slider>
                     </calcite-label>
                     <calcite-label className="scene-camera-studio-control">
-                      Atmosphere quality
-                      <calcite-select id="camera-layer-scene-atmosphere-quality" value="high">
-                        <calcite-option value="low">Low</calcite-option>
-                        <calcite-option value="high">High</calcite-option>
-                      </calcite-select>
+                      Atmosphere Quality
+                      <calcite-slider
+                        id="camera-layer-scene-atmosphere-quality"
+                        min="0"
+                        max="1"
+                        step="1"
+                        ticks="1"
+                        value="1"
+                        min-label="Low atmosphere quality"
+                        max-label="High atmosphere quality"
+                        label-ticks
+                        label-handles
+                        snap
+                      ></calcite-slider>
                     </calcite-label>
                     <calcite-label className="scene-camera-studio-toggle">
                       Glow
                       <calcite-switch id="camera-layer-scene-glow-enabled" scale="s" checked></calcite-switch>
                     </calcite-label>
-                    <calcite-label className="scene-camera-studio-toggle">
-                      Cinematic FX
-                      <calcite-switch id="camera-layer-scene-camera-fx-enabled" scale="s"></calcite-switch>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Exposure
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-exposure"
-                        min="0"
-                        max="200"
-                        step="1"
-                        value="100"
-                        min-label="0%"
-                        max-label="200%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-exposure-value" className="scene-camera-studio-readout">
-                        100%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Contrast
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-contrast"
-                        min="0"
-                        max="200"
-                        step="1"
-                        value="100"
-                        min-label="0%"
-                        max-label="200%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-contrast-value" className="scene-camera-studio-readout">
-                        100%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Saturation
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-saturation"
-                        min="0"
-                        max="200"
-                        step="1"
-                        value="100"
-                        min-label="0%"
-                        max-label="200%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-saturation-value" className="scene-camera-studio-readout">
-                        100%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Letterbox
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-letterbox"
-                        min="0"
-                        max="20"
-                        step="1"
-                        value="0"
-                        min-label="0%"
-                        max-label="20%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-letterbox-value" className="scene-camera-studio-readout">
-                        0%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Noise
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-noise"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value="42"
-                        min-label="0%"
-                        max-label="100%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-noise-value" className="scene-camera-studio-readout">
-                        42%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Scanlines
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-scanline"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value="38"
-                        min-label="0%"
-                        max-label="100%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-scanline-value" className="scene-camera-studio-readout">
-                        38%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Vignette
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-vignette"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value="44"
-                        min-label="0%"
-                        max-label="100%"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-vignette-value" className="scene-camera-studio-readout">
-                        44%
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Jitter
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-jitter"
-                        min="0"
-                        max="12"
-                        step="0.1"
-                        value="2.5"
-                        min-label="0px"
-                        max-label="12px"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-jitter-value" className="scene-camera-studio-readout">
-                        2.5 px
-                      </span>
-                    </calcite-label>
-                    <calcite-label className="scene-camera-studio-control">
-                      Chromatic shift
-                      <calcite-slider
-                        id="camera-layer-scene-camera-fx-chromatic"
-                        min="0"
-                        max="12"
-                        step="0.1"
-                        value="2.2"
-                        min-label="0px"
-                        max-label="12px"
-                      ></calcite-slider>
-                      <span id="camera-layer-scene-camera-fx-chromatic-value" className="scene-camera-studio-readout">
-                        2.2 px
-                      </span>
-                    </calcite-label>
+                    <div className="scene-camera-fx-section">
+                      <div className="scene-camera-studio-heading">Scene look</div>
+                      <div
+                        id="camera-layer-scene-camera-fx-preview-status"
+                        className="scene-camera-fx-preview-status"
+                      >
+                        Previews update when the camera stops.
+                      </div>
+                      <div id="camera-layer-scene-camera-fx-presets" className="scene-camera-fx-preset-grid">
+                        {sceneLookPresets.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            className="scene-camera-fx-preset-card"
+                            data-scene-camera-fx-preset={preset.id}
+                          >
+                            <canvas
+                              className="scene-camera-fx-preset-preview"
+                              data-scene-camera-fx-preview={preset.id}
+                              width="160"
+                              height="92"
+                              aria-hidden="true"
+                            ></canvas>
+                            <span className="scene-camera-fx-preset-label">{preset.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div
+                        id="camera-layer-scene-camera-fx-custom-controls"
+                        className="scene-camera-fx-custom-controls"
+                        style={{ display: "none" }}
+                      >
+                        <calcite-label className="scene-camera-studio-control">
+                          Exposure
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-exposure"
+                            min="0"
+                            max="200"
+                            step="1"
+                            value="100"
+                            min-label="0%"
+                            max-label="200%"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-exposure-value" className="scene-camera-studio-readout">
+                            100%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Contrast
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-contrast"
+                            min="0"
+                            max="200"
+                            step="1"
+                            value="100"
+                            min-label="0%"
+                            max-label="200%"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-contrast-value" className="scene-camera-studio-readout">
+                            100%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Saturation
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-saturation"
+                            min="0"
+                            max="200"
+                            step="1"
+                            value="100"
+                            min-label="0%"
+                            max-label="200%"
+                          ></calcite-slider>
+                          <span
+                            id="camera-layer-scene-camera-fx-saturation-value"
+                            className="scene-camera-studio-readout"
+                          >
+                            100%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Letterbox
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-letterbox"
+                            min="0"
+                            max="20"
+                            step="1"
+                            value="0"
+                            min-label="0%"
+                            max-label="20%"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-letterbox-value" className="scene-camera-studio-readout">
+                            0%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Noise
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-noise"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value="42"
+                            min-label="0%"
+                            max-label="100%"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-noise-value" className="scene-camera-studio-readout">
+                            42%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Scanlines
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-scanline"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value="38"
+                            min-label="0%"
+                            max-label="100%"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-scanline-value" className="scene-camera-studio-readout">
+                            38%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Vignette
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-vignette"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value="44"
+                            min-label="0%"
+                            max-label="100%"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-vignette-value" className="scene-camera-studio-readout">
+                            44%
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Jitter
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-jitter"
+                            min="0"
+                            max="12"
+                            step="0.1"
+                            value="2.5"
+                            min-label="0px"
+                            max-label="12px"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-jitter-value" className="scene-camera-studio-readout">
+                            2.5 px
+                          </span>
+                        </calcite-label>
+                        <calcite-label className="scene-camera-studio-control">
+                          Chromatic shift
+                          <calcite-slider
+                            id="camera-layer-scene-camera-fx-chromatic"
+                            min="0"
+                            max="12"
+                            step="0.1"
+                            value="2.2"
+                            min-label="0px"
+                            max-label="12px"
+                          ></calcite-slider>
+                          <span id="camera-layer-scene-camera-fx-chromatic-value" className="scene-camera-studio-readout">
+                            2.2 px
+                          </span>
+                        </calcite-label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

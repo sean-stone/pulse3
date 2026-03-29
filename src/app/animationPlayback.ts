@@ -42,7 +42,7 @@ import {
   toRgbaArray,
   triangleWave
 } from "./animationPlaybackHelpers";
-import { defaultLineStyle, defaultPolygonStyle } from "./constants";
+import { defaultLineStyle, defaultPolygonStyle, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "./constants";
 import {
   getPointOrientationAngle,
   mergePointSymbolOrientations,
@@ -50,7 +50,7 @@ import {
   readPointStyleOrientation
 } from "./pointOrientation";
 import { getInactiveRevealGeometryMode } from "./revealTiming";
-import { syncTextMeshOverlay } from "./textMesh";
+import { isMeshTextRenderMode, syncTextMeshOverlay } from "./textMesh";
 
 type AnimationPlaybackConfig = {
   getView: () => any;
@@ -260,18 +260,61 @@ const applyPolygonOutlineWidth = (graphic: any, width: number) => {
   return false;
 };
 
-const applyTextSymbolState = (graphic: any, layerData: LayerData, text: string, size: number) => {
+const toClampedRgbaColor = (
+  color: unknown,
+  fallback: [number, number, number, number]
+): [number, number, number, number] => {
+  if (typeof color === "string") {
+    return parseColorToRgbaArray(color, fallback);
+  }
+  const r = Number((color as any)?.[0]);
+  const g = Number((color as any)?.[1]);
+  const b = Number((color as any)?.[2]);
+  const a = Number((color as any)?.[3]);
+  return [
+    Number.isFinite(r) ? clamp(r, 0, 255) : fallback[0],
+    Number.isFinite(g) ? clamp(g, 0, 255) : fallback[1],
+    Number.isFinite(b) ? clamp(b, 0, 255) : fallback[2],
+    Number.isFinite(a) ? clamp(a, 0, 1) : fallback[3]
+  ];
+};
+
+const multiplyColorOpacity = (
+  color: unknown,
+  opacity: number,
+  fallback: [number, number, number, number]
+): [number, number, number, number] => {
+  const rgba = toClampedRgbaColor(color, fallback);
+  return [rgba[0], rgba[1], rgba[2], clamp(rgba[3] * clamp(opacity, 0, 1), 0, 1)];
+};
+
+const applyTextSymbolState = (
+  graphic: any,
+  layerData: LayerData,
+  text: string,
+  size: number,
+  symbolOpacity = 1,
+  enforceSymbolOpacity = false
+) => {
+  const resolvedSize = clamp(Number(size) || 14, MIN_TEXT_SIZE, MAX_TEXT_SIZE);
   graphic.__pulseTextCurrentText = text;
-  graphic.__pulseTextCurrentSize = size;
+  graphic.__pulseTextCurrentSize = resolvedSize;
   const symbol = cloneSymbol(graphic?.symbol);
   if (!symbol) return false;
+  const baseTextColor = toClampedRgbaColor(layerData.textColor || "#22323a", [34, 35, 58, 1]);
   if (symbol.type === "text") {
     symbol.text = text;
-    symbol.font = symbol.font || { size, family: "sans-serif" };
-    symbol.font.size = size;
+    symbol.font = symbol.font || { size: resolvedSize, family: "sans-serif" };
+    symbol.font.size = resolvedSize;
     symbol.font.family = layerData.textFontFamily || symbol.font.family || "sans-serif";
     symbol.font.style = layerData.textItalic ? "italic" : "normal";
     symbol.font.decoration = layerData.textUnderline ? "underline" : "none";
+    if (enforceSymbolOpacity) {
+      symbol.color = multiplyColorOpacity(symbol.color ?? baseTextColor, symbolOpacity, baseTextColor);
+      if (symbol.haloColor) {
+        symbol.haloColor = multiplyColorOpacity(symbol.haloColor, symbolOpacity, [255, 255, 255, 0.9]);
+      }
+    }
     graphic.symbol = symbol;
     return true;
   }
@@ -287,12 +330,41 @@ const applyTextSymbolState = (graphic: any, layerData: LayerData, text: string, 
       nextFont.family = layerData.textFontFamily || nextFont.family || "sans-serif";
       nextFont.style = layerData.textItalic ? "italic" : "normal";
       nextLayer.text = text;
-      nextLayer.size = size;
+      nextLayer.size = resolvedSize;
       nextLayer.font = nextFont;
+      if (enforceSymbolOpacity) {
+        nextLayer.material = {
+          ...(nextLayer.material ?? {}),
+          color: multiplyColorOpacity(nextLayer.material?.color ?? baseTextColor, symbolOpacity, baseTextColor)
+        };
+        if (nextLayer.halo) {
+          nextLayer.halo = {
+            ...(nextLayer.halo ?? {}),
+            color: multiplyColorOpacity(nextLayer.halo?.color, symbolOpacity, [255, 255, 255, 0.9])
+          };
+        }
+      }
       return nextLayer;
     });
     if (changed) {
       setSymbolLayers(symbol, nextLayers);
+      if (enforceSymbolOpacity && symbol.callout) {
+        symbol.callout = {
+          ...(symbol.callout ?? {}),
+          color: multiplyColorOpacity(symbol.callout?.color ?? baseTextColor, symbolOpacity, [
+            baseTextColor[0],
+            baseTextColor[1],
+            baseTextColor[2],
+            0.9
+          ]),
+          border: symbol.callout?.border
+            ? {
+                ...(symbol.callout.border ?? {}),
+                color: multiplyColorOpacity(symbol.callout.border?.color, symbolOpacity, [255, 255, 255, 0.9])
+              }
+            : symbol.callout?.border
+        };
+      }
       graphic.symbol = symbol;
       return true;
     }
@@ -818,6 +890,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       config.applyFeatureLayerAnimation(layerData, time);
       return;
     }
+    const view = config.getView?.();
+    const useExplicit3DTextOpacity =
+      layerData.type === "text" && String(view?.type) === "3d" && !isMeshTextRenderMode(layerData.textRenderMode);
     const isPreviewing = isPlaying || isScrubbingTimeline;
     const hasRealAnimations = layerData.animations?.some((anim) => anim.type !== "__placeholder__") ?? false;
     const hasLayerPointKeyframes = config.hasPointKeyframes(layerData);
@@ -872,9 +947,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const baseText = layerData.textContent || "Text";
         const baseSize = layerData.textSize ?? 14;
         layerData.layer.graphics.forEach((graphic: any) => {
-          applyTextSymbolState(graphic, layerData, baseText, baseSize);
+          applyTextSymbolState(graphic, layerData, baseText, baseSize, 1, useExplicit3DTextOpacity);
         });
-        syncTextMeshOverlay(layerData, config.getView?.());
+        syncTextMeshOverlay(layerData, view);
       }
       if (pointKeyframe) {
         applyPointKeyframes(layerData, pointKeyframe);
@@ -1245,7 +1320,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         }
       }
       baseLayerOpacity = layerVisible ? opacity : 0;
-      layerData.layer.opacity = baseLayerOpacity;
+      layerData.layer.opacity = useExplicit3DTextOpacity ? 1 : baseLayerOpacity;
     }
 
     if (hasDrawAnimation) {
@@ -2470,24 +2545,31 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         clearFireworksLayer(layerData);
       }
     }
-    if (layerData.type === "text") {
-      const baseText = layerData.textContent || "Text";
-      const baseSize = layerData.textSize ?? 14;
-      layerData.layer.graphics.forEach((graphic: any) => {
-        let text = baseText;
+      if (layerData.type === "text") {
+        const baseText = layerData.textContent || "Text";
+        const baseSize = layerData.textSize ?? 14;
+        layerData.layer.graphics.forEach((graphic: any) => {
+          let text = baseText;
         if (hasTypewriterAnimation) {
           if (activeTypewriter) {
             const length = Math.max(0, Math.floor(baseText.length * activeTypewriter.progress));
             text = baseText.slice(0, length);
           } else if (time < minTypewriterStart) {
             text = "";
-          } else if (time > maxTypewriterEnd) {
-            text = baseText;
+            } else if (time > maxTypewriterEnd) {
+              text = baseText;
+            }
           }
-        }
-        applyTextSymbolState(graphic, layerData, text, baseSize * scale);
-      });
-    }
+          applyTextSymbolState(
+            graphic,
+            layerData,
+            text,
+            baseSize * scale,
+            useExplicit3DTextOpacity ? baseLayerOpacity : 1,
+            useExplicit3DTextOpacity
+          );
+        });
+      }
 
     if (layerData.type === "polyline") {
       if (neonProgress !== null) {
@@ -3961,7 +4043,10 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       applyBaseLayerEffect(layerData);
     }
     if (layerData.type === "text") {
-      syncTextMeshOverlay(layerData, config.getView?.());
+      syncTextMeshOverlay(layerData, view);
+      if (useExplicit3DTextOpacity && isPreviewing) {
+        view?.requestRender?.();
+      }
     }
   });
 };

@@ -49,6 +49,8 @@ export const defaultPolygonStyle: PolygonStyle = {
   extrudeHeight: 0
 };
 export const DEFAULT_TEXT_MESH_DEPTH_PERCENT = 22;
+export const MIN_TEXT_SIZE = 8;
+export const MAX_TEXT_SIZE = 200;
 
 export const PROJECT_STORAGE_KEY_LOCAL = "pulse.project.local";
 export const PROJECT_STORAGE_KEY_SESSION = "pulse.project.session";
