@@ -49,6 +49,7 @@ import {
   readPointKeyframeOrientation,
   readPointStyleOrientation
 } from "./pointOrientation";
+import { getInactiveRevealGeometryMode } from "./revealTiming";
 import { syncTextMeshOverlay } from "./textMesh";
 
 type AnimationPlaybackConfig = {
@@ -87,7 +88,8 @@ const updatePolylineDraw = (
   layerData: LayerData,
   activeAnim: LayerAnimation | null,
   time: number,
-  maxDrawEnd: number,
+  firstDrawStart: number,
+  firstAnimationStart: number,
   isPlaying: boolean,
   isScrubbingTimeline: boolean
 ) => {
@@ -117,12 +119,13 @@ const updatePolylineDraw = (
       return;
     }
 
-    if (time > maxDrawEnd) {
-      const displayGeometry = (original.spatialReference as any)?.isGeographic ? densified : original;
-      graphic.geometry = displayGeometry.clone();
-    } else if (time < maxDrawEnd) {
+    if (getInactiveRevealGeometryMode(time, firstDrawStart, firstAnimationStart) === "empty") {
       graphic.geometry = buildPartialPolyline(densified, 0, false);
+      return;
     }
+
+    const displayGeometry = (original.spatialReference as any)?.isGeographic ? densified : original;
+    graphic.geometry = displayGeometry.clone();
   });
 };
 
@@ -130,7 +133,8 @@ const updatePolygonFill = (
   layerData: LayerData,
   activeAnim: LayerAnimation | null,
   time: number,
-  maxFillEnd: number
+  firstFillStart: number,
+  firstAnimationStart: number
 ) => {
   layerData.layer.graphics.forEach((graphic: any) => {
     if (!graphic.geometry || graphic.geometry.type !== "polygon") return;
@@ -160,11 +164,12 @@ const updatePolygonFill = (
       return;
     }
 
-    if (time > maxFillEnd) {
-      graphic.geometry = original.clone();
-    } else if (time < maxFillEnd) {
+    if (getInactiveRevealGeometryMode(time, firstFillStart, firstAnimationStart) === "empty") {
       graphic.geometry = buildEmptyPolygon(original);
+      return;
     }
+
+    graphic.geometry = original.clone();
   });
 };
 
@@ -520,6 +525,25 @@ const buildPointGeometry = (x: number, y: number, spatialReference: any, z?: num
     spatialReference
   });
 
+const hasRenderablePolylinePath = (geometry: Polyline | null | undefined) =>
+  Boolean(geometry?.paths?.some((path) => Array.isArray(path) && path.length > 1));
+
+const getStablePolylineEffectGeometry = (graphic: any) => {
+  const original = graphic?.__originalGeometry as Polyline | undefined;
+  if (hasRenderablePolylinePath(original)) {
+    return original;
+  }
+  const backup = graphic?.__lastRenderableGeometry as Polyline | undefined;
+  if (hasRenderablePolylinePath(backup)) {
+    return backup;
+  }
+  const geometry = graphic?.geometry as Polyline | undefined;
+  if (hasRenderablePolylinePath(geometry)) {
+    return geometry;
+  }
+  return original ?? backup ?? geometry ?? null;
+};
+
 const toViewPolyline = (geometry: Polyline, view: any) => {
   let workingGeometry = geometry;
   if (
@@ -863,13 +887,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let scale = 1;
     let lineWidthScale = 1;
     let outlineWidthScale = 1;
+    let minAnimationStart = Number.POSITIVE_INFINITY;
     let activeDrawAnimation: LayerAnimation | null = null;
     let hasDrawAnimation = false;
-    let maxDrawEnd = 0;
     let minDrawStart = Number.POSITIVE_INFINITY;
     let activeFillAnimation: LayerAnimation | null = null;
     let hasFillAnimation = false;
-    let maxFillEnd = 0;
     let minFillStart = Number.POSITIVE_INFINITY;
     let activeSpinProgress: number | null = null;
     let activeTypewriter: { anim: LayerAnimation; progress: number } | null = null;
@@ -918,6 +941,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         return;
       }
       const animEnd = anim.start + anim.duration;
+      minAnimationStart = Math.min(minAnimationStart, anim.start);
       if (
         anim.type === "draw" ||
         anim.type === "drawReverse" ||
@@ -929,7 +953,6 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         anim.type === "waypointRouteCartoon"
       ) {
         hasDrawAnimation = true;
-        maxDrawEnd = Math.max(maxDrawEnd, animEnd);
         minDrawStart = Math.min(minDrawStart, anim.start);
         if (time >= anim.start && time <= animEnd) {
           activeDrawAnimation = anim;
@@ -949,7 +972,6 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       }
       if (anim.type === "fill") {
         hasFillAnimation = true;
-        maxFillEnd = Math.max(maxFillEnd, animEnd);
         minFillStart = Math.min(minFillStart, anim.start);
         if (time >= anim.start && time <= animEnd) {
           activeFillAnimation = anim;
@@ -1196,10 +1218,18 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const firstKeyframeTime = layerData.pointKeyframes?.[0]?.time ?? 0;
         layerVisible = time >= firstKeyframeTime;
       }
-      if (hasDrawAnimation && time < minDrawStart && (isPlaying || isScrubbingTimeline)) {
+      if (
+        hasDrawAnimation &&
+        getInactiveRevealGeometryMode(time, minDrawStart, minAnimationStart) === "empty" &&
+        (isPlaying || isScrubbingTimeline)
+      ) {
         layerVisible = false;
       }
-      if (hasFillAnimation && time < minFillStart && (isPlaying || isScrubbingTimeline)) {
+      if (
+        hasFillAnimation &&
+        getInactiveRevealGeometryMode(time, minFillStart, minAnimationStart) === "empty" &&
+        (isPlaying || isScrubbingTimeline)
+      ) {
         layerVisible = false;
       }
       if (!hasActiveAnimation && latestEndedAnimation) {
@@ -1219,10 +1249,18 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     }
 
     if (hasDrawAnimation) {
-      updatePolylineDraw(layerData, activeDrawAnimation, time, maxDrawEnd, isPlaying, isScrubbingTimeline);
+      updatePolylineDraw(
+        layerData,
+        activeDrawAnimation,
+        time,
+        minDrawStart,
+        minAnimationStart,
+        isPlaying,
+        isScrubbingTimeline
+      );
     }
     if (hasFillAnimation) {
-      updatePolygonFill(layerData, activeFillAnimation, time, maxFillEnd);
+      updatePolygonFill(layerData, activeFillAnimation, time, minFillStart, minAnimationStart);
     }
     if (pointKeyframe) {
       applyPointKeyframes(layerData, pointKeyframe);
@@ -2506,9 +2544,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
           layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
             if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
-            const geometry = graphic.geometry as Polyline;
-            const marchGeometry =
-              geometry.paths?.length ? geometry : ((graphic.__originalGeometry as Polyline) ?? geometry);
+            const marchGeometry = getStablePolylineEffectGeometry(graphic);
+            if (!marchGeometry) return;
             const { segments, total } = buildMarchSegments(marchGeometry);
             if (!segments.length || total <= 0) return;
             const resolution = Number(view?.resolution) || 1;
@@ -3675,9 +3712,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
 
           layerData.layer.graphics.forEach((graphic: any, graphicIndex: number) => {
             if (!graphic?.geometry || graphic.geometry.type !== "polyline") return;
-            const geometry = graphic.geometry as Polyline;
-            const sourceGeometry =
-              geometry.paths?.length ? geometry : ((graphic.__originalGeometry as Polyline) ?? geometry);
+            const sourceGeometry = getStablePolylineEffectGeometry(graphic);
+            if (!sourceGeometry) return;
             let workingGeometry = sourceGeometry;
             if (
               view?.spatialReference?.isWebMercator &&

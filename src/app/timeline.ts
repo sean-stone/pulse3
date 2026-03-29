@@ -7,6 +7,13 @@ import type { LayerAnimation, LayerData, PointKeyframe, PointKeyframeEasing } fr
 import { isPlaceholderAnimation } from "./animationUtils";
 import { TIMELINE_SNAP_INCREMENT, TIMELINE_SNAP_PX } from "./constants";
 
+const TIMELINE_MIN_ZOOM = 20;
+const TIMELINE_EMPTY_DURATION = 5;
+const TIMELINE_ZOOM_STEP = 20;
+const TIMELINE_AUTO_FIT_PADDING = 56;
+const TIMELINE_AUTO_FIT_EMPTY_PADDING = 96;
+const TIMELINE_CONTENT_END_PADDING = 24;
+
 export type TimelineState = {
   timelineZoom: number;
   timelineZoomAuto: boolean;
@@ -100,7 +107,15 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
 
   const getMinTimelineDuration = () => Math.max(getBaseTimelineDuration(), 0.1);
 
-  const getDefaultTimelineDuration = () => Math.max(5, getMinTimelineDuration());
+  const hasRealTimelineContent = () =>
+    config.getGraphicsLayers().some(
+      (layerData) =>
+        layerData.animations.some((anim) => !isPlaceholderAnimation(anim)) ||
+        config.hasPointKeyframes(layerData)
+    );
+
+  const getDefaultTimelineDuration = () =>
+    hasRealTimelineContent() ? getMinTimelineDuration() : TIMELINE_EMPTY_DURATION;
 
   const getTimelineDuration = () => {
     const minDuration = getMinTimelineDuration();
@@ -430,15 +445,22 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     durationInput.min = minDuration.toFixed(1);
     config.setCalciteValue(durationInput as HTMLElement, maxEndTime.toFixed(1));
 
+    const realTimelineContent = hasRealTimelineContent();
     if (state.timelineZoomAuto) {
       const containerWidth = tracksContainer.clientWidth;
-      if (containerWidth > 0) {
-        state.timelineZoom = Math.min(200, Math.max(20, containerWidth / maxEndTime));
+      const fitPadding = realTimelineContent ? TIMELINE_AUTO_FIT_PADDING : TIMELINE_AUTO_FIT_EMPTY_PADDING;
+      const fitWidth = containerWidth - fitPadding;
+      if (fitWidth > 0) {
+        state.timelineZoom = Math.max(TIMELINE_MIN_ZOOM, fitWidth / maxEndTime);
       }
     }
     applyTimelineGridState();
     applyTimelineSnapState();
     const totalWidth = maxEndTime * state.timelineZoom;
+    const contentWidth = Math.max(
+      totalWidth + TIMELINE_CONTENT_END_PADDING,
+      tracksContainer.clientWidth
+    );
     const zoomLabel = document.getElementById("timeline-zoom-label");
     if (zoomLabel) {
       const zoomPercent = Math.round((state.timelineZoom / 50) * 100);
@@ -455,8 +477,11 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       emptyMsg.style.display = "block";
       layersPanel.innerHTML = "";
       tracksArea.innerHTML = "";
+      tracksArea.style.width = "";
       ruler.innerHTML = "";
+      ruler.style.width = "";
       clearSelectedTimelineAnimation();
+      config.updatePlayhead();
       config.updateExportWarning();
       return;
     }
@@ -464,7 +489,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     emptyMsg.style.display = "none";
 
     ruler.innerHTML = "";
-    ruler.style.width = `${totalWidth}px`;
+    ruler.style.width = `${contentWidth}px`;
     for (let t = 0; t <= maxEndTime; t += 0.5) {
       const tick = document.createElement("div");
       tick.className = "ruler-tick";
@@ -684,7 +709,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     });
 
     tracksArea.innerHTML = "";
-    tracksArea.style.width = `${totalWidth}px`;
+    tracksArea.style.width = `${contentWidth}px`;
 
     orderedLayers.forEach((layerData, layerIdx) => {
       const track = document.createElement("div");
@@ -758,6 +783,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       clearSelectedTimelineAnimation();
     }
     updateKeyframeEasingControl();
+    config.updatePlayhead();
     config.updateExportWarning();
   };
   const initTimelineScrollSync = () => {
@@ -1137,13 +1163,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
 
   const zoomInTimeline = () => {
     state.timelineZoomAuto = false;
-    state.timelineZoom = Math.min(200, state.timelineZoom + 20);
+    state.timelineZoom += TIMELINE_ZOOM_STEP;
     updateTimeline();
   };
 
   const zoomOutTimeline = () => {
     state.timelineZoomAuto = false;
-    state.timelineZoom = Math.max(20, state.timelineZoom - 20);
+    state.timelineZoom = Math.max(TIMELINE_MIN_ZOOM, state.timelineZoom - TIMELINE_ZOOM_STEP);
     updateTimeline();
   };
 

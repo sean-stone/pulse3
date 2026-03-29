@@ -15,6 +15,7 @@ foreach ($envCandidates as $envPath) {
 @set_time_limit(120);
 
 header("Content-Type: application/json; charset=utf-8");
+header("X-Content-Type-Options: nosniff");
 
 $allowedOrigin = getenv("PULSE_ALLOWED_ORIGIN");
 if ($allowedOrigin) {
@@ -55,6 +56,13 @@ if (!$arcgisApiKey) {
     exit;
 }
 
+$contentLength = (int) ($_SERVER["CONTENT_LENGTH"] ?? 0);
+if ($contentLength > 4096) {
+    http_response_code(413);
+    echo json_encode(["error" => "Request body too large"]);
+    exit;
+}
+
 $raw = file_get_contents("php://input");
 if ($raw === false || $raw === "") {
     http_response_code(400);
@@ -69,10 +77,42 @@ if (!is_array($payload)) {
     exit;
 }
 
-$from = isset($payload["from"]) ? trim((string) $payload["from"]) : "";
-$to = isset($payload["to"]) ? trim((string) $payload["to"]) : "";
-$mode = strtolower(trim((string) ($payload["mode"] ?? "drive")));
-$name = isset($payload["name"]) ? trim((string) $payload["name"]) : "";
+function sanitize_route_text($value, $maxLength) {
+    $text = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string) $value) ?? '';
+    $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+    $text = trim($text);
+    if ($text === '') {
+        return '';
+    }
+    if (function_exists('mb_substr')) {
+        return mb_substr($text, 0, $maxLength);
+    }
+    return substr($text, 0, $maxLength);
+}
+
+function read_payload_string($payload, $key, $maxLength, $default = '') {
+    if (!array_key_exists($key, $payload) || $payload[$key] === null) {
+        return $default;
+    }
+    $value = $payload[$key];
+    if (!is_scalar($value)) {
+        return null;
+    }
+    return sanitize_route_text($value, $maxLength);
+}
+
+$from = read_payload_string($payload, "from", 200, "");
+$to = read_payload_string($payload, "to", 200, "");
+$modeRaw = read_payload_string($payload, "mode", 16, "drive");
+$name = read_payload_string($payload, "name", 200, "");
+
+if ($from === null || $to === null || $modeRaw === null || $name === null) {
+    http_response_code(400);
+    echo json_encode(["error" => "Invalid route field types"]);
+    exit;
+}
+
+$mode = strtolower($modeRaw);
 
 if ($from === "" || $to === "") {
     http_response_code(400);
@@ -122,18 +162,18 @@ function reserve_daily_route_slot($limit) {
     $date = gmdate("Y-m-d");
     $dir = get_route_usage_dir();
     if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-        return [null, ["error" => "route_usage_storage_unavailable", "path" => $dir]];
+        return [null, ["error" => "route_usage_storage_unavailable"]];
     }
 
     $filePath = $dir . DIRECTORY_SEPARATOR . $date . ".json";
     $handle = @fopen($filePath, "c+");
     if ($handle === false) {
-        return [null, ["error" => "route_usage_file_unavailable", "path" => $filePath]];
+        return [null, ["error" => "route_usage_file_unavailable"]];
     }
 
     if (!flock($handle, LOCK_EX)) {
         fclose($handle);
-        return [null, ["error" => "route_usage_lock_failed", "path" => $filePath]];
+        return [null, ["error" => "route_usage_lock_failed"]];
     }
 
     $contents = stream_get_contents($handle);
@@ -419,7 +459,7 @@ if (!$coords) {
     exit;
 }
 
-$layerName = $name !== "" ? $name : ($from . " to " . $to);
+$layerName = sanitize_route_text($name !== "" ? $name : ($from . " to " . $to), 200);
 
 echo json_encode([
     "name" => $layerName,

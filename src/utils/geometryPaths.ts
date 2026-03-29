@@ -55,8 +55,11 @@ export function buildPartialPaths(
   reverse: boolean
 ) {
   if (progress <= 0) {
-    const firstPath = paths[0] || [];
-    const firstPoint = firstPath[0] ? cloneCoord(firstPath[0]) : [];
+    const endpointPath = reverse
+      ? [...paths].reverse().find((path) => Array.isArray(path) && path.length > 0) || []
+      : paths.find((path) => Array.isArray(path) && path.length > 0) || [];
+    const endpointCoord = reverse ? endpointPath[endpointPath.length - 1] : endpointPath[0];
+    const firstPoint = endpointCoord ? cloneCoord(endpointCoord) : [];
     return firstPoint.length ? [[firstPoint]] : [];
   }
 

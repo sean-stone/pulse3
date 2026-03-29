@@ -5,20 +5,21 @@ function Modals() {
         <div id="style-settings-panel" data-testid="style-settings-panel" className="style-settings-panel">
           <div>
           <div id="point-style-section">
-            <calcite-label>
-              Point Style
-              <calcite-input
-                id="point-style-search"
-                placeholder="Search styles (e.g. 3D, car, boat)"
-                scale="s"
-                clearable
-              ></calcite-input>
-              <div
-                id="point-style-options"
-                className="style-option-grid point-style-options"
-                role="group"
-                aria-label="Point style"
-              >
+            <div id="point-style-picker-section">
+              <calcite-label>
+                Point Style
+                <calcite-input
+                  id="point-style-search"
+                  placeholder="Search styles (e.g. 3D, car, boat)"
+                  scale="s"
+                  clearable
+                ></calcite-input>
+                <div
+                  id="point-style-options"
+                  className="style-option-grid point-style-options"
+                  role="group"
+                  aria-label="Point style"
+                >
                 <div id="point-3d-models-title" className="style-option-section-title">
                   3D Scene Models
                 </div>
@@ -571,9 +572,10 @@ function Modals() {
                   </svg>
                   9
                 </button>
-              
-              </div>
-            </calcite-label>
+                
+                </div>
+              </calcite-label>
+            </div>
 
             <div className="style-grid">
               <div className="style-grid-row">
@@ -590,7 +592,7 @@ function Modals() {
                   scale="m"
                 ></calcite-slider>
               </div>
-              <div className="style-grid-row">
+              <div id="point-outline-width-row" className="style-grid-row">
                 <span className="style-grid-label">Outer Stroke</span>
                 <calcite-slider
                   id="point-outline-width"
@@ -605,7 +607,7 @@ function Modals() {
               </div>
             </div>
 
-            <div className="style-compact-colors" role="group" aria-label="Point colors">
+            <div id="point-color-controls" className="style-compact-colors" role="group" aria-label="Point colors">
               <div className="style-compact-group">
                 <span className="style-compact-label">Fill</span>
                 <button
@@ -828,7 +830,7 @@ function Modals() {
                   ></calcite-color-picker>
                 </calcite-popover>
               </div>
-              <div className="style-compact-group">
+              <div id="polygon-outline-color-group" className="style-compact-group">
                 <span className="style-compact-label">Outline</span>
                 <button
                   type="button"
@@ -1007,7 +1009,7 @@ function Modals() {
                   <calcite-switch id="point-follow-terrain-toggle" checked></calcite-switch>
                 </calcite-label>
               </div>
-              <calcite-label style={{ marginTop: 12 }}>
+              <calcite-label id="layer-blend-mode-row" style={{ marginTop: 12 }}>
                 Blend Mode
                 <calcite-select id="layer-blend-mode-select" scale="m">
                   <calcite-option value="normal">Normal</calcite-option>
@@ -1041,185 +1043,187 @@ function Modals() {
                 </calcite-select>
               </calcite-label>
 
-              <div className="effects-divider">CSS Effects</div>
+              <div id="style-effects-divider" className="effects-divider">CSS Effects</div>
 
-              <calcite-label className="filter-control">
-                Brightness
-                <calcite-slider
-                  id="effect-brightness"
-                  min="0"
-                  max="5"
-                  step="0.1"
-                  value="1"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+              <div id="layer-css-effects-controls">
+                <calcite-label className="filter-control">
+                  Brightness
+                  <calcite-slider
+                    id="effect-brightness"
+                    min="0"
+                    max="5"
+                    step="0.1"
+                    value="1"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Contrast
-                <calcite-slider
-                  id="effect-contrast"
-                  min="0"
-                  max="200"
-                  step="1"
-                  value="100"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Contrast
+                  <calcite-slider
+                    id="effect-contrast"
+                    min="0"
+                    max="200"
+                    step="1"
+                    value="100"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Grayscale
-                <calcite-slider
-                  id="effect-grayscale"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Grayscale
+                  <calcite-slider
+                    id="effect-grayscale"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Hue Rotate
-                <calcite-slider
-                  id="effect-hue-rotate"
-                  min="0"
-                  max="360"
-                  step="1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Hue Rotate
+                  <calcite-slider
+                    id="effect-hue-rotate"
+                    min="0"
+                    max="360"
+                    step="1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Invert
-                <calcite-slider
-                  id="effect-invert"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Invert
+                  <calcite-slider
+                    id="effect-invert"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Opacity
-                <calcite-slider
-                  id="effect-opacity"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value="1"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Opacity
+                  <calcite-slider
+                    id="effect-opacity"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value="1"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Saturate
-                <calcite-slider
-                  id="effect-saturate"
-                  min="0"
-                  max="5"
-                  step="0.1"
-                  value="1"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Saturate
+                  <calcite-slider
+                    id="effect-saturate"
+                    min="0"
+                    max="5"
+                    step="0.1"
+                    value="1"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Sepia
-                <calcite-slider
-                  id="effect-sepia"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Sepia
+                  <calcite-slider
+                    id="effect-sepia"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Blur
-                <calcite-slider
-                  id="effect-blur"
-                  min="0"
-                  max="20"
-                  step="1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Blur
+                  <calcite-slider
+                    id="effect-blur"
+                    min="0"
+                    max="20"
+                    step="1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Drop Shadow Offset X
-                <calcite-slider
-                  id="effect-drop-shadow-offset-x"
-                  min="-50"
-                  max="50"
-                  step="1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Drop Shadow Offset X
+                  <calcite-slider
+                    id="effect-drop-shadow-offset-x"
+                    min="-50"
+                    max="50"
+                    step="1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Drop Shadow Offset Y
-                <calcite-slider
-                  id="effect-drop-shadow-offset-y"
-                  min="-50"
-                  max="50"
-                  step="1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Drop Shadow Offset Y
+                  <calcite-slider
+                    id="effect-drop-shadow-offset-y"
+                    min="-50"
+                    max="50"
+                    step="1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-              <calcite-label className="filter-control">
-                Drop Shadow Blur
-                <calcite-slider
-                  id="effect-drop-shadow-blur"
-                  min="0"
-                  max="50"
-                  step="1"
-                  value="0"
-                  label-handles="true"
-                  scale="m"
-                ></calcite-slider>
-              </calcite-label>
+                <calcite-label className="filter-control">
+                  Drop Shadow Blur
+                  <calcite-slider
+                    id="effect-drop-shadow-blur"
+                    min="0"
+                    max="50"
+                    step="1"
+                    value="0"
+                    label-handles="true"
+                    scale="m"
+                  ></calcite-slider>
+                </calcite-label>
 
-            <div className="style-compact-colors filter-control" role="group" aria-label="Drop shadow color">
-              <div className="style-compact-group">
-                <span className="style-compact-label">Drop Shadow</span>
-                <button
-                  type="button"
-                  id="effect-drop-shadow-color"
-                  className="color-swatch-button"
-                  aria-label="Drop shadow color"
-                ></button>
-                <calcite-popover reference-element="effect-drop-shadow-color" placement="bottom-start" auto-close>
-                  <calcite-color-picker
-                    id="effect-drop-shadow-color-picker"
-                    value="#000000"
-                    scale="s"
-                    alpha-channel
-                    channels-disabled
-                    saved-disabled
-                  ></calcite-color-picker>
-                </calcite-popover>
+                <div className="style-compact-colors filter-control" role="group" aria-label="Drop shadow color">
+                  <div className="style-compact-group">
+                    <span className="style-compact-label">Drop Shadow</span>
+                    <button
+                      type="button"
+                      id="effect-drop-shadow-color"
+                      className="color-swatch-button"
+                      aria-label="Drop shadow color"
+                    ></button>
+                    <calcite-popover reference-element="effect-drop-shadow-color" placement="bottom-start" auto-close>
+                      <calcite-color-picker
+                        id="effect-drop-shadow-color-picker"
+                        value="#000000"
+                        scale="s"
+                        alpha-channel
+                        channels-disabled
+                        saved-disabled
+                      ></calcite-color-picker>
+                    </calcite-popover>
+                  </div>
+                </div>
               </div>
-            </div>
             </div>
           </div>
           </div>

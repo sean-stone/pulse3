@@ -45,6 +45,11 @@ describe("geometryPaths", () => {
     expect(buildPartialPaths(paths, 0, false)).toEqual([[[0, 0, 15]]]);
   });
 
+  test("buildPartialPaths uses the route endpoint at 0 progress for reverse traversal", () => {
+    const paths = [[[0, 0, 15], [10, 0, 25]]];
+    expect(buildPartialPaths(paths, 0, true)).toEqual([[[10, 0, 25]]]);
+  });
+
   test("buildPartialPaths interpolates z at mid progress", () => {
     const paths = [[[0, 0, 10], [10, 0, 30]]];
     expect(buildPartialPaths(paths, 0.5, false)).toEqual([[[0, 0, 10], [5, 0, 20]]]);

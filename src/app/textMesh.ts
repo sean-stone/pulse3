@@ -33,6 +33,7 @@ const ITALIC_SHEAR = 0.18;
 const DEFAULT_CURVE_SEGMENTS = 8;
 const MIN_TEXT_WORLD_HEIGHT = 0.6;
 const MAX_TEXT_WORLD_HEIGHT = 5000;
+const TEXT_MESH_ANCHOR_CLEARANCE = 0.45;
 const templateCache = new Map<string, TextMeshTemplate>();
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -225,7 +226,7 @@ const buildTextMeshTemplate = (options: {
     const z = merged.positions[index + 2] + offsetZ;
     localPositions[index] = x;
     localPositions[index + 1] = z;
-    localPositions[index + 2] = y;
+    localPositions[index + 2] = y + TEXT_MESH_ANCHOR_CLEARANCE;
   }
 
   return {
@@ -354,6 +355,18 @@ const buildTextMeshGeometry = (
     ]
   });
 
+const normalizeTextMeshAnchorPoint = (point: any) => {
+  if (!point || point.type !== "point") return point;
+  const x = Number(point.x);
+  const y = Number(point.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return point;
+  return new Point({
+    x,
+    y,
+    spatialReference: point.spatialReference
+  });
+};
+
 const syncOverlayLayerState = (overlayLayer: GraphicsLayer, layerData: LayerData, view: any) => {
   const overlayAny = overlayLayer as any;
   const sourceLayer: any = layerData.layer;
@@ -452,6 +465,8 @@ export const syncTextMeshOverlay = (layerData: LayerData, view: any) => {
 
   layerData.layer.graphics.forEach((anchorGraphic: any) => {
     if (!anchorGraphic?.geometry || anchorGraphic.geometry.type !== "point") return;
+    const anchorPoint = normalizeTextMeshAnchorPoint(anchorGraphic.geometry);
+    if (!anchorPoint) return;
 
     const text = String(anchorGraphic.__pulseTextCurrentText ?? layerData.textContent ?? "Text");
     if (!text.trim()) {
@@ -474,22 +489,22 @@ export const syncTextMeshOverlay = (layerData: LayerData, view: any) => {
 
     const size = Number(anchorGraphic.__pulseTextCurrentSize ?? layerData.textSize ?? 14);
     if (layerData.textFixedToWorld && (!Number.isFinite(resolvedFixedWorldHeight) || resolvedFixedWorldHeight <= 0)) {
-      resolvedFixedWorldHeight = getWorldTextHeight(view, anchorGraphic.geometry, size);
+      resolvedFixedWorldHeight = getWorldTextHeight(view, anchorPoint, size);
       layerData.textWorldHeight = resolvedFixedWorldHeight;
     }
     if (layerData.textFixedToWorld && !Number.isFinite(resolvedFixedWorldRotation)) {
-      resolvedFixedWorldRotation = getTextRotationAngle(view, anchorGraphic.geometry);
+      resolvedFixedWorldRotation = getTextRotationAngle(view, anchorPoint);
       layerData.textWorldRotation = resolvedFixedWorldRotation;
     }
     const worldHeight =
       layerData.textFixedToWorld && Number.isFinite(resolvedFixedWorldHeight) && resolvedFixedWorldHeight > 0
         ? resolvedFixedWorldHeight
-        : getWorldTextHeight(view, anchorGraphic.geometry, size);
+        : getWorldTextHeight(view, anchorPoint, size);
     const rotationAngle =
       layerData.textFixedToWorld && Number.isFinite(resolvedFixedWorldRotation)
         ? resolvedFixedWorldRotation
-        : getTextRotationAngle(view, anchorGraphic.geometry);
-    const meshGeometry = buildTextMeshGeometry(template, anchorGraphic.geometry, worldHeight, rotationAngle);
+        : getTextRotationAngle(view, anchorPoint);
+    const meshGeometry = buildTextMeshGeometry(template, anchorPoint, worldHeight, rotationAngle);
     let meshGraphic = anchorGraphic.__pulseTextMeshGraphic as Graphic | undefined;
 
     if (!meshGraphic || meshGraphic.layer !== overlayLayer) {

@@ -62,9 +62,11 @@ import {
   applyPointOrientationToSymbol,
   getPointOrientationAngle,
   getPointOrientationHeading,
+  getSymbolLayers,
   mergePointSymbolOrientations,
   readPointStyleOrientation,
   readPointSymbolOrientation,
+  setSymbolLayers,
   toFiniteNumber
 } from "./app/pointOrientation";
 import {
@@ -2382,6 +2384,10 @@ function applyLayerModeProperties(layerData: LayerData) {
   }
   const layerAny = layerData.layer as any;
   const geometryType = layerData.type === "feature" ? String(layerAny.geometryType || "") : layerData.type;
+  if (layerData.type === "text") {
+    layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0 };
+    return;
+  }
   if (geometryType === "polygon") {
     const polygonOffset = Number(layerData.polygonZOffset);
     layerAny.elevationInfo = {
@@ -2400,10 +2406,13 @@ function applyLayerModeProperties(layerData: LayerData) {
       : { mode: "relative-to-ground", offset: 1 };
     return;
   }
-  if (geometryType === "point" || geometryType === "multipoint") {
-    layerAny.elevationInfo = { mode: "absolute-height" };
-    return;
-  }
+    if (geometryType === "point" || geometryType === "multipoint") {
+    layerAny.elevationInfo =
+      layerData.pointFollowTerrain3D === true
+        ? { mode: "relative-to-ground", offset: 0 }
+        : { mode: "absolute-height" };
+      return;
+    }
   layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0.5 };
 }
 
@@ -2437,6 +2446,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     updateTimeline();
     updateAnimationOptions();
     filterPointStyles();
+    filterPolygonFillStyles();
     updateGoogle3DTilesToggleVisibility();
     ensureGoogle3DTilesLayerState();
     return;
@@ -2487,6 +2497,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     updateTimeline();
     updateAnimationOptions();
     filterPointStyles();
+    filterPolygonFillStyles();
     if (selectedLayerIndex >= 0) {
       selectLayer(selectedLayerIndex, false);
     }
@@ -4426,6 +4437,20 @@ function normalizeTextRenderMode(value: unknown): "flat" | "scene-3d" | "mesh-3d
   return "scene-3d";
 }
 
+function normalizeTextAnchorGeometry(geometry: any) {
+  const normalized = (toGeographicGeometry(geometry) as Point | null) ?? geometry;
+  const x = Number(normalized?.x);
+  const y = Number(normalized?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return geometry;
+  }
+  return new Point({
+    x,
+    y,
+    spatialReference: normalized?.spatialReference ?? geometry?.spatialReference ?? view?.spatialReference
+  });
+}
+
 function refreshTextMeshOverlays() {
   if (!view) return;
   graphicsLayers.forEach((layerData) => {
@@ -5121,21 +5146,82 @@ function normalizePointKeyframeEasing(value: unknown): PointKeyframeEasing | und
   return undefined;
 }
 
+function normalizePointKeyframeGeometry(geometry: Point) {
+  const normalized = (toGeographicGeometry(geometry) as Point | null) ?? geometry;
+  const x = Number(normalized?.x);
+  const y = Number(normalized?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return geometry;
+  }
+  const z = Number((normalized as any)?.z);
+  return new Point({
+    x,
+    y,
+    spatialReference: normalized.spatialReference ?? geometry.spatialReference,
+    ...(Number.isFinite(z) ? { z } : {})
+  });
+}
+
+function buildPointKeyframeGeometry(
+  frame: PointKeyframe | null | undefined,
+  fallbackSpatialReference?: any
+) {
+  if (!frame) return null;
+  const x = Number(frame.x);
+  const y = Number(frame.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  const z = Number(frame.z);
+  return new Point({
+    x,
+    y,
+    spatialReference: frame.spatialReference ?? fallbackSpatialReference,
+    ...(Number.isFinite(z) ? { z } : {})
+  });
+}
+
+function projectPointKeyframeGeometry(
+  frame: PointKeyframe | null | undefined,
+  targetSpatialReference?: any
+) {
+  const geometry = buildPointKeyframeGeometry(frame, targetSpatialReference);
+  if (!geometry) return null;
+  if (!targetSpatialReference) {
+    return geometry;
+  }
+  const projected = toViewGeometry(geometry, targetSpatialReference) as Point | null;
+  const x = Number(projected?.x);
+  const y = Number(projected?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return geometry;
+  }
+  return projected;
+}
+
 function upsertPointKeyframe(
   layerData: LayerData,
   geometry: Point,
   time: number,
   extras?: Partial<PointKeyframe>
 ) {
+  const previousTimelineDuration = timelineController.getTimelineDuration();
+  const previousTimelineDurationOverride = timelineController.getTimelineDurationOverride();
   const keyframes = layerData.pointKeyframes ? [...layerData.pointKeyframes] : [];
   const existingIndex = keyframes.findIndex((frame) => Math.abs(frame.time - time) < 0.001);
   const existingEasing = existingIndex >= 0 ? normalizePointKeyframeEasing(keyframes[existingIndex].easing) : undefined;
   const nextEasing = normalizePointKeyframeEasing(extras?.easing) ?? existingEasing;
+  const normalizedGeometry = normalizePointKeyframeGeometry(geometry);
+  const normalizedGeometryZ = Number((normalizedGeometry as any)?.z);
   const next: PointKeyframe = {
     time,
-    x: geometry.x,
-    y: geometry.y,
-    z: Number.isFinite(Number(extras?.z)) ? Number(extras?.z) : undefined,
+    x: normalizedGeometry.x,
+    y: normalizedGeometry.y,
+    z: Number.isFinite(Number(extras?.z))
+      ? Number(extras?.z)
+      : Number.isFinite(normalizedGeometryZ)
+        ? normalizedGeometryZ
+        : undefined,
     heading: Number.isFinite(Number(extras?.heading)) ? Number(extras?.heading) : undefined,
     tilt: Number.isFinite(Number(extras?.tilt)) ? Number(extras?.tilt) : undefined,
     roll: Number.isFinite(Number(extras?.roll)) ? Number(extras?.roll) : undefined,
@@ -5143,7 +5229,7 @@ function upsertPointKeyframe(
     rotation: Number.isFinite(Number(extras?.rotation)) ? Number(extras?.rotation) : undefined,
     scale: Number.isFinite(Number(extras?.scale)) ? Number(extras?.scale) : undefined,
     easing: nextEasing,
-    spatialReference: geometry.spatialReference
+    spatialReference: normalizedGeometry.spatialReference
   };
   if (existingIndex >= 0) {
     keyframes[existingIndex] = next;
@@ -5152,6 +5238,12 @@ function upsertPointKeyframe(
   }
   keyframes.sort((a, b) => a.time - b.time);
   layerData.pointKeyframes = keyframes;
+  if (previousTimelineDurationOverride === null) {
+    const nextTimelineDuration = timelineController.getTimelineDuration();
+    if (previousTimelineDuration > nextTimelineDuration) {
+      timelineController.setTimelineDurationOverride(previousTimelineDuration);
+    }
+  }
   updatePrimaryActionsState();
   scheduleProjectSave();
 }
@@ -5232,10 +5324,24 @@ function getPointKeyframeAtTime(layerData: LayerData, time: number) {
       if (span <= 0) return end;
       const t = (time - start.time) / span;
       const easedT = applyPointKeyframeEasing(t, start.easing);
+      const interpolationSpatialReference =
+        view?.spatialReference ?? start.spatialReference ?? end.spatialReference;
+      const startGeometry = projectPointKeyframeGeometry(start, interpolationSpatialReference);
+      const endGeometry = projectPointKeyframeGeometry(end, interpolationSpatialReference);
+      const startX = Number(startGeometry?.x);
+      const startY = Number(startGeometry?.y);
+      const endX = Number(endGeometry?.x);
+      const endY = Number(endGeometry?.y);
       return {
         time,
-        x: start.x + (end.x - start.x) * easedT,
-        y: start.y + (end.y - start.y) * easedT,
+        x:
+          Number.isFinite(startX) && Number.isFinite(endX)
+            ? startX + (endX - startX) * easedT
+            : start.x + (end.x - start.x) * easedT,
+        y:
+          Number.isFinite(startY) && Number.isFinite(endY)
+            ? startY + (endY - startY) * easedT
+            : start.y + (end.y - start.y) * easedT,
         z: interpolateNumber(start.z, end.z, easedT),
         heading: interpolateAngleDegrees(start.heading, end.heading, easedT),
         tilt: interpolateNumber(start.tilt, end.tilt, easedT),
@@ -5244,7 +5350,11 @@ function getPointKeyframeAtTime(layerData: LayerData, time: number) {
         rotation: interpolateAngleDegrees(start.rotation, end.rotation, easedT),
         scale: interpolateNumber(start.scale, end.scale, easedT),
         easing: normalizePointKeyframeEasing(start.easing),
-        spatialReference: start.spatialReference || end.spatialReference
+        spatialReference:
+          startGeometry?.spatialReference ??
+          endGeometry?.spatialReference ??
+          start.spatialReference ??
+          end.spatialReference
       };
     }
   }
@@ -5266,7 +5376,7 @@ export function getAnimationSettingsSnapshot() {
   return buildAnimationSettingsSnapshot(graphicsLayers, timelineController.getTimelineDurationOverride());
 }
 
-  function initializeApp() {
+function initializeApp() {
   if (hasInitialized) return;
   hasInitialized = true;
   setupResponsiveLayout(layoutState, {
@@ -5298,15 +5408,15 @@ export function getAnimationSettingsSnapshot() {
   updateLayersList();
   updateTimeline();
   updateAnimationOptions();
-    updateExportWarning();
-    resetHistory(historyState, historyConfig);
-    updateBasemapBackgroundControls();
-    updateGoogle3DTilesToggleVisibility();
-    ensureGoogle3DTilesLayerState();
-    scheduleBasemapLabelsVisibility();
-  }
+  updateExportWarning();
+  resetHistory(historyState, historyConfig);
+  updateBasemapBackgroundControls();
+  updateGoogle3DTilesToggleVisibility();
+  ensureGoogle3DTilesLayerState();
+  scheduleBasemapLabelsVisibility();
+}
 
-  function setupEventListeners() {
+function setupEventListeners() {
   updateExportControlsForFormat();
   updateExportResolutionControls();
   updateExportResolutionLabel(view as any);
@@ -5564,6 +5674,7 @@ export function getAnimationSettingsSnapshot() {
     button.setAttribute("aria-pressed", "true");
     applyStyleSettings(false);
   });
+  filterPolygonFillStyles();
   getEl("polygon-outline-style-select").addEventListener("calciteSelectChange", () =>
     applyStyleSettings(false)
   );
@@ -6301,6 +6412,12 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.layerEffectsEnabled = true;
   }
 
+  if (type === "polyline" || type === "polygon") {
+    newLayer.graphics.forEach((graphic: any) => {
+      ensureGeometryCache(layerData, graphic);
+    });
+  }
+
   applyLayerModeProperties(layerData);
   if (type === "text") {
     applyTextSymbols(layerData);
@@ -6349,7 +6466,7 @@ function beginTextPlacement(layerIndex: number) {
 
   textPlacementHandle = view.on("click", (event: any) => {
     const graphic = new Graphic({
-      geometry: toGeographicGeometry(event.mapPoint) as any,
+      geometry: normalizeTextAnchorGeometry(event.mapPoint) as any,
       symbol: buildTextSymbolForCurrentView(layerData)
     });
 
@@ -6862,6 +6979,11 @@ async function duplicateLayer(index: number) {
     layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
     layerEffectsEnabled: layerData.layerEffectsEnabled
   };
+  if (duplicate.type === "polyline" || duplicate.type === "polygon") {
+    duplicate.layer.graphics.forEach((graphic: any) => {
+      ensureGeometryCache(duplicate, graphic);
+    });
+  }
   if (layerData.type === "point") {
     duplicate.pointStyle = duplicate.pointStyle ?? { ...defaultPointStyle };
   } else if (layerData.type === "polyline") {
@@ -6984,8 +7106,17 @@ function syncPointOrientationControlVisibility(styleValue?: string | null) {
   const tiltRow = document.getElementById("point-tilt-row") as HTMLElement | null;
   const rollRow = document.getElementById("point-roll-row") as HTMLElement | null;
   const note = document.getElementById("point-rotation-model-note") as HTMLElement | null;
+  const pointStylePickerSection = document.getElementById("point-style-picker-section") as HTMLElement | null;
+  const pointOutlineWidthRow = document.getElementById("point-outline-width-row") as HTMLElement | null;
+  const pointColorControls = document.getElementById("point-color-controls") as HTMLElement | null;
+  const blendModeRow = document.getElementById("layer-blend-mode-row") as HTMLElement | null;
+  const effectsDivider = document.getElementById("style-effects-divider") as HTMLElement | null;
+  const cssEffectsControls = document.getElementById("layer-css-effects-controls") as HTMLElement | null;
+  const effectsAdvanced = document.getElementById("style-effects-advanced") as HTMLElement | null;
+  const effectsToggle = document.getElementById("style-effects-toggle") as HTMLElement | null;
   const is3D = currentViewMode === "3d";
   const usesObjectLayer = pointStyleUses3DObjectLayer(styleValue ?? getSelectedPointStyle());
+  const useCompactModelControls = is3D && usesObjectLayer;
 
   if (angleRow) {
     angleRow.style.display = is3D ? "none" : "";
@@ -7001,6 +7132,30 @@ function syncPointOrientationControlVisibility(styleValue?: string | null) {
   }
   if (note) {
     note.style.display = is3D && !usesObjectLayer ? "" : "none";
+  }
+  if (pointStylePickerSection) {
+    pointStylePickerSection.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (pointOutlineWidthRow) {
+    pointOutlineWidthRow.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (pointColorControls) {
+    pointColorControls.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (blendModeRow) {
+    blendModeRow.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (effectsDivider) {
+    effectsDivider.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (cssEffectsControls) {
+    cssEffectsControls.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (effectsToggle) {
+    effectsToggle.style.display = useCompactModelControls ? "none" : "";
+  }
+  if (effectsAdvanced && useCompactModelControls) {
+    effectsAdvanced.classList.add("show");
   }
 }
 
@@ -7020,6 +7175,21 @@ function syncPolygonExtrusionControlVisibility(styleValue?: string | null) {
   }
   if (note) {
     note.style.display = is3D && !supportsExtrusion ? "" : "none";
+  }
+}
+
+function syncPolygonOutlineControlVisibility(isPolygon: boolean, showOutlineStyleRow: boolean) {
+  const outlineColorGroup = document.getElementById("polygon-outline-color-group") as HTMLElement | null;
+  const outlineStyleRow = document.getElementById("polygon-outline-style-row") as HTMLElement | null;
+  const outlineWidthInput = document.getElementById("polygon-outline-width") as any;
+  const outlineWidth = readNumber(outlineWidthInput?.value, defaultPolygonStyle.outlineWidth);
+  const showOutlineControls = isPolygon && outlineWidth > 0;
+
+  if (outlineColorGroup) {
+    outlineColorGroup.style.display = showOutlineControls ? "" : "none";
+  }
+  if (outlineStyleRow) {
+    outlineStyleRow.style.display = showOutlineControls && showOutlineStyleRow ? "block" : "none";
   }
 }
 
@@ -7049,11 +7219,11 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     setCalciteValue(getEl("point-tilt-input"), toFiniteNumber(orientation.tilt) ?? 0);
     setCalciteValue(getEl("point-roll-input"), toFiniteNumber(orientation.roll) ?? 0);
     setCalciteValue(getEl("point-xoffset-input"), style.xoffset ?? 0);
-    setCalciteValue(getEl("point-yoffset-input"), style.yoffset ?? 0);
-    syncPointOrientationControlVisibility(style.style);
-    if (followTerrainToggle) {
-      followTerrainToggle.checked = layerData.pointFollowTerrain3D !== false;
-    }
+      setCalciteValue(getEl("point-yoffset-input"), style.yoffset ?? 0);
+      syncPointOrientationControlVisibility(style.style);
+      if (followTerrainToggle) {
+        followTerrainToggle.checked = layerData.pointFollowTerrain3D === true;
+      }
     updatePointAnimationPreview(style.color, style.outlineColor, style.style);
     updatePointStyleOptionColors(style.color, style.outlineColor);
     if (currentViewMode === "3d") {
@@ -7084,6 +7254,7 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     setCalciteValue(getEl("polygon-zoffset-input"), Number(layerData.polygonZOffset) || 0);
     setCalciteValue(getEl("polygon-extrude-height-input"), Number(style.extrudeHeight) || 0);
     syncPolygonExtrusionControlVisibility(style.style);
+    syncPolygonOutlineControlVisibility(true, layerData.type === "feature");
     updatePolygonStyleOptionColors(style.color, style.outlineColor);
   }
 
@@ -7105,9 +7276,13 @@ function syncStylePanelFromLayer(layerData: LayerData) {
 
   const effectsAdvanced = getEl("style-effects-advanced");
   const effectsToggleEl = getEl("style-effects-toggle");
-  effectsAdvanced.classList.remove("show");
-  effectsToggleEl.textContent = "Show more";
-  effectsToggleEl.setAttribute("aria-expanded", "false");
+  const lockEffectsOpen =
+    styleType === "point" &&
+    currentViewMode === "3d" &&
+    pointStyleUses3DObjectLayer((layerData.pointStyle ?? defaultPointStyle).style);
+  effectsAdvanced.classList.toggle("show", lockEffectsOpen);
+  effectsToggleEl.textContent = lockEffectsOpen ? "Show less" : "Show more";
+  effectsToggleEl.setAttribute("aria-expanded", String(lockEffectsOpen));
 }
 
 function confirmStyleSettings() {
@@ -7142,6 +7317,16 @@ function readEffectSettingsFromInputs(): LayerEffectSettings {
 
 
 function applyLayerEffects(layerData: LayerData) {
+  if (
+    layerData.type === "point" &&
+    currentViewMode === "3d" &&
+    pointStyleUses3DObjectLayer(layerData.pointStyle?.style)
+  ) {
+    layerData.layer.blendMode = "normal";
+    layerData.layer.effect = "";
+    return;
+  }
+
   const blend = layerData.layerBlendMode || "normal";
   layerData.layer.blendMode = blend;
 
@@ -7250,6 +7435,7 @@ function applyStyleSettings(shouldClose: boolean) {
     };
     layerData.polygonZOffset = readNumber((getEl("polygon-zoffset-input") as any).value, 0);
     syncPolygonExtrusionControlVisibility(layerData.polygonStyle.style);
+    syncPolygonOutlineControlVisibility(true, layerData.type === "feature");
     updatePolygonAnimationPreview(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
     updatePolygonStyleOptionColors(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
   }
@@ -7381,6 +7567,33 @@ async function applyPointModelSymbolToLayer(layerData: LayerData, style: PointSt
     );
     const symbolInstance =
       typeof resolvedBase.clone === "function" ? resolvedBase.clone() : { ...resolvedBase };
+    const sizeScale = Math.max(1, Number(latestStyle.size) || defaultPointStyle.size) / defaultPointStyle.size;
+    if (symbolInstance?.type === "point-3d") {
+      const nextLayers = getSymbolLayers(symbolInstance).map((layer: any) => {
+        if (!layer) return layer;
+        const nextLayer = typeof layer.clone === "function" ? layer.clone() : { ...layer };
+        if (nextLayer.type === "icon") {
+          nextLayer.size = Math.max(2, Number(latestStyle.size) || defaultPointStyle.size);
+          return nextLayer;
+        }
+        if (nextLayer.type === "object") {
+          const height = toFiniteNumber(nextLayer.height);
+          const width = toFiniteNumber(nextLayer.width);
+          const depth = toFiniteNumber(nextLayer.depth);
+          if (typeof height === "number" && height > 0) {
+            nextLayer.height = height * sizeScale;
+          }
+          if (typeof width === "number" && width > 0) {
+            nextLayer.width = width * sizeScale;
+          }
+          if (typeof depth === "number" && depth > 0) {
+            nextLayer.depth = depth * sizeScale;
+          }
+        }
+        return nextLayer;
+      });
+      setSymbolLayers(symbolInstance, nextLayers);
+    }
     graphic.symbol = applyPointOrientationToSymbol(symbolInstance, orientation);
   });
 }
@@ -7641,6 +7854,8 @@ function buildTextSymbol3D(layerData: LayerData) {
           size: 1
         },
         size: Math.max(10, Number(layerData.textSize) || 14),
+        horizontalAlignment: "center",
+        verticalAlignment: "bottom",
         font: {
           family: layerData.textFontFamily || "sans-serif",
           style: layerData.textItalic ? "italic" : "normal",
@@ -7787,9 +8002,47 @@ function applyLayerStyle(layerData: LayerData) {
 function ensureGeometryCache(layerData: LayerData, graphic: any) {
   if (!graphic?.geometry) return;
   if (layerData.type !== "polyline" && layerData.type !== "polygon") return;
-  if (!graphic.__originalGeometry) {
-    graphic.__originalGeometry = graphic.geometry.clone();
+  const isRenderableGeometry = (geometry: any) => {
+    if (!geometry || typeof geometry !== "object") return false;
+    if (layerData.type === "polyline") {
+      return Boolean(
+        geometry.paths?.some((path: any) => Array.isArray(path) && path.length > 1)
+      );
+    }
+    return Boolean(
+      geometry.rings?.some((ring: any) => Array.isArray(ring) && ring.length > 2)
+    );
+  };
+  const cacheRenderableGeometry = (geometry: any) => {
+    if (!isRenderableGeometry(geometry)) return false;
+    graphic.__lastRenderableGeometry = geometry.clone();
+    return true;
+  };
+
+  const originalGeometry = graphic.__originalGeometry;
+  const currentGeometry = graphic.geometry;
+  const originalRenderable = isRenderableGeometry(originalGeometry);
+  const currentRenderable = isRenderableGeometry(currentGeometry);
+  const backupRenderable = isRenderableGeometry(graphic.__lastRenderableGeometry);
+
+  if (!originalGeometry) {
+    if (currentRenderable) {
+      graphic.__originalGeometry = currentGeometry.clone();
+    } else if (backupRenderable) {
+      graphic.__originalGeometry = graphic.__lastRenderableGeometry.clone();
+      graphic.geometry = graphic.__originalGeometry.clone();
+    } else {
+      graphic.__originalGeometry = currentGeometry.clone();
+    }
+  } else if (!originalRenderable && currentRenderable) {
+    graphic.__originalGeometry = currentGeometry.clone();
+  } else if (!originalRenderable && backupRenderable) {
+    graphic.__originalGeometry = graphic.__lastRenderableGeometry.clone();
+    graphic.geometry = graphic.__originalGeometry.clone();
   }
+
+  cacheRenderableGeometry(graphic.__originalGeometry);
+  cacheRenderableGeometry(graphic.geometry);
   if (graphic.__densifiedGeometry) {
     delete graphic.__densifiedGeometry;
   }
@@ -7801,7 +8054,27 @@ function ensureGeometryCache(layerData: LayerData, graphic: any) {
 function refreshGeometryCache(layerData: LayerData, graphic: any) {
   if (!graphic?.geometry) return;
   if (layerData.type !== "polyline" && layerData.type !== "polygon") return;
-  graphic.__originalGeometry = graphic.geometry.clone();
+  const isRenderableGeometry = (geometry: any) => {
+    if (!geometry || typeof geometry !== "object") return false;
+    if (layerData.type === "polyline") {
+      return Boolean(
+        geometry.paths?.some((path: any) => Array.isArray(path) && path.length > 1)
+      );
+    }
+    return Boolean(
+      geometry.rings?.some((ring: any) => Array.isArray(ring) && ring.length > 2)
+    );
+  };
+  const currentGeometry = graphic.geometry;
+  if (isRenderableGeometry(currentGeometry)) {
+    graphic.__originalGeometry = currentGeometry.clone();
+    graphic.__lastRenderableGeometry = currentGeometry.clone();
+  } else if (isRenderableGeometry(graphic.__lastRenderableGeometry)) {
+    graphic.__originalGeometry = graphic.__lastRenderableGeometry.clone();
+    graphic.geometry = graphic.__originalGeometry.clone();
+  } else {
+    graphic.__originalGeometry = currentGeometry.clone();
+  }
   if (graphic.__densifiedGeometry) {
     delete graphic.__densifiedGeometry;
   }
@@ -7813,10 +8086,10 @@ function refreshGeometryCache(layerData: LayerData, graphic: any) {
 function handleSketchUpdate(event: any) {
   const state = event?.state as string | undefined;
   const tool = String(event?.tool || "");
+  const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
   if (state === "start" || state === "active") {
     isVertexEditing = tool === "reshape" || tool === "vertex" || tool === "vertex-edit";
     if (currentViewMode === "3d" && isVertexEditing) {
-      const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
       graphics.forEach((graphic: any) => {
         const layerData = graphicsLayers.find((entry) => entry.layer === graphic?.layer);
         if (!layerData || layerData.type !== "polyline") return;
@@ -7826,18 +8099,29 @@ function handleSketchUpdate(event: any) {
         }
       });
     }
+    if (currentViewMode === "3d") {
+      const hasTextGraphic = graphics.some((graphic: any) => {
+        const layerData = graphicsLayers.find((entry) => entry.layer === graphic?.layer);
+        return layerData?.type === "text";
+      });
+      if (hasTextGraphic) {
+        scheduleTextMeshOverlayRefresh();
+      }
+    }
     return;
   }
   if (state === "complete" || state === "cancel") {
     isVertexEditing = false;
   }
   if (state !== "complete") return;
-  const graphics = event.graphics ?? (event.graphic ? [event.graphic] : []);
   const touchedLayers = new Set<LayerData>();
   graphics.forEach((graphic: any) => {
-    graphic.geometry = toGeographicGeometry(graphic.geometry);
     const layerData = graphicsLayers.find((entry) => entry.layer === graphic.layer);
     if (!layerData) return;
+    graphic.geometry =
+      layerData.type === "text"
+        ? normalizeTextAnchorGeometry(graphic.geometry)
+        : toGeographicGeometry(graphic.geometry);
     refreshGeometryCache(layerData, graphic);
     touchedLayers.add(layerData);
   });
@@ -7845,6 +8129,7 @@ function handleSketchUpdate(event: any) {
     applyLayerModeProperties(layerData);
     if (layerData.type === "text") {
       applyTextSymbols(layerData);
+      scheduleTextMeshOverlayRefresh();
       return;
     }
     clearLayerOverlayLayers(layerData);
@@ -7900,7 +8185,6 @@ function setStyleSectionVisibility(
   const polygonZOffsetRow = document.getElementById("polygon-zoffset-row") as HTMLElement | null;
   const polygonExtrudeRow = document.getElementById("polygon-extrude-height-row") as HTMLElement | null;
   const polygonExtrudeNote = document.getElementById("polygon-extrude-note") as HTMLElement | null;
-  const polygonOutlineStyle = getEl("polygon-outline-style-row");
   const effectsSection = getEl("layer-effects-section");
 
   pointSection.style.display = type === "point" ? "block" : "none";
@@ -7908,10 +8192,11 @@ function setStyleSectionVisibility(
   polygonSection.style.display = type === "polygon" ? "block" : "none";
   effectsSection.style.display = showEffects ? "block" : "none";
 
-  pointAdvanced.style.display = type === "point" ? "block" : "none";
-  if (pointFollowTerrainRow) {
-    pointFollowTerrainRow.style.display = "none";
-  }
+    pointAdvanced.style.display = type === "point" ? "block" : "none";
+    if (pointFollowTerrainRow) {
+      pointFollowTerrainRow.style.display =
+        type === "point" && currentViewMode === "3d" && !showFeatureExtras ? "" : "none";
+    }
   if (lineFollowTerrainRow) {
     lineFollowTerrainRow.style.display =
       type === "polyline" && currentViewMode === "3d" && !showFeatureExtras ? "" : "none";
@@ -7925,7 +8210,7 @@ function setStyleSectionVisibility(
   if (polygonExtrudeNote) {
     polygonExtrudeNote.style.display = "none";
   }
-  polygonOutlineStyle.style.display = showFeatureExtras && type === "polygon" ? "block" : "none";
+  syncPolygonOutlineControlVisibility(type === "polygon", showFeatureExtras && type === "polygon");
   if (type === "point") {
     syncPointOrientationControlVisibility(getSelectedPointStyle());
     filterPointStyles();
@@ -8100,6 +8385,18 @@ function filterPointStyles() {
       return;
     }
     title.style.display = hasVisible ? "" : "none";
+  });
+}
+
+function filterPolygonFillStyles() {
+  const container = document.getElementById("polygon-fill-style-options");
+  if (!container) return;
+  const is3D = currentViewMode === "3d";
+  const buttons = Array.from(container.querySelectorAll(".style-option-btn")) as HTMLElement[];
+  buttons.forEach((button) => {
+    const value = String(button.dataset.value || "");
+    const is3DOption = Boolean(getPolygonWaterStyle3D(value));
+    button.style.display = is3D || !is3DOption ? "" : "none";
   });
 }
 
@@ -8333,6 +8630,7 @@ function setPolygonFillStyleSelection(value: string) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+  filterPolygonFillStyles();
   syncPolygonExtrusionControlVisibility(value);
 }
 
@@ -8932,22 +9230,26 @@ function applyTextSettings(
 
 function updateStylePanel() {
   if (selectedLayerIndex < 0) {
+    activeTextLayerIndex = null;
     attachStylePanelTo();
     attachTextPanelTo();
     return;
   }
   const layerData = graphicsLayers[selectedLayerIndex];
   if (isViewTrackLayer(layerData)) {
+    activeTextLayerIndex = null;
     attachStylePanelTo();
     attachTextPanelTo();
     return;
   }
   if (layerData.type === "text") {
+    activeTextLayerIndex = selectedLayerIndex;
     attachStylePanelTo();
     attachTextPanelTo(`style-settings-host-${selectedLayerIndex}`);
     syncTextPanelFromLayer(layerData);
     return;
   }
+  activeTextLayerIndex = null;
   attachTextPanelTo();
   attachStylePanelTo(`style-settings-host-${selectedLayerIndex}`);
   syncStylePanelFromLayer(layerData);
@@ -8955,6 +9257,7 @@ function updateStylePanel() {
 
 function updateAnimationOptions() {
   if (selectedLayerIndex < 0) {
+    activeTextLayerIndex = null;
     setAnimationPanelVisible(false);
     attachAnimationPanelTo();
     attachStylePanelTo();
@@ -8975,6 +9278,7 @@ function updateAnimationOptions() {
   const cameraStudioInlineSettings = document.getElementById("camera-layer-studio-settings");
 
   if (isViewTrackLayer(layerData)) {
+    activeTextLayerIndex = null;
     attachStylePanelTo();
     attachTextPanelTo();
     if (baseTypeSection) {
@@ -9238,6 +9542,8 @@ function addAnimation(typeOverride?: string) {
   const startInput = document.getElementById("animation-start-input") as any;
   const duration = durationInput ? Number(durationInput.value) || 1.2 : 1.2;
   let start = startInput ? Number(startInput.value) || 0 : currentTime;
+  const previousTimelineDuration = timelineController.getTimelineDuration();
+  const previousTimelineDurationOverride = timelineController.getTimelineDurationOverride();
 
   const layerData = graphicsLayers[selectedLayerIndex];
   if (layerData.type === "feature") {
@@ -9276,6 +9582,13 @@ function addAnimation(typeOverride?: string) {
     duration,
     start
   });
+
+  if (previousTimelineDurationOverride === null) {
+    const nextTimelineDuration = timelineController.getTimelineDuration();
+    if (previousTimelineDuration > nextTimelineDuration) {
+      timelineController.setTimelineDurationOverride(previousTimelineDuration);
+    }
+  }
 
   updateAnimationsList();
   updateTimeline();
@@ -9319,9 +9632,7 @@ function resetAnimationGeometryCaches() {
     if (layerData.type !== "polyline" && layerData.type !== "polygon") return;
     layerData.layer.graphics.forEach((graphic: any) => {
       if (!graphic?.geometry) return;
-      if (!graphic.__originalGeometry) {
-        graphic.__originalGeometry = graphic.geometry.clone();
-      }
+      ensureGeometryCache(layerData, graphic);
       graphic.geometry = graphic.__originalGeometry.clone();
       if (graphic.__densifiedGeometry) {
         delete graphic.__densifiedGeometry;
@@ -9337,6 +9648,7 @@ function restoreLayerGeometry(layerData: LayerData) {
   if (layerData.type !== "polyline" && layerData.type !== "polygon") return;
   layerData.layer.graphics.forEach((graphic: any) => {
     if (!graphic?.geometry) return;
+    ensureGeometryCache(layerData, graphic);
     if (graphic.__originalGeometry) {
       graphic.geometry = graphic.__originalGeometry.clone();
     }
