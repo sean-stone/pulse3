@@ -14,6 +14,7 @@ type FeatureLayerConfig = {
   isValidFeatureLayerUrl: (value: string) => boolean;
   setFeatureLayerError: (message: string | null) => void;
   sanitizePlainText: (value: string, fallback: string) => string;
+  createLayerId: (prefix?: string) => string;
   createPlaceholderAnimation: () => any;
   getFeatureLayerFields: (layer: FeatureLayer) => Array<{ name: string; type: string }>;
   updateFeatureFieldStats: (layerData: LayerData) => Promise<boolean>;
@@ -53,7 +54,7 @@ const handleAddFeatureLayer = async (state: FeatureLayerState, config: FeatureLa
   try {
     let layer: FeatureLayer;
     try {
-      layer = new FeatureLayer({ url });
+      layer = new FeatureLayer({ url, id: config.createLayerId("feature") });
       await layer.load();
     } catch (error) {
       config.setFeatureLayerError("Unable to load FeatureLayer. Please check the URL.");

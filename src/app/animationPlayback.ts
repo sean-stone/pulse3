@@ -45,10 +45,12 @@ import {
 import { defaultLineStyle, defaultPolygonStyle, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "./constants";
 import {
   getPointOrientationAngle,
+  getPointOrientationHeading,
   mergePointSymbolOrientations,
   readPointKeyframeOrientation,
   readPointStyleOrientation
 } from "./pointOrientation";
+import type { PointSymbolOrientation } from "./pointOrientation";
 import { getInactiveRevealGeometryMode } from "./revealTiming";
 import { isMeshTextRenderMode, syncTextMeshOverlay } from "./textMesh";
 
@@ -61,6 +63,17 @@ type AnimationPlaybackConfig = {
   applyFeatureLayerAnimation: (layerData: LayerData, time: number) => void;
   isPlaying: () => boolean;
   isScrubbingTimeline: () => boolean;
+};
+
+type FollowPathState = {
+  animation: LayerAnimation;
+  geometry: Point;
+  orientation: Partial<PointSymbolOrientation> | null;
+  visible: boolean;
+};
+
+type FollowPathAnimation = LayerAnimation & {
+  pathLayerId: string;
 };
 
 let geodeticOperatorsLoadPromise: Promise<void> | null = null;
@@ -586,6 +599,35 @@ const sampleMarchPoint = (segments: MarchSegment[], distance: number) => {
   return null;
 };
 
+const getSmoothedMarchAngle = (
+  segments: MarchSegment[],
+  total: number,
+  distance: number,
+  fallbackAngle: number
+) => {
+  if (!Number.isFinite(total) || total <= 0) {
+    return fallbackAngle;
+  }
+  const smoothWindow = Math.min(total * 0.125, Math.max(total * 0.025, 0.000001));
+  const behindDistance = Math.max(0, distance - smoothWindow);
+  const aheadDistance = Math.min(total, distance + smoothWindow);
+  if (aheadDistance <= behindDistance) {
+    return fallbackAngle;
+  }
+  const behindSample = sampleMarchPoint(segments, behindDistance);
+  const aheadSample = sampleMarchPoint(segments, aheadDistance);
+  if (!behindSample || !aheadSample) {
+    return fallbackAngle;
+  }
+  const dx = aheadSample.x - behindSample.x;
+  const dy = aheadSample.y - behindSample.y;
+  if (Math.hypot(dx, dy) <= 0.000001) {
+    return fallbackAngle;
+  }
+  const heading = Math.atan2(dy, dx);
+  return 90 - heading * (180 / Math.PI);
+};
+
 const toPathCoord = (x: number, y: number, z?: number) =>
   Number.isFinite(Number(z)) ? [x, y, Number(z)] : [x, y];
 
@@ -864,7 +906,8 @@ const densifyPolyline = (polyline: Polyline) => {
   if (totalLength <= 0) {
     return polyline.clone();
   }
-  const maxSegmentLength = Math.max(totalLength / 400, totalLength / 2000, 0.00001);
+  // SceneView is more reliable with denser animated long lines, especially while zoomed far out.
+  const maxSegmentLength = Math.max(totalLength / 1200, totalLength / 6000, 0.00001);
   const densified = (isGeographic
     ? geodeticDensifyOperator.execute(polyline, maxSegmentLength)
     : densifyOperator.execute(polyline, maxSegmentLength)) as Polyline | null | undefined;
@@ -874,10 +917,148 @@ const densifyPolyline = (polyline: Polyline) => {
   return densified;
 };
 
+const normalizeAngleDegrees = (value: number) => {
+  let next = value % 360;
+  if (next < 0) {
+    next += 360;
+  }
+  return next;
+};
+
+const getLayerGraphicsArray = (layer: any) => {
+  const graphics = layer?.graphics;
+  if (Array.isArray(graphics)) {
+    return graphics;
+  }
+  if (graphics && typeof graphics.toArray === "function") {
+    try {
+      return graphics.toArray();
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const getFollowPathStateAtTime = (
+  graphicsLayers: LayerData[],
+  layerData: LayerData,
+  time: number,
+  defaultPointStyle: PointStyle
+): FollowPathState | null => {
+  if (layerData.type !== "point") {
+    return null;
+  }
+
+  const followAnimations = layerData.animations.filter(
+    (anim): anim is FollowPathAnimation =>
+      anim.type === "followPath" && typeof anim.pathLayerId === "string" && anim.pathLayerId.trim() !== ""
+  );
+  if (!followAnimations.length) {
+    return null;
+  }
+
+  let activeAnim: FollowPathAnimation | null = null;
+  let latestEndedAnim: FollowPathAnimation | null = null;
+  let earliestUpcomingAnim: FollowPathAnimation | null = null;
+  let latestEndedTime = Number.NEGATIVE_INFINITY;
+  let earliestUpcomingTime = Number.POSITIVE_INFINITY;
+
+  for (const anim of followAnimations) {
+    const end = anim.start + anim.duration;
+    if (time >= anim.start && time <= end) {
+      activeAnim = anim;
+      continue;
+    }
+    if (end <= time && end > latestEndedTime) {
+      latestEndedTime = end;
+      latestEndedAnim = anim;
+    }
+    if (anim.start > time && anim.start < earliestUpcomingTime) {
+      earliestUpcomingTime = anim.start;
+      earliestUpcomingAnim = anim;
+    }
+  }
+
+  const animation: FollowPathAnimation | null = activeAnim ?? latestEndedAnim ?? earliestUpcomingAnim;
+  if (!animation) {
+    return null;
+  }
+
+  const pathLayerId = animation.pathLayerId.trim();
+  if (!pathLayerId) {
+    return null;
+  }
+
+  const sourceLayer = graphicsLayers.find(
+    (candidate) => candidate.type === "polyline" && String(candidate.layer?.id || "").trim() === pathLayerId
+  );
+  if (!sourceLayer) {
+    return null;
+  }
+
+  const sourceGraphic = getLayerGraphicsArray(sourceLayer.layer).find((graphic: any) =>
+    hasRenderablePolylinePath(getStablePolylineEffectGeometry(graphic))
+  );
+  if (!sourceGraphic) {
+    return null;
+  }
+
+  const sourceGeometry = getStablePolylineEffectGeometry(sourceGraphic);
+  if (!sourceGeometry) {
+    return null;
+  }
+  const densifiedGeometry = sourceGraphic.__densifiedGeometry ?? densifyPolyline(sourceGeometry);
+  sourceGraphic.__densifiedGeometry = densifiedGeometry;
+  const { segments, total } = buildMarchSegments(densifiedGeometry);
+  if (!segments.length || total <= 0) {
+    return null;
+  }
+
+  const rawProgress =
+    animation.duration > 0
+      ? clamp((time - animation.start) / animation.duration, 0, 1)
+      : time >= animation.start
+        ? 1
+        : 0;
+  const travelProgress = animation.reverse ? 1 - rawProgress : rawProgress;
+  const travelDistance = total * travelProgress;
+  const sample = sampleMarchPoint(segments, travelDistance);
+  if (!sample) {
+    return null;
+  }
+
+  const styleOrientation = readPointStyleOrientation(layerData.pointStyle ?? defaultPointStyle);
+  const styleAngleOffset = getPointOrientationAngle(styleOrientation) ?? 0;
+  const styleHeadingOffset = getPointOrientationHeading(styleOrientation) ?? styleAngleOffset;
+  const baseTravelAngle =
+    animation.smoothFollow !== false
+      ? getSmoothedMarchAngle(segments, total, travelDistance, sample.angle)
+      : sample.angle;
+  const travelAngle = normalizeAngleDegrees(baseTravelAngle + (animation.reverse ? 180 : 0));
+  const orientation =
+    animation.orientToPath === false
+      ? styleOrientation
+      : {
+          ...styleOrientation,
+          angle: normalizeAngleDegrees(travelAngle + styleAngleOffset),
+          heading: normalizeAngleDegrees(travelAngle + styleHeadingOffset)
+        };
+
+  return {
+    animation,
+    geometry: buildPointGeometry(sample.x, sample.y, densifiedGeometry.spatialReference, sample.z),
+    orientation,
+    visible: Boolean(activeAnim || latestEndedAnim)
+  };
+};
+
 const buildPartialPolyline = (polyline: Polyline, progress: number, reverse: boolean) => {
   const resultPaths = buildPartialPaths(polyline.paths, progress, reverse);
   return new Polyline({
     spatialReference: polyline.spatialReference,
+    hasZ: Boolean((polyline as any).hasZ),
+    hasM: Boolean((polyline as any).hasM),
     paths: resultPaths
   });
 };
@@ -897,10 +1078,19 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     const hasRealAnimations = layerData.animations?.some((anim) => anim.type !== "__placeholder__") ?? false;
     const hasLayerPointKeyframes = config.hasPointKeyframes(layerData);
     const pointKeyframe = hasLayerPointKeyframes ? config.getPointKeyframeAtTime(layerData, time) : null;
+    const followPathState =
+      layerData.type === "point"
+        ? getFollowPathStateAtTime(config.getGraphicsLayers(), layerData, time, config.defaultPointStyle)
+        : null;
+    const pointStyleOrientation =
+      layerData.type === "point"
+        ? readPointStyleOrientation(layerData.pointStyle ?? config.defaultPointStyle)
+        : null;
     const basePointOrientation =
       layerData.type === "point"
-        ? mergePointSymbolOrientations(
-            readPointStyleOrientation(layerData.pointStyle ?? config.defaultPointStyle),
+        ? followPathState?.orientation ??
+          mergePointSymbolOrientations(
+            pointStyleOrientation,
             readPointKeyframeOrientation(pointKeyframe)
           )
         : null;
@@ -950,12 +1140,18 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           applyTextSymbolState(graphic, layerData, baseText, baseSize, 1, useExplicit3DTextOpacity);
         });
         syncTextMeshOverlay(layerData, view);
+        }
+        if (pointKeyframe) {
+          applyPointKeyframes(layerData, pointKeyframe);
+        }
+        if (followPathState) {
+          layerData.layer.graphics.forEach((graphic: any) => {
+            if (!graphic?.geometry) return;
+            graphic.geometry = followPathState.geometry.clone();
+          });
+        }
+        return;
       }
-      if (pointKeyframe) {
-        applyPointKeyframes(layerData, pointKeyframe);
-      }
-      return;
-    }
     let layerVisible = false;
     let opacity = 1;
     let baseLayerOpacity = 1;
@@ -1220,6 +1416,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           case "drawReverse":
             opacity = 1;
             break;
+          case "followPath":
+            opacity = 1;
+            break;
           case "fill":
             opacity = 1;
             break;
@@ -1337,7 +1536,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     if (hasFillAnimation) {
       updatePolygonFill(layerData, activeFillAnimation, time, minFillStart, minAnimationStart);
     }
-    if (pointKeyframe) {
+    if (followPathState) {
+      layerData.layer.graphics.forEach((graphic: any) => {
+        if (!graphic?.geometry) return;
+        graphic.geometry = followPathState.geometry.clone();
+      });
+    } else if (pointKeyframe) {
       applyPointKeyframes(layerData, pointKeyframe);
     }
     if (jitterProgress === null) {
@@ -4067,4 +4271,4 @@ const applyPointKeyframes = (layerData: LayerData, frame: PointKeyframe | null) 
   });
 };
 
-export { applyAnimationsAtTime };
+export { applyAnimationsAtTime, getFollowPathStateAtTime };

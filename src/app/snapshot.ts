@@ -131,6 +131,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
 
   const viewTrackLayer = config.graphicsLayers.find((layerData) => layerData.isViewTrack);
   const savableLayers = config.graphicsLayers.filter((layerData) => !layerData.isViewTrack);
+  const layerIds = new Map<LayerData, string>();
   const viewTrackKeyframes =
     viewTrackLayer?.pointKeyframes?.map((frame) => {
       const easing: PointKeyframe["easing"] =
@@ -163,50 +164,55 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
       };
     }) ?? [];
 
-  const layers: ProjectLayerSnapshot[] = savableLayers.map((layerData, index) => ({
-    id: `layer-${index}`,
-    name: layerData.name,
-    type: layerData.type,
-    animations: layerData.animations.map((anim) => ({ ...anim })),
-    pointKeyframes: layerData.pointKeyframes?.map((frame) => ({ ...frame })),
-    pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
-    pointFollowTerrain3D: layerData.pointFollowTerrain3D,
-    lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
-    lineFollowTerrain3D: layerData.lineFollowTerrain3D,
-    polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
-    polygonZOffset: layerData.polygonZOffset,
-    textContent: layerData.textContent,
-    textSize: layerData.textSize,
-    textColor: layerData.textColor,
-    textFontFamily: layerData.textFontFamily,
-    textItalic: layerData.textItalic,
-    textUnderline: layerData.textUnderline,
-    textRenderMode: layerData.textRenderMode,
-    textCalloutLine: layerData.textCalloutLine,
-    textDepth: layerData.textDepth,
-    textFixedToWorld: layerData.textFixedToWorld,
-    textWorldHeight: layerData.textWorldHeight,
-    textWorldRotation: layerData.textWorldRotation,
-    featureLayerUrl: layerData.featureLayerUrl,
-    featureFields: layerData.featureFields?.map((field) => ({ ...field })),
-    featureField: layerData.featureField,
-    featureFieldType: layerData.featureFieldType,
-    featureFieldStats: layerData.featureFieldStats ? { ...layerData.featureFieldStats } : undefined,
-    featureVisualVariable: layerData.featureVisualVariable,
-    featureHideNulls: layerData.featureHideNulls,
-    featureKeepVisible: layerData.featureKeepVisible,
-    customAttribution: layerData.customAttribution,
-    layerBlendMode: layerData.layerBlendMode,
-    layerEffectSettings: layerData.layerEffectSettings
-      ? { ...layerData.layerEffectSettings }
-      : undefined,
-    layerEffectsEnabled: layerData.layerEffectsEnabled
-  }));
+  const layers: ProjectLayerSnapshot[] = savableLayers.map((layerData, index) => {
+    const runtimeId = String(layerData.layer?.id || "").trim();
+    const layerId = runtimeId || `layer-${index}`;
+    layerIds.set(layerData, layerId);
+    return {
+      id: layerId,
+      name: layerData.name,
+      type: layerData.type,
+      animations: layerData.animations.map((anim) => ({ ...anim })),
+      pointKeyframes: layerData.pointKeyframes?.map((frame) => ({ ...frame })),
+      pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
+      pointFollowTerrain3D: layerData.pointFollowTerrain3D,
+      lineStyle: layerData.lineStyle ? { ...layerData.lineStyle } : undefined,
+      lineFollowTerrain3D: layerData.lineFollowTerrain3D,
+      polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
+      polygonZOffset: layerData.polygonZOffset,
+      textContent: layerData.textContent,
+      textSize: layerData.textSize,
+      textColor: layerData.textColor,
+      textFontFamily: layerData.textFontFamily,
+      textItalic: layerData.textItalic,
+      textUnderline: layerData.textUnderline,
+      textRenderMode: layerData.textRenderMode,
+      textCalloutLine: layerData.textCalloutLine,
+      textDepth: layerData.textDepth,
+      textFixedToWorld: layerData.textFixedToWorld,
+      textWorldHeight: layerData.textWorldHeight,
+      textWorldRotation: layerData.textWorldRotation,
+      featureLayerUrl: layerData.featureLayerUrl,
+      featureFields: layerData.featureFields?.map((field) => ({ ...field })),
+      featureField: layerData.featureField,
+      featureFieldType: layerData.featureFieldType,
+      featureFieldStats: layerData.featureFieldStats ? { ...layerData.featureFieldStats } : undefined,
+      featureVisualVariable: layerData.featureVisualVariable,
+      featureHideNulls: layerData.featureHideNulls,
+      featureKeepVisible: layerData.featureKeepVisible,
+      customAttribution: layerData.customAttribution,
+      layerBlendMode: layerData.layerBlendMode,
+      layerEffectSettings: layerData.layerEffectSettings
+        ? { ...layerData.layerEffectSettings }
+        : undefined,
+      layerEffectsEnabled: layerData.layerEffectsEnabled
+    };
+  });
 
   const features: ProjectSnapshot["features"] = [];
   savableLayers.forEach((layerData, index) => {
     if (layerData.type === "feature") return;
-    const layerId = `layer-${index}`;
+    const layerId = layerIds.get(layerData) || `layer-${index}`;
     layerData.layer.graphics.forEach((graphic: any) => {
       config.ensureGeometryCache(layerData, graphic);
       const sourceGeometry =
@@ -448,7 +454,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         if (!layerSnapshot.featureLayerUrl) continue;
         let featureLayer: FeatureLayer;
         try {
-          featureLayer = new FeatureLayer({ url: layerSnapshot.featureLayerUrl });
+          featureLayer = new FeatureLayer({ url: layerSnapshot.featureLayerUrl, id: layerSnapshot.id });
           await featureLayer.load();
         } catch (error) {
           console.warn("Unable to load FeatureLayer from project.", error);
@@ -533,6 +539,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
       }
 
       const newLayer = new GraphicsLayer({
+        id: layerSnapshot.id,
         title: config.sanitizePlainText(layerSnapshot.name, "Layer")
       });
       config.view.map.add(newLayer);

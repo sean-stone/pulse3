@@ -334,7 +334,7 @@ import type { FeatureLayerConfig, FeatureLayerState } from "./app/featureLayerAd
 import { queueHistorySnapshot, redoHistory, resetHistory, undoHistory } from "./app/history";
 import type { HistoryConfig, HistoryState } from "./app/history";
 import { importCsv as importCsvFromState, importGeoJson as importGeoJsonFromState } from "./app/importers";
-import type { ImportConfig } from "./app/importers";
+import type { GeoJsonImportChoiceRequest, GeoJsonImportMode, ImportConfig } from "./app/importers";
 import { setupResponsiveLayout } from "./app/layout";
 import { createLoadingOverlayController } from "./app/loading";
 import { createPlaybackController } from "./app/playback";
@@ -365,6 +365,7 @@ import { zoomToLayer as zoomToLayerFromState, zoomToLayers as zoomToLayersFromSt
 import type { ZoomConfig } from "./app/zoom";
 import { getEl } from "./dom";
 import type {
+  LayerAnimation,
   LayerData,
   LayerEffectSettings,
   LayerType,
@@ -438,6 +439,7 @@ let preExportViewpoint: any | null = null;
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoaded = false;
 let pendingImportType: "geojson" | "csv" | null = null;
+let geoJsonImportModeResolve: ((choice: GeoJsonImportMode | null) => void) | null = null;
 let lastPointSizeInput = DEFAULT_PIN_SIZE;
 let projectStatusTimer: number | null = null;
 let mapContextMenuEl: HTMLElement | null = null;
@@ -503,6 +505,7 @@ const GOOGLE_3D_TILES_ROOT_URL = "https://tile.googleapis.com/v1/3dtiles/root.js
 const GOOGLE_3D_TILES_BETA_NOTICE =
   "Using Google tiles at your own risk - currently in BETA and you need to attribute Google 3D tiles if you export/share the video.";
 const VIEW_TRACK_LAYER_ID = "pulse-view-track";
+let layerRuntimeIdCounter = 1;
 type SceneQualityProfile = "low" | "medium" | "high";
 type SceneAtmosphereQuality = "low" | "high";
 
@@ -973,7 +976,8 @@ const importConfig: ImportConfig = {
   createImportedLayer,
   zoomToLayers: (layers) => zoomToLayersRef(layers),
   applyProjectSnapshot,
-  setProjectError
+  setProjectError,
+  chooseGeoJsonImportMode: chooseGeoJsonImportModeFromUser
 };
 const animationPlaybackConfig = {
   getView: () => view,
@@ -1002,13 +1006,14 @@ const featureLayerState: FeatureLayerState = {
     return graphicsLayers.length - 1;
   }
 };
-const featureLayerConfig: FeatureLayerConfig = {
-  getEl,
-  isValidFeatureLayerUrl,
-  setFeatureLayerError,
-  sanitizePlainText,
-  createPlaceholderAnimation,
-  getFeatureLayerFields,
+  const featureLayerConfig: FeatureLayerConfig = {
+    getEl,
+    isValidFeatureLayerUrl,
+    setFeatureLayerError,
+    sanitizePlainText,
+    createLayerId: createLayerRuntimeId,
+    createPlaceholderAnimation,
+    getFeatureLayerFields,
   updateFeatureFieldStats,
   applyFeatureLayerDefinition,
   applyFeatureLayerAnimation,
@@ -3026,9 +3031,12 @@ function applyLayerModeProperties(layerData: LayerData) {
       layerData.lineFollowTerrain3D !== undefined
         ? layerData.lineFollowTerrain3D
         : layerData.type !== "polyline";
+    const lineWidth = Math.max(1, Number(layerData.lineStyle?.width) || defaultLineStyle.width);
+    // Keep relative 3D lines slightly above terrain so animated geometry updates remain visible at wide zooms.
+    const relativeGroundOffset = Math.max(2, lineWidth * 1.5);
     layerAny.elevationInfo = shouldFollowTerrain
       ? { mode: "on-the-ground" }
-      : { mode: "relative-to-ground", offset: 1 };
+      : { mode: "relative-to-ground", offset: relativeGroundOffset };
     return;
   }
     if (geometryType === "point" || geometryType === "multipoint") {
@@ -5422,6 +5430,17 @@ function isViewTrackLayer(layerData: LayerData | null | undefined) {
   return Boolean(layerData?.isViewTrack);
 }
 
+function createLayerRuntimeId(prefix = "layer") {
+  const safePrefix = sanitizePlainText(prefix, "layer").toLowerCase().replace(/\s+/g, "-");
+  const uniquePart = `${Date.now().toString(36)}-${layerRuntimeIdCounter++}`;
+  return `pulse-${safePrefix}-${uniquePart}`;
+}
+
+function getLayerRuntimeId(layerData: LayerData | null | undefined) {
+  const id = String(layerData?.layer?.id || "").trim();
+  return id || null;
+}
+
 function getViewTrackLayerName(mode: ViewMode = currentViewMode) {
   return mode === "3d" ? "Camera" : "View";
 }
@@ -6187,6 +6206,19 @@ function setupEventListeners() {
     "calciteSwitchChange",
     handleFeatureFadeOutChange as EventListener
   );
+  getEl("follow-path-layer-select").addEventListener("calciteSelectChange", handleFollowPathLayerChange as EventListener);
+  getEl("follow-path-orient-toggle").addEventListener(
+    "calciteSwitchChange",
+    handleFollowPathOrientChange as EventListener
+  );
+  getEl("follow-path-smooth-toggle").addEventListener(
+    "calciteSwitchChange",
+    handleFollowPathSmoothChange as EventListener
+  );
+  getEl("follow-path-reverse-toggle").addEventListener(
+    "calciteSwitchChange",
+    handleFollowPathReverseChange as EventListener
+  );
   getEl("feature-style-btn").addEventListener("click", () => {
     openStyleModal();
   });
@@ -6572,6 +6604,7 @@ function setupEventListeners() {
   });
 
   bindConfirmDialogListeners();
+  bindGeoJsonImportModeDialogListeners();
 }
 
 function handleLayoutChange(event: Event) {
@@ -6740,7 +6773,7 @@ function handleImportFileChange(event: Event) {
   reader.onload = () => {
     const text = String(reader.result || "");
     if (importType === "geojson") {
-      importGeoJsonFromState(importConfig, file.name, text);
+      void importGeoJsonFromState(importConfig, file.name, text);
     } else {
       importCsvFromState(importConfig, file.name, text);
     }
@@ -7007,10 +7040,141 @@ function handleFeatureFadeOutChange(event: Event) {
   scheduleProjectSave();
 }
 
+function getFollowPathAnimation(layerData: LayerData | null | undefined) {
+  if (!layerData) return null;
+  return (
+    layerData.animations.find(
+      (anim) => anim.type === "followPath" && !isPlaceholderAnimation(anim)
+    ) ?? null
+  );
+}
+
+function getEligibleFollowPathLayers(layerData?: LayerData | null) {
+  return graphicsLayers.filter((candidate) => {
+    if (candidate === layerData) return false;
+    if (isViewTrackLayer(candidate)) return false;
+    if (candidate.type !== "polyline") return false;
+    return Boolean(getLayerRuntimeId(candidate));
+  });
+}
+
+function syncFollowPathAnimationSettings(layerData?: LayerData | null) {
+  const section = document.getElementById("follow-path-animation-settings");
+  if (!section) return;
+
+  if (!layerData || layerData.type !== "point" || isViewTrackLayer(layerData)) {
+    section.style.display = "none";
+    return;
+  }
+
+  const select = getEl("follow-path-layer-select") as any;
+  const orientToggle = getEl("follow-path-orient-toggle") as any;
+  const smoothToggle = getEl("follow-path-smooth-toggle") as any;
+  const reverseToggle = getEl("follow-path-reverse-toggle") as any;
+  const help = document.getElementById("follow-path-help");
+  const followPathAnim = getFollowPathAnimation(layerData);
+  if (!followPathAnim) {
+    section.style.display = "none";
+    return;
+  }
+  const eligibleLayers = getEligibleFollowPathLayers(layerData);
+  const currentPathId = String(followPathAnim?.pathLayerId || "").trim();
+  const hasMissingSelection = Boolean(
+    currentPathId && !eligibleLayers.some((candidate) => getLayerRuntimeId(candidate) === currentPathId)
+  );
+
+  if (!eligibleLayers.length && !currentPathId) {
+    section.style.display = "none";
+    return;
+  }
+
+  section.style.display = "block";
+  select.innerHTML = "";
+
+  eligibleLayers.forEach((candidate) => {
+    const option = document.createElement("calcite-option");
+    option.value = getLayerRuntimeId(candidate) || "";
+    option.textContent = candidate.name;
+    select.appendChild(option);
+  });
+
+  if (hasMissingSelection) {
+    const missingOption = document.createElement("calcite-option");
+    missingOption.value = currentPathId;
+    missingOption.textContent = "Missing path layer";
+    select.appendChild(missingOption);
+  }
+
+  if (currentPathId) {
+    select.value = currentPathId;
+  } else if (eligibleLayers.length) {
+    select.value = getLayerRuntimeId(eligibleLayers[0]) || "";
+  } else {
+    select.value = "";
+  }
+
+  orientToggle.checked = followPathAnim?.orientToPath !== false;
+  smoothToggle.checked = followPathAnim?.smoothFollow !== false;
+  reverseToggle.checked = Boolean(followPathAnim?.reverse);
+
+  if (help) {
+    if (followPathAnim && hasMissingSelection) {
+      help.textContent = "The selected path layer is missing. Choose another polyline layer to repair this animation.";
+    } else if (followPathAnim) {
+      help.textContent = "Use the timeline to sync this point with the line draw animation.";
+    }
+  }
+}
+
+function updateFollowPathAnimationSetting(
+  mutate: (anim: NonNullable<ReturnType<typeof getFollowPathAnimation>>) => void
+) {
+  if (selectedLayerIndex < 0) return;
+  const layerData = graphicsLayers[selectedLayerIndex];
+  if (!layerData || layerData.type !== "point") return;
+  const anim = getFollowPathAnimation(layerData);
+  if (!anim) return;
+  mutate(anim);
+  updateAnimationsList();
+  updateTimeline();
+  scheduleProjectSave();
+}
+
+function handleFollowPathLayerChange() {
+  const select = getEl("follow-path-layer-select") as any;
+  const nextPathId = String(select.value || "").trim();
+  if (!nextPathId) return;
+  updateFollowPathAnimationSetting((anim) => {
+    anim.pathLayerId = nextPathId;
+  });
+}
+
+function handleFollowPathOrientChange(event: Event) {
+  const target = event.target as any;
+  updateFollowPathAnimationSetting((anim) => {
+    anim.orientToPath = Boolean(target?.checked);
+  });
+}
+
+function handleFollowPathSmoothChange(event: Event) {
+  const target = event.target as any;
+  updateFollowPathAnimationSetting((anim) => {
+    anim.smoothFollow = Boolean(target?.checked);
+  });
+}
+
+function handleFollowPathReverseChange(event: Event) {
+  const target = event.target as any;
+  updateFollowPathAnimationSetting((anim) => {
+    anim.reverse = Boolean(target?.checked);
+  });
+}
+
 function createImportedLayer(type: LayerType, name: string, graphics: Graphic[]): LayerData | null {
   if (!view) return null;
   const safeName = sanitizePlainText(name, `${type.charAt(0).toUpperCase() + type.slice(1)} Layer`);
   const newLayer = new GraphicsLayer({
+    id: createLayerRuntimeId(type),
     title: safeName
   });
   graphics.forEach((graphic) => newLayer.add(graphic));
@@ -7144,6 +7308,7 @@ async function startDrawing(type: LayerType) {
   const userLayerCount = graphicsLayers.filter((layerData) => !isViewTrackLayer(layerData)).length;
   const layerName = `${type.charAt(0).toUpperCase() + type.slice(1)} ${userLayerCount + 1}`;
   const newLayer = new GraphicsLayer({
+    id: createLayerRuntimeId(type),
     title: layerName
   });
   const layerIndex = graphicsLayers.length;
@@ -7536,7 +7701,7 @@ async function duplicateLayer(index: number) {
     }
     let featureLayer: FeatureLayer;
     try {
-      featureLayer = new FeatureLayer({ url: layerData.featureLayerUrl });
+      featureLayer = new FeatureLayer({ url: layerData.featureLayerUrl, id: createLayerRuntimeId("feature") });
       await featureLayer.load();
     } catch (error) {
       console.warn("Unable to duplicate FeatureLayer.", error);
@@ -7582,7 +7747,7 @@ async function duplicateLayer(index: number) {
     return;
   }
 
-  const newLayer = new GraphicsLayer({ title: nextName });
+  const newLayer = new GraphicsLayer({ id: createLayerRuntimeId(layerData.type), title: nextName });
   layerData.layer.graphics.forEach((graphic: any) => {
     const clone = typeof graphic.clone === "function" ? graphic.clone() : new Graphic({ geometry: graphic.geometry });
     if (graphic.attributes) {
@@ -7770,7 +7935,7 @@ function syncPointOrientationControlVisibility(styleValue?: string | null) {
     note.style.display = is3D && !usesObjectLayer ? "" : "none";
   }
   if (pointStylePickerSection) {
-    pointStylePickerSection.style.display = useCompactModelControls ? "none" : "";
+    pointStylePickerSection.style.display = "";
   }
   if (pointOutlineWidthRow) {
     pointOutlineWidthRow.style.display = useCompactModelControls ? "none" : "";
@@ -9362,6 +9527,7 @@ function updatePointAnimationPreview(color: string, outlineColor: string, style:
     ) as HTMLElement[];
     previews.forEach((preview) => {
       const usesPointStyle =
+        !preview.classList.contains("animation-type-preview--followPath") &&
         !preview.classList.contains("animation-type-preview--dartHit") &&
         !preview.classList.contains("animation-type-preview--fireworks") &&
         !preview.classList.contains("animation-type-preview--crossetteShell") &&
@@ -9965,6 +10131,7 @@ function updateAnimationOptions() {
   const baseTypeSection = document.getElementById("animation-type-base-section");
   const webglSection = document.getElementById("webgl-animation-section");
   const featureSettings = document.getElementById("feature-animation-settings");
+  const followPathSettings = document.getElementById("follow-path-animation-settings");
   const cameraSettings = document.getElementById("camera-animation-settings");
   const cameraStudioInlineSettings = document.getElementById("camera-layer-studio-settings");
 
@@ -9980,6 +10147,9 @@ function updateAnimationOptions() {
     }
     if (featureSettings) {
       featureSettings.style.display = "none";
+    }
+    if (followPathSettings) {
+      followPathSettings.style.display = "none";
     }
     if (cameraSettings) {
       cameraSettings.style.display = "block";
@@ -10000,6 +10170,9 @@ function updateAnimationOptions() {
   if (cameraSettings) {
     cameraSettings.style.display = "none";
   }
+  if (followPathSettings) {
+    followPathSettings.style.display = "none";
+  }
   if (baseTypeSection) {
     baseTypeSection.style.display = "block";
   }
@@ -10013,6 +10186,11 @@ function updateAnimationOptions() {
   webglOptionsContainer.innerHTML = "";
 
   const types = (animationTypes[layerData.type] || animationTypes.point).filter((type) => {
+    if (type.value === "followPath") {
+      return layerData.type === "point" &&
+        !getFollowPathAnimation(layerData) &&
+        getEligibleFollowPathLayers(layerData).length > 0;
+    }
     if (type.value !== "extrude") return true;
     return (
       currentViewMode === "3d" &&
@@ -10113,6 +10291,8 @@ function updateAnimationOptions() {
     featureSettings.style.display = "none";
   }
 
+  syncFollowPathAnimationSettings(layerData);
+
   updateAnimationsList();
 }
 
@@ -10189,6 +10369,16 @@ function attachTextPanelTo(hostId?: string) {
   host.appendChild(panel);
 }
 
+function getAnimationDisplayLabel(layerData: LayerData, anim: LayerAnimation) {
+  const options = animationTypes[layerData.type] || animationTypes.point;
+  const baseLabel = options.find((option) => option.value === anim.type)?.label || anim.type;
+  if (anim.type !== "followPath") {
+    return baseLabel;
+  }
+  const sourceLayer = graphicsLayers.find((candidate) => getLayerRuntimeId(candidate) === anim.pathLayerId);
+  return sourceLayer ? `${baseLabel} -> ${sourceLayer.name}` : `${baseLabel} -> Missing path`;
+}
+
 function updateAnimationsList() {
   const listDiv = document.getElementById("current-animations-list");
   const container = document.getElementById("animations-container");
@@ -10216,7 +10406,7 @@ function updateAnimationsList() {
     const item = document.createElement("div");
     item.className = "animation-item";
     item.innerHTML = `
-      <span>${anim.type} (${anim.start}s - ${(anim.start + anim.duration).toFixed(1)}s)</span>
+      <span>${getAnimationDisplayLabel(layerData, anim)} (${anim.start}s - ${(anim.start + anim.duration).toFixed(1)}s)</span>
       <span class="animation-item-remove" data-index="${index}">x</span>
     `;
     item
@@ -10260,6 +10450,42 @@ function addAnimation(typeOverride?: string) {
   }
 
   layerData.animations = layerData.animations.filter((anim) => !isPlaceholderAnimation(anim));
+  if (type === "followPath") {
+    const existingFollowPath = getFollowPathAnimation(layerData);
+    const eligiblePathIds = getEligibleFollowPathLayers(layerData)
+      .map((candidate) => getLayerRuntimeId(candidate))
+      .filter((id): id is string => Boolean(id));
+    const selectedPathLayerId = String((getEl("follow-path-layer-select") as any)?.value || "").trim();
+    const pathLayerId = existingFollowPath
+      ? selectedPathLayerId
+      : eligiblePathIds.includes(selectedPathLayerId)
+        ? selectedPathLayerId
+        : (eligiblePathIds[0] ?? "");
+    if (!pathLayerId) {
+      setProjectError("Select a polyline layer to follow first.");
+      return;
+    }
+    const orientToPath = existingFollowPath
+      ? Boolean((getEl("follow-path-orient-toggle") as any)?.checked)
+      : true;
+    const smoothFollow = existingFollowPath
+      ? Boolean((getEl("follow-path-smooth-toggle") as any)?.checked)
+      : true;
+    const reverse = existingFollowPath
+      ? Boolean((getEl("follow-path-reverse-toggle") as any)?.checked)
+      : false;
+    if (existingFollowPath) {
+      existingFollowPath.pathLayerId = pathLayerId;
+      existingFollowPath.orientToPath = orientToPath;
+      existingFollowPath.smoothFollow = smoothFollow;
+      existingFollowPath.reverse = reverse;
+      updateAnimationsList();
+      updateTimeline();
+      updateAnimationOptions();
+      scheduleProjectSave();
+      return;
+    }
+  }
   if (
     timelineState.selectedTimelineAnimation &&
     timelineState.selectedTimelineAnimation.layerIdx === selectedLayerIndex &&
@@ -10272,11 +10498,21 @@ function addAnimation(typeOverride?: string) {
   }
   start = timelineController.getNextNonOverlappingStart(layerData, start, duration);
   start = timelineController.snapTimeToGridCeil(start);
-  layerData.animations.push({
+  const nextAnimation: LayerAnimation = {
     type,
     duration,
     start
-  });
+  };
+  if (type === "followPath") {
+    const eligiblePathIds = getEligibleFollowPathLayers(layerData)
+      .map((candidate) => getLayerRuntimeId(candidate))
+      .filter((id): id is string => Boolean(id));
+    nextAnimation.pathLayerId = eligiblePathIds[0] ?? "";
+    nextAnimation.orientToPath = true;
+    nextAnimation.smoothFollow = true;
+    nextAnimation.reverse = false;
+  }
+  layerData.animations.push(nextAnimation);
 
   if (previousTimelineDurationOverride === null) {
     const nextTimelineDuration = timelineController.getTimelineDuration();
@@ -10300,6 +10536,7 @@ function removeAnimation(animIndex: number) {
   ensurePlaceholderAnimation(layerData);
   updateAnimationsList();
   updateTimeline();
+  updateAnimationOptions();
   if (layerData.type === "feature") {
     applyFeatureLayerAnimation(layerData, currentTime);
   }
@@ -10313,6 +10550,7 @@ function removeAnimationAt(layerIdx: number, animIdx: number) {
   ensurePlaceholderAnimation(layerData);
   updateAnimationsList();
   updateTimeline();
+  updateAnimationOptions();
   if (layerData.type === "feature") {
     applyFeatureLayerAnimation(layerData, currentTime);
   }
@@ -10322,6 +10560,85 @@ function removeAnimationAt(layerIdx: number, animIdx: number) {
 function closeModal(modalId: string) {
   (getEl(modalId) as any).open = false;
 }
+
+function formatGeoJsonImportTypeCounts(typeCounts: Partial<Record<LayerType, number>>) {
+  const parts = (["point", "polyline", "polygon"] as LayerType[])
+    .map((type) => {
+      const count = typeCounts[type] ?? 0;
+      if (!count) return null;
+      if (type === "point") {
+        return `${count} ${count === 1 ? "point" : "points"}`;
+      }
+      if (type === "polyline") {
+        return `${count} ${count === 1 ? "line" : "lines"}`;
+      }
+      return `${count} ${count === 1 ? "polygon" : "polygons"}`;
+    })
+    .filter((part): part is string => Boolean(part));
+
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+function closeGeoJsonImportModeModal(choice: GeoJsonImportMode | null) {
+  const resolve = geoJsonImportModeResolve;
+  geoJsonImportModeResolve = null;
+  if (resolve) {
+    resolve(choice);
+  }
+  const modal = getEl("geojson-import-mode-modal") as any;
+  if (modal.open) {
+    modal.open = false;
+  }
+}
+
+function bindGeoJsonImportModeDialogListeners() {
+  getEl("geojson-import-mode-cancel").addEventListener("click", () => closeGeoJsonImportModeModal(null));
+  getEl("geojson-import-mode-combined").addEventListener("click", () => closeGeoJsonImportModeModal("combined"));
+  getEl("geojson-import-mode-split").addEventListener("click", () => closeGeoJsonImportModeModal("split"));
+  getEl("geojson-import-mode-modal").addEventListener("calciteDialogClose", () => closeGeoJsonImportModeModal(null));
+}
+
+function chooseGeoJsonImportModeFromUser(
+  request: GeoJsonImportChoiceRequest
+): Promise<GeoJsonImportMode | null> {
+  if (geoJsonImportModeResolve) {
+    geoJsonImportModeResolve(null);
+    geoJsonImportModeResolve = null;
+  }
+
+  const modal = getEl("geojson-import-mode-modal") as any;
+  const messageEl = getEl("geojson-import-mode-message");
+  const detailEl = getEl("geojson-import-mode-detail");
+  const combinedButton = getEl("geojson-import-mode-combined");
+  const distinctTypeCount = Object.values(request.typeCounts).filter((count) => Number(count) > 0).length;
+  const supportedFeatureLabel =
+    request.supportedFeatureCount === 1
+      ? "1 supported feature"
+      : `${request.supportedFeatureCount} supported features`;
+  const typeSummary = formatGeoJsonImportTypeCounts(request.typeCounts);
+
+  messageEl.textContent = `${request.fileName} contains ${supportedFeatureLabel}.`;
+  if (distinctTypeCount > 1) {
+    detailEl.textContent =
+      `Keep combined groups imports by geometry type (${typeSummary}). ` +
+      "Split layers creates one layer per feature.";
+    combinedButton.textContent = "Keep combined";
+  } else {
+    detailEl.textContent = `Single layer keeps all ${typeSummary} together. Split layers creates one layer per feature.`;
+    combinedButton.textContent = "Single layer";
+  }
+
+  modal.open = true;
+  setTimeout(() => combinedButton.focus(), 0);
+
+  return new Promise<GeoJsonImportMode | null>((resolve) => {
+    geoJsonImportModeResolve = resolve;
+  });
+}
+
 function resetAnimationGeometryCaches() {
   graphicsLayers.forEach((layerData) => {
     if (layerData.type !== "polyline" && layerData.type !== "polygon") return;

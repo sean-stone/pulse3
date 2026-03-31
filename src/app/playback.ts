@@ -5,6 +5,7 @@ import {
   applyPointSymbolScaleOrientation,
   applyPolygonExtrusionHeight
 } from "./animationPlaybackHelpers";
+import { getFollowPathStateAtTime } from "./animationPlayback";
 import {
   mergePointSymbolOrientations,
   readPointKeyframeOrientation,
@@ -167,9 +168,19 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
         layerData.type === "point" && config.hasPointKeyframes(layerData)
           ? config.getPointKeyframeAtTime(layerData, accessors.getCurrentTime())
           : null;
+      const followPathState =
+        layerData.type === "point"
+          ? getFollowPathStateAtTime(
+              config.getGraphicsLayers(),
+              layerData,
+              accessors.getCurrentTime(),
+              pointStyle ?? config.defaultPointStyle
+            )
+          : null;
       const pointOrientation =
         layerData.type === "point"
-          ? mergePointSymbolOrientations(
+          ? followPathState?.orientation ??
+            mergePointSymbolOrientations(
               readPointStyleOrientation(pointStyle ?? config.defaultPointStyle),
               readPointKeyframeOrientation(pointFrame)
             )
@@ -194,6 +205,10 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
           graphic.symbol = symbol;
         }
         if (graphic.__originalGeometry) {
+          if (layerData.type === "point" && followPathState) {
+            graphic.geometry = followPathState.geometry.clone();
+            return;
+          }
           if (layerData.type === "point" && pointFrame) {
             const frameZ = Number(pointFrame.z);
             graphic.geometry = new Point({

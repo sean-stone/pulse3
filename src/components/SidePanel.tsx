@@ -71,6 +71,30 @@ function SidePanel({ themeMode }: SidePanelProps) {
                     <div id="animation-type-options" className="animation-type-options"></div>
                   </div>
                 </div>
+                <div id="follow-path-animation-settings" style={{ display: "none" }}>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Path layer
+                    <calcite-select id="follow-path-layer-select" scale="m"></calcite-select>
+                  </calcite-label>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Orient to path
+                    <calcite-switch id="follow-path-orient-toggle" checked></calcite-switch>
+                  </calcite-label>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Smooth follow
+                    <calcite-switch id="follow-path-smooth-toggle" checked></calcite-switch>
+                  </calcite-label>
+                  <calcite-label style={{ marginTop: 12 }}>
+                    Reverse direction
+                    <calcite-switch id="follow-path-reverse-toggle"></calcite-switch>
+                  </calcite-label>
+                  <div
+                    id="follow-path-help"
+                    style={{ marginTop: 8, fontSize: 12, color: "var(--color-muted)" }}
+                  >
+                    Choose a polyline layer before adding the Follow Path animation.
+                  </div>
+                </div>
                 <div id="webgl-animation-section" className="animation-type-row animation-type-webgl-section">
                   <div className="animation-type-header">
                     <span>WebGL animations</span>

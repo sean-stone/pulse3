@@ -6,6 +6,10 @@ export interface LayerAnimation {
   type: string;
   duration: number;
   start: number;
+  pathLayerId?: string;
+  orientToPath?: boolean;
+  reverse?: boolean;
+  smoothFollow?: boolean;
 }
 
 export interface PointKeyframe {

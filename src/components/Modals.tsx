@@ -1582,6 +1582,40 @@ function Modals() {
       </calcite-dialog>
 
       <calcite-dialog
+        id="geojson-import-mode-modal"
+        heading="Import GeoJSON"
+        scale="s"
+        overlay-positioning="absolute"
+        placement="center"
+        embedded
+      >
+        <div>
+          <p id="geojson-import-mode-message" style={{ margin: 0, fontSize: 14, color: "var(--color-text)" }}></p>
+          <p
+            id="geojson-import-mode-detail"
+            style={{ margin: "12px 0 0", fontSize: 13, color: "var(--color-text-muted, #5f6b77)" }}
+          ></p>
+        </div>
+        <div slot="footer" className="dialog-footer">
+          <calcite-button id="geojson-import-mode-cancel" appearance="outline">
+            Cancel
+          </calcite-button>
+          <calcite-button id="geojson-import-mode-combined" appearance="outline">
+            Keep combined
+          </calcite-button>
+          <calcite-button
+            id="geojson-import-mode-split"
+            style={{
+              "--calcite-button-text-color": "#ffffff",
+              "--calcite-button-icon-color": "#ffffff",
+            }}
+          >
+            Split layers
+          </calcite-button>
+        </div>
+      </calcite-dialog>
+
+      <calcite-dialog
         id="confirm-dialog"
         heading="Confirm"
         scale="s"

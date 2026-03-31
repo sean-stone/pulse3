@@ -692,29 +692,55 @@ $schema = [
                                     "animations" => [
                                         "type" => "array",
                                         "items" => [
-                                            "type" => "object",
-                                            "additionalProperties" => false,
-                                            "properties" => [
-                                                "type" => [
-                                                    "type" => "string",
-                                                    "enum" => [
-                                                        "fadeIn",
-                                                        "fadeOut",
-                                                        "pulse",
-                                                        "bounce",
-                                                        "spin",
-                                                        "grow",
-                                                        "draw",
-                                                        "drawReverse",
-                                                        "fill",
-                                                        "typewriter",
-                                                        "field"
-                                                    ]
+                                            "anyOf" => [
+                                                [
+                                                    "type" => "object",
+                                                    "additionalProperties" => false,
+                                                    "properties" => [
+                                                        "type" => [
+                                                            "type" => "string",
+                                                            "enum" => [
+                                                                "fadeIn",
+                                                                "fadeOut",
+                                                                "pulse",
+                                                                "bounce",
+                                                                "spin",
+                                                                "grow",
+                                                                "draw",
+                                                                "drawReverse",
+                                                                "fill",
+                                                                "typewriter",
+                                                                "field"
+                                                            ]
+                                                        ],
+                                                        "duration" => ["type" => "number"],
+                                                        "start" => ["type" => "number"]
+                                                    ],
+                                                    "required" => ["type", "duration", "start"]
                                                 ],
-                                                "duration" => ["type" => "number"],
-                                                "start" => ["type" => "number"]
-                                            ],
-                                            "required" => ["type", "duration", "start"]
+                                                [
+                                                    "type" => "object",
+                                                    "additionalProperties" => false,
+                                                    "properties" => [
+                                                        "type" => ["type" => "string", "enum" => ["followPath"]],
+                                                        "duration" => ["type" => "number"],
+                                                        "start" => ["type" => "number"],
+                                                        "pathLayerId" => ["type" => "string"],
+                                                        "orientToPath" => ["type" => "boolean"],
+                                                        "reverse" => ["type" => "boolean"],
+                                                        "smoothFollow" => ["type" => "boolean"]
+                                                    ],
+                                                    "required" => [
+                                                        "type",
+                                                        "duration",
+                                                        "start",
+                                                        "pathLayerId",
+                                                        "orientToPath",
+                                                        "reverse",
+                                                        "smoothFollow"
+                                                    ]
+                                                ]
+                                            ]
                                         ]
                                     ],
                                     "pointKeyframes" => [
@@ -1114,7 +1140,7 @@ $instructions = trim(
     "Default durationOverride to 6 seconds unless the user specifies otherwise. " .
     "Do not overlap animations on the same layer; avoid multiple animations running at the same time. " .
     "Valid animation types: " .
-    "point=[fadeIn, fadeOut, pulse, bounce, spin, grow], " .
+    "point=[fadeIn, fadeOut, pulse, bounce, spin, grow, followPath], " .
     "polyline=[draw, drawReverse, fadeIn, fadeOut], " .
     "polygon=[fadeIn, fadeOut, fill, pulse], " .
     "text=[fadeIn, fadeOut, typewriter, bounce], " .
@@ -1151,6 +1177,7 @@ $instructions = trim(
     "(fov, qualityProfile, atmosphereQuality, glowEnabled, glowIntensity, cinematicFxEnabled, exposure, contrast, saturation, letterbox, noiseLevel, scanlineLevel, vignetteLevel, jitter, chromaticAberration), optional app.scene.lighting, and optional extent. " .
     "Provide properties._pulse.timeline.durationOverride (number or null). " .
     "Provide properties._pulse.layers[] with id, name, type, animations, and any needed style fields. " .
+    "For point followPath animations, set pathLayerId to a matching polyline layer id and include orientToPath, reverse, and smoothFollow booleans. " .
     "For each feature, set properties._pulse.layerId to a matching layer id."
 );
 
@@ -1263,10 +1290,15 @@ $snapshot["properties"]["_pulse"]["savedAt"] = gmdate("c");
 if (is_array($routeLineCoords) && isset($routeLineCoords[0]["coords"])) {
     // Apply routed geometry to separate polyline layers.
     $baseLayer = null;
+    $existingPolylineLayerIds = [];
     foreach ($snapshot["properties"]["_pulse"]["layers"] as $layer) {
         if (($layer["type"] ?? null) === "polyline") {
-            $baseLayer = $layer;
-            break;
+            if (is_string($layer["id"] ?? null) && $layer["id"] !== "") {
+                $existingPolylineLayerIds[] = $layer["id"];
+            }
+            if (!$baseLayer) {
+                $baseLayer = $layer;
+            }
         }
     }
     if (!$baseLayer) {
@@ -1297,9 +1329,11 @@ if (is_array($routeLineCoords) && isset($routeLineCoords[0]["coords"])) {
 
     $duration = $snapshot["properties"]["_pulse"]["timeline"]["durationOverride"] ?? 6;
     $duration = clamp_duration($duration, 60) ?? 6;
+    $newRouteLayerIds = [];
 
     foreach ($routeLineCoords as $idx => $route) {
         $layerId = "route-" . ($idx + 1);
+        $newRouteLayerIds[] = $layerId;
         $layerName = "Route " . ($idx + 1);
         if (!empty($route["from"]) && !empty($route["to"])) {
             $layerName = $route["from"] . " to " . $route["to"];
@@ -1326,6 +1360,31 @@ if (is_array($routeLineCoords) && isset($routeLineCoords[0]["coords"])) {
                 "_pulse" => ["layerId" => $layerId]
             ]
         ];
+    }
+
+    if ($newRouteLayerIds && isset($snapshot["properties"]["_pulse"]["layers"]) && is_array($snapshot["properties"]["_pulse"]["layers"])) {
+        $replacementPathLayerId = $newRouteLayerIds[0];
+        foreach ($snapshot["properties"]["_pulse"]["layers"] as &$layer) {
+            if (($layer["type"] ?? null) !== "point" || !isset($layer["animations"]) || !is_array($layer["animations"])) {
+                continue;
+            }
+            foreach ($layer["animations"] as &$anim) {
+                if (($anim["type"] ?? null) !== "followPath") {
+                    continue;
+                }
+                $pathLayerId = $anim["pathLayerId"] ?? null;
+                $isMissingPathLayerId = !is_string($pathLayerId) || $pathLayerId === "";
+                $referencesRemovedPolyline =
+                    is_string($pathLayerId) &&
+                    in_array($pathLayerId, $existingPolylineLayerIds, true) &&
+                    !in_array($pathLayerId, $newRouteLayerIds, true);
+                if ($isMissingPathLayerId || $referencesRemovedPolyline) {
+                    $anim["pathLayerId"] = $replacementPathLayerId;
+                }
+            }
+            unset($anim);
+        }
+        unset($layer);
     }
 
     // Set extent around all routes if none provided.
@@ -1399,7 +1458,7 @@ function normalize_non_overlapping_animations(array $layer): array {
     $priority = [
         "polygon" => ["fill", "fadeIn", "fadeOut", "pulse"],
         "polyline" => ["draw", "drawReverse", "fadeIn", "fadeOut"],
-        "point" => ["fadeIn", "fadeOut", "pulse", "bounce", "spin", "grow"],
+        "point" => ["followPath", "fadeIn", "fadeOut", "pulse", "bounce", "spin", "grow"],
         "text" => ["typewriter", "fadeIn", "fadeOut", "bounce"],
         "feature" => ["field"]
     ];
@@ -1684,7 +1743,7 @@ function validate_snapshot(array $data): ?string {
         return "Missing properties._pulse.layers";
     }
     $allowedAnimationsByLayer = [
-        "point" => ["fadeIn", "fadeOut", "pulse", "bounce", "spin", "grow"],
+        "point" => ["fadeIn", "fadeOut", "pulse", "bounce", "spin", "grow", "followPath"],
         "polyline" => ["draw", "drawReverse", "fadeIn", "fadeOut"],
         "polygon" => ["fadeIn", "fadeOut", "fill", "pulse"],
         "text" => ["fadeIn", "fadeOut", "typewriter", "bounce"],
@@ -1851,6 +1910,7 @@ function validate_snapshot(array $data): ?string {
         "xor"
     ];
     $layerIds = [];
+    $layerTypesById = [];
     foreach ($pulse["layers"] as $layer) {
         if (!is_array($layer)) {
             return "Invalid layer entry";
@@ -1874,6 +1934,21 @@ function validate_snapshot(array $data): ?string {
             $animType = $anim["type"] ?? null;
             if (!is_string($animType) || !in_array($animType, $allowedAnimationsByLayer[$layerType], true)) {
                 return "Invalid animation type for layer";
+            }
+            if ($animType === "followPath") {
+                $pathLayerId = $anim["pathLayerId"] ?? null;
+                if (!is_string($pathLayerId) || trim($pathLayerId) === "") {
+                    return "followPath animation missing pathLayerId";
+                }
+                if (!array_key_exists("orientToPath", $anim) || !is_bool($anim["orientToPath"])) {
+                    return "followPath animation missing orientToPath";
+                }
+                if (!array_key_exists("reverse", $anim) || !is_bool($anim["reverse"])) {
+                    return "followPath animation missing reverse";
+                }
+                if (!array_key_exists("smoothFollow", $anim) || !is_bool($anim["smoothFollow"])) {
+                    return "followPath animation missing smoothFollow";
+                }
             }
         }
         $pointStyle = $layer["pointStyle"] ?? null;
@@ -1906,6 +1981,28 @@ function validate_snapshot(array $data): ?string {
             return "Invalid blend mode";
         }
         $layerIds[$id] = true;
+        $layerTypesById[$id] = $layerType;
+    }
+    foreach ($pulse["layers"] as $layer) {
+        if (!is_array($layer) || ($layer["type"] ?? null) !== "point") {
+            continue;
+        }
+        $anims = $layer["animations"] ?? [];
+        if (!is_array($anims)) {
+            continue;
+        }
+        foreach ($anims as $anim) {
+            if (!is_array($anim) || ($anim["type"] ?? null) !== "followPath") {
+                continue;
+            }
+            $pathLayerId = trim((string) ($anim["pathLayerId"] ?? ""));
+            if (!isset($layerTypesById[$pathLayerId])) {
+                return "followPath pathLayerId does not match a layer";
+            }
+            if ($layerTypesById[$pathLayerId] !== "polyline") {
+                return "followPath pathLayerId must reference a polyline layer";
+            }
+        }
     }
     foreach ($data["features"] as $feature) {
         if (!is_array($feature)) {

@@ -58,7 +58,7 @@ export const PROJECT_STORAGE_KEY_RECENTS = "pulse.project.recents";
 export const PROJECT_STORAGE_KEY_NAME = "pulse.project.name";
 export const STORAGE_CONSENT_KEY = "pulse.storage.consent";
 export const PROJECT_VERSION = 1;
-export const APP_VERSION = "3.13.0";
+export const APP_VERSION = "3.14.0";
 export const ENABLE_PROJECT_STORAGE = true;
 
 export const allowedBasemaps = new Set([

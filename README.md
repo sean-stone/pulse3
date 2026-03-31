@@ -258,4 +258,4 @@ We stayed in short loops:
      source rather than only CSS.
 
 # NOTE
-This full repo I did not write a single line of code... it was done using codex and about 2-3 evenings. I think this would have taken months to do manually. Especially considering the amount of iterations and changes I made to the UI during the process. I thought I'd share the code still so you can see the output.
+This full repo I did not write a single line of code... it was done using codex and about 2-3 months. I think this would have taken months to do manually. Especially considering the amount of iterations and changes I made to the UI during the process. I thought I'd share the code still so you can see the output.

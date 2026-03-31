@@ -5,6 +5,7 @@
     { value: "pulse", label: "Pulse" },
     { value: "bounce", label: "Bounce" },
     { value: "spin", label: "Spin" },
+    { value: "followPath", label: "Follow Path" },
     { value: "dartHit", label: "Over-Shoulder Dart Hit" },
     { value: "fireworks", label: "Fireworks Burst" },
     { value: "crossetteShell", label: "Crossette Shell" },

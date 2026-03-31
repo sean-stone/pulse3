@@ -3,16 +3,19 @@ import { describe, expect, test, vi } from "vitest";
 import type { LayerData } from "../../types";
 import { applyAnimationsAtTime } from "../animationPlayback";
 
-const createPlaybackConfig = (layerData: LayerData, view: any = { type: "3d" }) => ({
-  getView: () => view,
-  getGraphicsLayers: () => [layerData],
-  defaultPointStyle: { size: 12 } as any,
-  hasPointKeyframes: () => false,
-  getPointKeyframeAtTime: () => null,
-  applyFeatureLayerAnimation: () => undefined,
-  isPlaying: () => true,
-  isScrubbingTimeline: () => false
-});
+const createPlaybackConfig = (layerData: LayerData | LayerData[], view: any = { type: "3d" }) => {
+  const layers = Array.isArray(layerData) ? layerData : [layerData];
+  return {
+    getView: () => view,
+    getGraphicsLayers: () => layers,
+    defaultPointStyle: { size: 12 } as any,
+    hasPointKeyframes: () => false,
+    getPointKeyframeAtTime: () => null,
+    applyFeatureLayerAnimation: () => undefined,
+    isPlaying: () => true,
+    isScrubbingTimeline: () => false
+  };
+};
 
 describe("animation playback text opacity", () => {
   test("fades flat text in 3D by updating symbol color alpha directly", () => {
@@ -131,5 +134,179 @@ describe("animation playback text opacity", () => {
     expect(graphic.symbol.callout.color[3]).toBeCloseTo(0.225, 5);
     expect(graphic.symbol.callout.border.color[3]).toBeCloseTo(0.225, 5);
     expect(requestRenderSpy).toHaveBeenCalled();
+  });
+
+  test("moves a point along a followed polyline and rotates it to the path direction", () => {
+    const routeGeometry = {
+      type: "polyline",
+      spatialReference: { wkid: 3857 },
+      paths: [[[0, 0], [10, 0], [10, 10]]],
+      clone() {
+        return {
+          ...this,
+          paths: this.paths.map((path: number[][]) => path.map((coord) => [...coord]))
+        };
+      }
+    };
+    const routeGraphic = {
+      geometry: routeGeometry,
+      __originalGeometry: routeGeometry,
+      __densifiedGeometry: routeGeometry
+    };
+    const carGraphic = {
+      geometry: { type: "point", x: 0, y: 0, spatialReference: { wkid: 3857 } },
+      symbol: {
+        type: "simple-marker",
+        size: 12,
+        angle: 0
+      }
+    };
+    const routeLayer: LayerData = {
+      name: "Route 1",
+      type: "polyline",
+      layer: {
+        id: "route-layer",
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [routeGraphic]
+      },
+      animations: [
+        {
+          type: "draw",
+          start: 0,
+          duration: 10
+        } as any
+      ],
+      lineStyle: {
+        style: "solid",
+        width: 2,
+        color: "#0a4c66"
+      }
+    };
+    const carLayer: LayerData = {
+      name: "Car",
+      type: "point",
+      layer: {
+        id: "car-layer",
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [carGraphic]
+      },
+      animations: [
+        {
+          type: "followPath",
+          start: 0,
+          duration: 10,
+          pathLayerId: "route-layer",
+          orientToPath: true,
+          smoothFollow: false,
+          reverse: false
+        } as any
+      ],
+      pointKeyframes: [],
+      pointStyle: {
+        style: "circle",
+        size: 12,
+        color: "#0a4c66",
+        outlineColor: "#ffffff",
+        outlineWidth: 1,
+        angle: 0,
+        heading: 0,
+        xoffset: 0,
+        yoffset: 0
+      }
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig([routeLayer, carLayer], { type: "2d" }), 7.5);
+
+    expect(Number(carGraphic.geometry.x)).toBeCloseTo(10, 5);
+    expect(Number(carGraphic.geometry.y)).toBeCloseTo(5, 5);
+    expect(Number(carGraphic.symbol.angle)).toBeCloseTo(0, 5);
+  });
+
+  test("smooths follow-path rotation across a corner when enabled", () => {
+    const routeGeometry = {
+      type: "polyline",
+      spatialReference: { wkid: 3857 },
+      paths: [[[0, 0], [10, 0], [10, 10]]],
+      clone() {
+        return {
+          ...this,
+          paths: this.paths.map((path: number[][]) => path.map((coord) => [...coord]))
+        };
+      }
+    };
+    const routeGraphic = {
+      geometry: routeGeometry,
+      __originalGeometry: routeGeometry,
+      __densifiedGeometry: routeGeometry
+    };
+    const boatGraphic = {
+      geometry: { type: "point", x: 0, y: 0, spatialReference: { wkid: 3857 } },
+      symbol: {
+        type: "simple-marker",
+        size: 12,
+        angle: 0
+      }
+    };
+    const routeLayer: LayerData = {
+      name: "Route 1",
+      type: "polyline",
+      layer: {
+        id: "route-layer",
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [routeGraphic]
+      },
+      animations: [],
+      lineStyle: {
+        style: "solid",
+        width: 2,
+        color: "#0a4c66"
+      }
+    };
+    const boatLayer: LayerData = {
+      name: "Boat",
+      type: "point",
+      layer: {
+        id: "boat-layer",
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [boatGraphic]
+      },
+      animations: [
+        {
+          type: "followPath",
+          start: 0,
+          duration: 10,
+          pathLayerId: "route-layer",
+          orientToPath: true,
+          smoothFollow: true,
+          reverse: false
+        } as any
+      ],
+      pointKeyframes: [],
+      pointStyle: {
+        style: "circle",
+        size: 12,
+        color: "#0a4c66",
+        outlineColor: "#ffffff",
+        outlineWidth: 1,
+        angle: 0,
+        heading: 0,
+        xoffset: 0,
+        yoffset: 0
+      }
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig([routeLayer, boatLayer], { type: "2d" }), 5);
+
+    expect(Number(boatGraphic.geometry.x)).toBeCloseTo(10, 5);
+    expect(Number(boatGraphic.geometry.y)).toBeCloseTo(0, 5);
+    expect(Number(boatGraphic.symbol.angle)).toBeCloseTo(45, 5);
   });
 });
