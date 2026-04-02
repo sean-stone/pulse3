@@ -1162,25 +1162,23 @@ function ensureSketchViewModel(layer: GraphicsLayer) {
       }
       const graphic = event.graphic;
       if (!graphic) return;
-      graphic.geometry = toGeographicGeometry(graphic.geometry);
       if (layerData.type === "point") {
+        graphic.geometry = toGeographicGeometry(graphic.geometry);
         const style = layerData.pointStyle ?? defaultPointStyle;
         graphic.symbol = buildPointSymbolForCurrentView(style);
         if (currentViewMode === "3d" && getPointWebStyleSymbolSpec(style)) {
           void applyPointModelSymbolToLayer(layerData, style);
         }
       } else if (isParticleLayer(layerData)) {
-        graphic.geometry = new Point({
-          x: Number((graphic.geometry as any)?.x),
-          y: Number((graphic.geometry as any)?.y),
-          spatialReference: (graphic.geometry as any)?.spatialReference
-        });
+        graphic.geometry = normalizeParticleAnchorGeometry(graphic.geometry, graphic);
         graphic.symbol = buildVolumeAnchorSymbol(getParticleStyle(layerData));
         syncVolumeBoxOverlay(layerData, view);
       } else if (layerData.type === "polyline") {
+        graphic.geometry = toGeographicGeometry(graphic.geometry);
         const style = layerData.lineStyle ?? defaultLineStyle;
         graphic.symbol = buildLineSymbolForCurrentView(style);
       } else if (layerData.type === "polygon") {
+        graphic.geometry = toGeographicGeometry(graphic.geometry);
         const style = layerData.polygonStyle ?? defaultPolygonStyle;
         graphic.symbol = buildPolygonSymbolForCurrentView(style);
       }
@@ -5123,6 +5121,36 @@ function normalizeTextAnchorGeometry(geometry: any) {
   });
 }
 
+function normalizeParticleAnchorGeometry(geometry: any, graphic?: any) {
+  const normalized = (toGeographicGeometry(geometry) as Point | null) ?? geometry;
+  const x = Number(normalized?.x);
+  const y = Number(normalized?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return geometry;
+  }
+  const z = Number((normalized as any)?.z);
+  if (graphic) {
+    if (Number.isFinite(z)) {
+      (graphic as any).__pulseParticleGroundZ = z;
+      graphic.attributes = {
+        ...(graphic.attributes ?? {}),
+        __pulseParticleGroundZ: z
+      };
+    } else {
+      delete (graphic as any).__pulseParticleGroundZ;
+      if (graphic.attributes && "__pulseParticleGroundZ" in graphic.attributes) {
+        const { __pulseParticleGroundZ, ...remainingAttributes } = graphic.attributes;
+        graphic.attributes = remainingAttributes;
+      }
+    }
+  }
+  return new Point({
+    x,
+    y,
+    spatialReference: normalized?.spatialReference ?? geometry?.spatialReference ?? view?.spatialReference
+  });
+}
+
 function refreshTextMeshOverlays() {
   if (!view) return;
   graphicsLayers.forEach((layerData) => {
@@ -7349,6 +7377,7 @@ function createGraphicForType(
     const style = defaultPointStyle;
     graphic.symbol = buildPointSymbolForCurrentView(style);
   } else if (isParticleLayerType(type)) {
+    graphic.geometry = normalizeParticleAnchorGeometry(geometry, graphic);
     graphic.symbol = buildVolumeAnchorSymbol(defaultVolumeStyle);
   } else if (type === "polyline") {
     graphic.symbol = buildLineSymbolForCurrentView(defaultLineStyle);
@@ -9056,6 +9085,7 @@ function applyLayerStyle(layerData: LayerData) {
   if (isParticleLayer(layerData)) {
     const style = getParticleStyle(layerData);
     layerData.layer.graphics.forEach((graphic: any) => {
+      graphic.geometry = normalizeParticleAnchorGeometry(graphic.geometry, graphic);
       graphic.symbol = buildVolumeAnchorSymbol(style);
     });
     if (currentViewMode === "3d") {
@@ -9214,6 +9244,8 @@ function handleSketchUpdate(event: any) {
     graphic.geometry =
       layerData.type === "text"
         ? normalizeTextAnchorGeometry(graphic.geometry)
+        : isParticleLayer(layerData)
+          ? normalizeParticleAnchorGeometry(graphic.geometry, graphic)
         : toGeographicGeometry(graphic.geometry);
     refreshGeometryCache(layerData, graphic);
     touchedLayers.add(layerData);

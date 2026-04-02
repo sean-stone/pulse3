@@ -88,7 +88,12 @@ const importGeoJson = async (config: ImportConfig, fileName: string, content: st
     const addPoint = (point: number[]) => {
       if (!Array.isArray(point) || point.length < 2) return;
       const sr = isLikelyWebMercator(point) ? { wkid: 3857 } : { wkid: 4326 };
-      let geom = new Point({ x: point[0], y: point[1], spatialReference: sr });
+      let geom = new Point({
+        x: point[0],
+        y: point[1],
+        z: Number.isFinite(Number(point[2])) ? Number(point[2]) : undefined,
+        spatialReference: sr
+      });
       geom = normalizeGeometry(geom, sr);
       addGraphic("point", geom);
     };

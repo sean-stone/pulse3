@@ -37,7 +37,11 @@ const arcgisGeometryToGeoJSON = (geometry: unknown) => {
     sourceGeometry = webMercatorUtils.webMercatorToGeographic(sourceGeometry as any) as ArcgisGeometryLike;
   }
   if (sourceGeometry.type === "point") {
-    return { type: "Point", coordinates: [sourceGeometry.x, sourceGeometry.y] };
+    const z = Number((sourceGeometry as any).z);
+    return {
+      type: "Point",
+      coordinates: Number.isFinite(z) ? [sourceGeometry.x, sourceGeometry.y, z] : [sourceGeometry.x, sourceGeometry.y]
+    };
   }
   if (sourceGeometry.type === "multipoint") {
     return { type: "MultiPoint", coordinates: sourceGeometry.points ?? [] };
@@ -132,8 +136,13 @@ const geoJSONToArcGISGeometry = (geometry: unknown, spatialReference: unknown) =
   const geo = geometry as GeoJsonGeometryLike;
   if (geo.type === "Point") {
     const coordinates = Array.isArray(geo.coordinates) ? geo.coordinates : [];
-    const [x, y] = coordinates;
-    return new Point({ x, y, spatialReference: spatialReference as any });
+    const [x, y, z] = coordinates;
+    return new Point({
+      x,
+      y,
+      z: Number.isFinite(Number(z)) ? Number(z) : undefined,
+      spatialReference: spatialReference as any
+    });
   }
   if (geo.type === "MultiPoint") {
     return new Multipoint({

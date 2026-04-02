@@ -252,6 +252,43 @@ const transformLocalOffset = (transform: ArrayLike<number>, x: number, y: number
   Number(transform[2]) * x + Number(transform[6]) * y + Number(transform[10]) * z
 ] as [number, number, number];
 
+const resolveAnchorOrigin = (anchorGraphic: any, point: any, layerData: LayerData, view: any) => {
+  const x = Number(point?.x);
+  const y = Number(point?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+
+  const geometryZ = Number(point?.z);
+  const cachedSurfaceZ = Number(
+    anchorGraphic?.__pulseParticleGroundZ ?? anchorGraphic?.attributes?.__pulseParticleGroundZ
+  );
+  const elevationMode = String((layerData.layer as any)?.elevationInfo?.mode || "");
+
+  if (elevationMode === "relative-to-ground" || elevationMode === "on-the-ground") {
+    if (Number.isFinite(cachedSurfaceZ)) {
+      return [x, y, cachedSurfaceZ] as [number, number, number];
+    }
+    if (Number.isFinite(geometryZ)) {
+      return [x, y, geometryZ] as [number, number, number];
+    }
+    const elevatedPoint = view?.groundView?.elevationSampler?.queryElevation?.(point) as
+      | { z?: number }
+      | null
+      | undefined;
+    const groundZ = Number(elevatedPoint?.z);
+    if (Number.isFinite(groundZ)) {
+      return [x, y, groundZ] as [number, number, number];
+    }
+  }
+
+  if (Number.isFinite(cachedSurfaceZ)) {
+    return [x, y, cachedSurfaceZ] as [number, number, number];
+  }
+
+  return [x, y, Number.isFinite(geometryZ) ? geometryZ : 0] as [number, number, number];
+};
+
 const pushParticle = (
   target: number[],
   position: [number, number, number],
@@ -1075,7 +1112,8 @@ const buildEntry = (layerData: LayerData, view: any): VolumePlumeEntry | null =>
       const point = graphic?.geometry;
       if (!point || point.type !== "point") return null;
       if (!Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) return null;
-      const origin = [Number(point.x), Number(point.y), Number(point.z) || 0];
+      const origin = resolveAnchorOrigin(graphic, point, layerData, view);
+      if (!origin) return null;
       const transform = webgl.renderCoordinateTransformAt(
         view,
         origin,
