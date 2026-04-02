@@ -3,19 +3,28 @@ import { describe, expect, test, vi } from "vitest";
 import type { LayerData } from "../../types";
 import { applyAnimationsAtTime } from "../animationPlayback";
 
-const createPlaybackConfig = (layerData: LayerData | LayerData[], view: any = { type: "3d" }) => {
+const createPlaybackConfig = (
+  layerData: LayerData | LayerData[],
+  view: any = { type: "3d" },
+  overrides: Partial<ReturnType<typeof createPlaybackConfigBase>> = {}
+) => {
   const layers = Array.isArray(layerData) ? layerData : [layerData];
   return {
+    ...createPlaybackConfigBase(),
     getView: () => view,
     getGraphicsLayers: () => layers,
-    defaultPointStyle: { size: 12 } as any,
-    hasPointKeyframes: () => false,
-    getPointKeyframeAtTime: () => null,
-    applyFeatureLayerAnimation: () => undefined,
-    isPlaying: () => true,
-    isScrubbingTimeline: () => false
+    ...overrides
   };
 };
+
+const createPlaybackConfigBase = () => ({
+  defaultPointStyle: { size: 12 } as any,
+  hasPointKeyframes: () => false,
+  getPointKeyframeAtTime: () => null,
+  applyFeatureLayerAnimation: () => undefined,
+  isPlaying: () => true,
+  isScrubbingTimeline: () => false
+});
 
 describe("animation playback text opacity", () => {
   test("fades flat text in 3D by updating symbol color alpha directly", () => {
@@ -308,5 +317,87 @@ describe("animation playback text opacity", () => {
     expect(Number(boatGraphic.geometry.x)).toBeCloseTo(10, 5);
     expect(Number(boatGraphic.geometry.y)).toBeCloseTo(0, 5);
     expect(Number(boatGraphic.symbol.angle)).toBeCloseTo(45, 5);
+  });
+
+  test("stores smoke playback state for volume layers while the clip is active", () => {
+    const layerData: LayerData = {
+      name: "Smoke Box",
+      type: "volume",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: []
+      },
+      animations: [
+        {
+          type: "smoke",
+          start: 0,
+          duration: 2
+        } as any
+      ],
+      volumeStyle: {
+        width: 220,
+        depth: 220,
+        height: 140,
+        floorOffset: 8,
+        opacity: 0.32,
+        slices: 14,
+        color: "#c9dcff",
+        edgeColor: "#f4fbff"
+      }
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, { type: "2d" }), 0.5);
+
+    expect((layerData as any).__volumeAnimationState).toEqual({
+      effect: "smoke",
+      progress: 0.25,
+      time: 0.5
+    });
+    expect(layerData.layer.opacity).toBe(1);
+  });
+
+  test("clears volume playback state when playback is not previewing", () => {
+    const layerData: LayerData = {
+      name: "Smoke Box",
+      type: "volume",
+      layer: {
+        opacity: 0.4,
+        blendMode: "normal",
+        effect: "",
+        graphics: []
+      },
+      animations: [
+        {
+          type: "smoke",
+          start: 0,
+          duration: 2
+        } as any
+      ],
+      volumeStyle: {
+        width: 220,
+        depth: 220,
+        height: 140,
+        floorOffset: 8,
+        opacity: 0.32,
+        slices: 14,
+        color: "#c9dcff",
+        edgeColor: "#f4fbff"
+      }
+    };
+    (layerData as any).__volumeAnimationState = {
+      effect: "smoke",
+      progress: 0.5,
+      time: 1
+    };
+
+    applyAnimationsAtTime(
+      createPlaybackConfig(layerData, { type: "2d" }, { isPlaying: () => false }),
+      1
+    );
+
+    expect((layerData as any).__volumeAnimationState).toBeUndefined();
+    expect(layerData.layer.opacity).toBe(1);
   });
 });

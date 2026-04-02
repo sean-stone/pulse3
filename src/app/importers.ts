@@ -217,7 +217,8 @@ const importGeoJson = async (config: ImportConfig, fileName: string, content: st
       polyline: [],
       polygon: [],
       text: [],
-      feature: []
+      feature: [],
+      volume: []
     };
     featureImports.forEach((featureImport) => {
       graphicsByType[featureImport.type].push(...featureImport.graphics);

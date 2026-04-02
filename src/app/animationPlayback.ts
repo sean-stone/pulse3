@@ -53,6 +53,7 @@ import {
 import type { PointSymbolOrientation } from "./pointOrientation";
 import { getInactiveRevealGeometryMode } from "./revealTiming";
 import { isMeshTextRenderMode, syncTextMeshOverlay } from "./textMesh";
+import { syncVolumeBoxOverlay } from "./volumeBox";
 
 type AnimationPlaybackConfig = {
   getView: () => any;
@@ -76,7 +77,29 @@ type FollowPathAnimation = LayerAnimation & {
   pathLayerId: string;
 };
 
+type VolumeAnimationPlaybackState = {
+  effect: "smoke" | "fire";
+  progress: number;
+  time: number;
+};
+
 let geodeticOperatorsLoadPromise: Promise<void> | null = null;
+
+const setVolumeAnimationPlaybackState = (
+  layerData: LayerData,
+  state: VolumeAnimationPlaybackState | null
+) => {
+  if (layerData.type !== "volume") return;
+  if (state) {
+    (layerData as any).__volumeAnimationState = state;
+  } else {
+    delete (layerData as any).__volumeAnimationState;
+  }
+  layerData.layer.graphics.forEach((graphic: any) => {
+    if (!graphic) return;
+    graphic.visible = !state;
+  });
+};
 
 const ensureGeodeticOperatorsLoaded = () => {
   if (geodeticLengthOperator.isLoaded() && geodeticDensifyOperator.isLoaded()) {
@@ -1095,10 +1118,12 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           )
         : null;
     if (!hasRealAnimations && !hasLayerPointKeyframes) {
+      setVolumeAnimationPlaybackState(layerData, null);
       layerData.layer.opacity = 1;
       return;
     }
     if (!isPreviewing) {
+      setVolumeAnimationPlaybackState(layerData, null);
       layerData.layer.opacity = 1;
       layerData.layer.graphics.forEach((graphic: any) => {
         if (graphic.__originalGeometry) {
@@ -1140,18 +1165,20 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           applyTextSymbolState(graphic, layerData, baseText, baseSize, 1, useExplicit3DTextOpacity);
         });
         syncTextMeshOverlay(layerData, view);
-        }
-        if (pointKeyframe) {
-          applyPointKeyframes(layerData, pointKeyframe);
-        }
-        if (followPathState) {
-          layerData.layer.graphics.forEach((graphic: any) => {
-            if (!graphic?.geometry) return;
-            graphic.geometry = followPathState.geometry.clone();
-          });
-        }
-        return;
+      } else if (layerData.type === "volume") {
+        syncVolumeBoxOverlay(layerData, view);
       }
+      if (pointKeyframe) {
+        applyPointKeyframes(layerData, pointKeyframe);
+      }
+      if (followPathState) {
+        layerData.layer.graphics.forEach((graphic: any) => {
+          if (!graphic?.geometry) return;
+          graphic.geometry = followPathState.geometry.clone();
+        });
+      }
+      return;
+    }
     let layerVisible = false;
     let opacity = 1;
     let baseLayerOpacity = 1;
@@ -1196,6 +1223,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let fireworksProgress: number | null = null;
     let fireworksVariant: "fireworks" | "crossetteShell" | "mineShellCombo" = "fireworks";
     let fireworksFadeEnvelope = 1;
+    let activeVolumeEffect: "smoke" | "fire" | null = null;
+    let activeVolumeEffectProgress: number | null = null;
     let arrowProgress: number | null = null;
     let barrageProgress: number | null = null;
     let jitterProgress: number | null = null;
@@ -1369,6 +1398,16 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
             fireworksVariant = "mineShellCombo";
             opacity = 1;
             break;
+          case "smoke":
+            activeVolumeEffect = "smoke";
+            activeVolumeEffectProgress = progress;
+            opacity = 1;
+            break;
+          case "fire":
+            activeVolumeEffect = "fire";
+            activeVolumeEffectProgress = progress;
+            opacity = 1;
+            break;
           case "arrowMarch":
             arrowProgress = progress;
             opacity = 1;
@@ -1520,6 +1559,19 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       }
       baseLayerOpacity = layerVisible ? opacity : 0;
       layerData.layer.opacity = useExplicit3DTextOpacity ? 1 : baseLayerOpacity;
+    }
+
+    if (layerData.type === "volume") {
+      setVolumeAnimationPlaybackState(
+        layerData,
+        activeVolumeEffect && activeVolumeEffectProgress !== null
+          ? {
+              effect: activeVolumeEffect,
+              progress: clamp(activeVolumeEffectProgress, 0, 1),
+              time
+            }
+          : null
+      );
     }
 
     if (hasDrawAnimation) {
@@ -4251,6 +4303,8 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       if (useExplicit3DTextOpacity && isPreviewing) {
         view?.requestRender?.();
       }
+    } else if (layerData.type === "volume") {
+      syncVolumeBoxOverlay(layerData, view);
     }
   });
 };

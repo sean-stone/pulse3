@@ -6,7 +6,7 @@ import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import type { LayerAnimation, LayerData, LineStyle, PointKeyframe, PointStyle, PolygonStyle } from "../types";
 
 import type { ProjectLayerSnapshot, ProjectSnapshot } from "./constants";
-import { PROJECT_VERSION } from "./constants";
+import { PROJECT_VERSION, defaultVolumeStyle } from "./constants";
 
 type SnapshotBuildConfig = {
   view: any;
@@ -180,6 +180,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
       lineFollowTerrain3D: layerData.lineFollowTerrain3D,
       polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
       polygonZOffset: layerData.polygonZOffset,
+      volumeStyle: layerData.volumeStyle ? { ...layerData.volumeStyle } : undefined,
       textContent: layerData.textContent,
       textSize: layerData.textSize,
       textColor: layerData.textColor,
@@ -489,6 +490,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
           polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
             ? Number(layerSnapshot.polygonZOffset)
             : undefined,
+          volumeStyle: layerSnapshot.volumeStyle ? { ...layerSnapshot.volumeStyle } : undefined,
           layerBlendMode: layerSnapshot.layerBlendMode,
           layerEffectSettings: layerSnapshot.layerEffectSettings
             ? { ...layerSnapshot.layerEffectSettings }
@@ -562,6 +564,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
           ? Number(layerSnapshot.polygonZOffset)
           : undefined,
+        volumeStyle: layerSnapshot.volumeStyle ? { ...layerSnapshot.volumeStyle } : undefined,
         textContent: layerSnapshot.textContent,
         textSize: layerSnapshot.textSize,
         textColor: layerSnapshot.textColor,
@@ -588,6 +591,8 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         layerData.lineStyle = { ...config.defaultLineStyle };
       } else if (layerData.type === "polygon" && !layerData.polygonStyle) {
         layerData.polygonStyle = { ...config.defaultPolygonStyle };
+      } else if (layerData.type === "volume" && !layerData.volumeStyle) {
+        layerData.volumeStyle = { ...defaultVolumeStyle };
       }
       if (layerData.type === "polygon" && !Number.isFinite(Number(layerData.polygonZOffset))) {
         layerData.polygonZOffset = 0;

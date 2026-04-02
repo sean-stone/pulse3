@@ -911,6 +911,140 @@ function Modals() {
             </div>
           </div>
 
+          <div id="volume-style-section" style={{ display: "none" }}>
+            <calcite-label style={{ marginTop: 12 }}>
+              Emitter Mode
+              <calcite-select id="volume-emitter-mode-select" scale="m">
+                <calcite-option value="emitter">Particles</calcite-option>
+              </calcite-select>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Emitter Radius (m)
+              <calcite-input-number
+                id="volume-emitter-radius-input"
+                value="18"
+                min="1"
+                max="10000"
+                step="0.5"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Fire Lifetime (s)
+              <calcite-input-number
+                id="volume-fire-lifetime-input"
+                value="1.5"
+                min="0.1"
+                max="20"
+                step="0.1"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Smoke Lifetime (s)
+              <calcite-input-number
+                id="volume-smoke-lifetime-input"
+                value="7.6"
+                min="0.1"
+                max="60"
+                step="0.1"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Fire Speed
+              <calcite-input-number
+                id="volume-fire-speed-input"
+                value="58"
+                min="0"
+                max="10000"
+                step="0.5"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Smoke Speed
+              <calcite-input-number
+                id="volume-smoke-speed-input"
+                value="20"
+                min="0"
+                max="10000"
+                step="0.5"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Variation
+              <calcite-slider
+                id="volume-variation-input"
+                min="0"
+                max="1.5"
+                step="0.01"
+                value="0.65"
+                label-handles="true"
+                scale="m"
+              ></calcite-slider>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Turbulence
+              <calcite-input-number
+                id="volume-turbulence-input"
+                value="12"
+                min="0"
+                max="10000"
+                step="0.5"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Wind X
+              <calcite-input-number
+                id="volume-wind-x-input"
+                value="3.3"
+                min="-10000"
+                max="10000"
+                step="0.1"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Wind Y
+              <calcite-input-number
+                id="volume-wind-y-input"
+                value="1.1"
+                min="-10000"
+                max="10000"
+                step="0.1"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
+              Buoyancy
+              <calcite-input-number
+                id="volume-buoyancy-input"
+                value="28"
+                min="0"
+                max="10000"
+                step="0.5"
+                scale="m"
+              ></calcite-input-number>
+            </calcite-label>
+
+            <div className="style-helper-copy">
+              3D only. These settings shape the particles renderer. In 2D this layer shows a compact anchor marker.
+            </div>
+          </div>
+
           <div id="layer-effects-section">
             <button
               id="style-effects-toggle"

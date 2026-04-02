@@ -299,6 +299,16 @@ export default function App() {
                     >
                       Route
                     </calcite-button>
+                    <calcite-button
+                      id="add-volume-btn"
+                      icon-start="pin"
+                      scale="s"
+                      appearance="outline"
+                      width="full"
+                      style={{ marginBottom: 12, ...(darkOutlineButtonStyle ?? {}) }}
+                    >
+                      Particles
+                    </calcite-button>
                     <calcite-label style={{ marginTop: 12 }}>
                       FeatureLayer URL
                       <calcite-input

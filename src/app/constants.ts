@@ -6,7 +6,8 @@ import type {
   PointKeyframe,
   PointStyle,
   PolygonStyle,
-  TextRenderMode
+  TextRenderMode,
+  VolumeStyle
 } from "../types";
 
 export const TIMELINE_SNAP_INCREMENT = 0.1;
@@ -47,6 +48,27 @@ export const defaultPolygonStyle: PolygonStyle = {
   outlineWidth: 2,
   outlineStyle: "solid",
   extrudeHeight: 0
+};
+export const defaultVolumeStyle: VolumeStyle = {
+  width: 220,
+  depth: 220,
+  height: 140,
+  floorOffset: 0,
+  opacity: 0.32,
+  slices: 22,
+  color: "#c9dcff",
+  edgeColor: "#f4fbff",
+  emitterMode: "emitter",
+  emitterRadius: 18,
+  fireLifetime: 1.5,
+  smokeLifetime: 7.6,
+  fireSpeed: 58,
+  smokeSpeed: 20,
+  variation: 0.65,
+  turbulence: 12,
+  windX: 3.3,
+  windY: 1.1,
+  buoyancy: 28
 };
 export const DEFAULT_TEXT_MESH_DEPTH_PERCENT = 22;
 export const MIN_TEXT_SIZE = 8;
@@ -97,6 +119,7 @@ export type ProjectLayerSnapshot = {
   lineFollowTerrain3D?: boolean;
   polygonStyle?: PolygonStyle;
   polygonZOffset?: number;
+  volumeStyle?: VolumeStyle;
   textContent?: string;
   textSize?: number;
   textColor?: string;

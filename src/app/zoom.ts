@@ -45,7 +45,7 @@ const estimateExtentSizeMeters = (extent: Extent | null) => {
 };
 
 const getSceneTargetScale = (layerData: LayerData, extent: Extent | null) => {
-  if (layerData.type === "point") {
+  if (layerData.type === "point" || layerData.type === "volume") {
     return SCENE_POINT_TARGET_SCALE;
   }
   if (layerData.type === "text") {

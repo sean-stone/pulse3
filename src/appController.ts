@@ -46,6 +46,7 @@ import {
   defaultLineStyle,
   defaultPointStyle,
   defaultPolygonStyle,
+  defaultVolumeStyle,
   getAutoPinYOffset,
   normalizeBasemap,
   sanitizePlainText
@@ -80,6 +81,11 @@ import {
   resolveTextMeshHitGraphic,
   syncTextMeshOverlay
 } from "./app/textMesh";
+import {
+  destroyVolumeBoxOverlay,
+  resolveVolumeBoxHitGraphic,
+  syncVolumeBoxOverlay
+} from "./app/volumeBox";
 import "jszip/dist/jszip.min.js";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
@@ -251,6 +257,8 @@ const webglAnimationTypes = new Set([
   "fireworks",
   "crossetteShell",
   "mineShellCombo",
+  "smoke",
+  "fire",
   "breathe",
   "pixelate",
   "timeGradient",
@@ -1152,6 +1160,14 @@ function ensureSketchViewModel(layer: GraphicsLayer) {
         if (currentViewMode === "3d" && getPointWebStyleSymbolSpec(style)) {
           void applyPointModelSymbolToLayer(layerData, style);
         }
+      } else if (layerData.type === "volume") {
+        graphic.geometry = new Point({
+          x: Number((graphic.geometry as any)?.x),
+          y: Number((graphic.geometry as any)?.y),
+          spatialReference: (graphic.geometry as any)?.spatialReference
+        });
+        graphic.symbol = buildVolumeAnchorSymbol(layerData.volumeStyle ?? defaultVolumeStyle);
+        syncVolumeBoxOverlay(layerData, view);
       } else if (layerData.type === "polyline") {
         const style = layerData.lineStyle ?? defaultLineStyle;
         graphic.symbol = buildLineSymbolForCurrentView(style);
@@ -2824,6 +2840,10 @@ async function handleMapContextMenu(event: MouseEvent) {
       label: "Add text",
       onSelect: () => void startDrawing("text")
     },
+    {
+      label: "Add particles",
+      onSelect: () => void startDrawing("volume")
+    },
     { type: "divider" },
     {
       label: "Center map here",
@@ -3018,6 +3038,10 @@ function applyLayerModeProperties(layerData: LayerData) {
     layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0 };
     return;
   }
+  if (layerData.type === "volume") {
+    layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0 };
+    return;
+  }
   if (geometryType === "polygon") {
     const polygonOffset = Number(layerData.polygonZOffset);
     layerAny.elevationInfo = {
@@ -3184,6 +3208,7 @@ async function applyProjectSnapshot(snapshot: unknown) {
       view.map.removeMany(overlayLayers);
     }
     graphicsLayers.forEach((layerData) => {
+      destroyVolumeBoxOverlay(layerData, view);
       delete (layerData as any).__textMeshLayer;
       delete (layerData as any).__arrowLayer;
       delete (layerData as any).__barrageLayer;
@@ -5127,6 +5152,10 @@ function captureTextWorldRotation(layerData: LayerData) {
 
 function resolveInteractiveLayerHit(graphic: any) {
   if (!graphic) return null;
+  const volumeHit = resolveVolumeBoxHitGraphic(graphic);
+  if (volumeHit) {
+    return volumeHit;
+  }
   const meshHit = resolveTextMeshHitGraphic(graphic);
   if (meshHit) {
     return meshHit;
@@ -5141,6 +5170,7 @@ function resolveInteractiveLayerHit(graphic: any) {
 
 function getLayerOverlayLayers(layerData: LayerData) {
   return [
+    (layerData as any).__volumeLayer,
     (layerData as any).__textMeshLayer,
     (layerData as any).__arrowLayer,
     (layerData as any).__barrageLayer,
@@ -5153,9 +5183,9 @@ function getLayerOverlayLayers(layerData: LayerData) {
 }
 
 function clearLayerOverlayLayers(layerData: LayerData) {
-  if (!view) return;
+  destroyVolumeBoxOverlay(layerData, view);
   const overlays = getLayerOverlayLayers(layerData);
-  if (overlays.length) {
+  if (view && overlays.length) {
     view.map.removeMany(overlays);
   }
   delete (layerData as any).__textMeshLayer;
@@ -5199,6 +5229,7 @@ async function resetProject() {
     view.map.removeMany(overlayLayers);
   }
   graphicsLayers.forEach((layerData) => {
+    destroyVolumeBoxOverlay(layerData, view);
     delete (layerData as any).__textMeshLayer;
     delete (layerData as any).__arrowLayer;
     delete (layerData as any).__barrageLayer;
@@ -6094,6 +6125,7 @@ function setupEventListeners() {
   getEl("add-line-btn").addEventListener("click", () => startDrawing("polyline"));
   getEl("add-polygon-btn").addEventListener("click", () => startDrawing("polygon"));
   getEl("add-text-btn").addEventListener("click", () => startDrawing("text"));
+  getEl("add-volume-btn").addEventListener("click", () => startDrawing("volume"));
   getEl("import-toggle-btn").addEventListener("click", toggleImportOptions);
   getEl("import-geojson-btn").addEventListener("click", () => handleImportClick("geojson"));
   getEl("import-csv-btn").addEventListener("click", () => handleImportClick("csv"));
@@ -6355,6 +6387,17 @@ function setupEventListeners() {
   getEl("polygon-extrude-height-input").addEventListener("calciteInputNumberChange", () =>
     applyStyleSettings(false)
   );
+  getEl("volume-emitter-mode-select").addEventListener("calciteSelectChange", () => applyStyleSettings(false));
+  getEl("volume-emitter-radius-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-fire-lifetime-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-smoke-lifetime-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-fire-speed-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-smoke-speed-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-variation-input").addEventListener("calciteSliderInput", () => applyStyleSettings(false));
+  getEl("volume-turbulence-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-wind-x-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-wind-y-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
+  getEl("volume-buoyancy-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
 
   getEl("layer-blend-mode-select").addEventListener("calciteSelectChange", () =>
     applyStyleSettings(false)
@@ -7170,9 +7213,53 @@ function handleFollowPathReverseChange(event: Event) {
   });
 }
 
+function getLayerTypeLabel(type: LayerType) {
+  if (type === "volume") {
+    return "Particles";
+  }
+  return `${type.charAt(0).toUpperCase() + type.slice(1)}`;
+}
+
+function getDefaultLayerFallbackName(type: LayerType) {
+  return `${getLayerTypeLabel(type)} Layer`;
+}
+
+function getDefaultLayerName(type: LayerType, index: number) {
+  return `${getLayerTypeLabel(type)} ${index}`;
+}
+
+function migrateLegacyVolumeLayerName(layerData: LayerData) {
+  if (layerData.type !== "volume") return;
+  const currentName = String(layerData.name || "").trim();
+  if (!currentName) return;
+
+  let nextName: string | null = null;
+  const indexedMatch = /^Volume\s+(\d+)$/i.exec(currentName);
+  const emitterIndexedMatch = /^Particle Emitter\s+(\d+)$/i.exec(currentName);
+  if (indexedMatch) {
+    nextName = `Particles ${indexedMatch[1]}`;
+  } else if (emitterIndexedMatch) {
+    nextName = `Particles ${emitterIndexedMatch[1]}`;
+  } else if (/^Volume Layer$/i.test(currentName)) {
+    nextName = "Particles Layer";
+  } else if (/^Particle Emitter Layer$/i.test(currentName)) {
+    nextName = "Particles Layer";
+  } else if (/^Volume$/i.test(currentName)) {
+    nextName = "Particles";
+  } else if (/^Particle Emitter$/i.test(currentName)) {
+    nextName = "Particles";
+  }
+
+  if (!nextName || nextName === currentName) return;
+  layerData.name = nextName;
+  if (layerData.layer) {
+    layerData.layer.title = nextName;
+  }
+}
+
 function createImportedLayer(type: LayerType, name: string, graphics: Graphic[]): LayerData | null {
   if (!view) return null;
-  const safeName = sanitizePlainText(name, `${type.charAt(0).toUpperCase() + type.slice(1)} Layer`);
+  const safeName = sanitizePlainText(name, getDefaultLayerFallbackName(type));
   const newLayer = new GraphicsLayer({
     id: createLayerRuntimeId(type),
     title: safeName
@@ -7193,6 +7280,9 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.pointStyle = { ...defaultPointStyle };
     layerData.pointFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
+  } else if (type === "volume") {
+    layerData.volumeStyle = { ...defaultVolumeStyle };
+    layerData.layerEffectsEnabled = false;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
     layerData.lineFollowTerrain3D = false;
@@ -7247,6 +7337,8 @@ function createGraphicForType(
   if (type === "point") {
     const style = defaultPointStyle;
     graphic.symbol = buildPointSymbolForCurrentView(style);
+  } else if (type === "volume") {
+    graphic.symbol = buildVolumeAnchorSymbol(defaultVolumeStyle);
   } else if (type === "polyline") {
     graphic.symbol = buildLineSymbolForCurrentView(defaultLineStyle);
   } else if (type === "polygon") {
@@ -7299,6 +7391,8 @@ async function startDrawing(type: LayerType) {
   const drawInfoText =
     type === "point"
       ? "Click on the map to place a point."
+      : type === "volume"
+        ? "Click on the map to place particles."
       : type === "text"
         ? "Click on the map to place text."
         : "Click to draw. Double-click to finish.";
@@ -7306,7 +7400,7 @@ async function startDrawing(type: LayerType) {
   setDrawInfoBoxVisible(true);
 
   const userLayerCount = graphicsLayers.filter((layerData) => !isViewTrackLayer(layerData)).length;
-  const layerName = `${type.charAt(0).toUpperCase() + type.slice(1)} ${userLayerCount + 1}`;
+  const layerName = getDefaultLayerName(type, userLayerCount + 1);
   const newLayer = new GraphicsLayer({
     id: createLayerRuntimeId(type),
     title: layerName
@@ -7327,6 +7421,9 @@ async function startDrawing(type: LayerType) {
     layerData.pointStyle = { ...defaultPointStyle };
     layerData.pointFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
+  } else if (type === "volume") {
+    layerData.volumeStyle = { ...defaultVolumeStyle };
+    layerData.layerEffectsEnabled = false;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
     layerData.lineFollowTerrain3D = false;
@@ -7363,6 +7460,7 @@ async function startDrawing(type: LayerType) {
     if (!sketchVm) return;
     const toolMap: Record<string, string> = {
       point: "point",
+      volume: "point",
       polyline: "polyline",
       polygon: "polygon"
     };
@@ -7388,6 +7486,7 @@ function updateLayersList() {
 
   const orderedLayers = [...graphicsLayers].reverse();
   orderedLayers.forEach((layerData) => {
+    migrateLegacyVolumeLayerName(layerData);
     const index = graphicsLayers.indexOf(layerData);
     const isLockedLayer = isViewTrackLayer(layerData);
     const item = document.createElement("calcite-accordion-item");
@@ -7466,6 +7565,8 @@ function getIconForType(type: LayerType) {
       return "polygon";
     case "text":
       return "text-large";
+    case "volume":
+      return "pin";
     case "feature":
       return "database";
     default:
@@ -7728,6 +7829,7 @@ async function duplicateLayer(index: number) {
       lineFollowTerrain3D: layerData.lineFollowTerrain3D,
       polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
       polygonZOffset: layerData.polygonZOffset,
+      volumeStyle: layerData.volumeStyle ? { ...layerData.volumeStyle } : undefined,
       layerBlendMode: layerData.layerBlendMode,
       layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
       layerEffectsEnabled: layerData.layerEffectsEnabled
@@ -7769,6 +7871,7 @@ async function duplicateLayer(index: number) {
     lineFollowTerrain3D: layerData.lineFollowTerrain3D,
     polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
     polygonZOffset: layerData.polygonZOffset,
+    volumeStyle: layerData.volumeStyle ? { ...layerData.volumeStyle } : undefined,
     textContent: layerData.textContent,
     textSize: layerData.textSize,
     textColor: layerData.textColor,
@@ -7792,6 +7895,8 @@ async function duplicateLayer(index: number) {
   }
   if (layerData.type === "point") {
     duplicate.pointStyle = duplicate.pointStyle ?? { ...defaultPointStyle };
+  } else if (layerData.type === "volume") {
+    duplicate.volumeStyle = duplicate.volumeStyle ?? { ...defaultVolumeStyle };
   } else if (layerData.type === "polyline") {
     duplicate.lineStyle = duplicate.lineStyle ?? { ...defaultLineStyle };
   } else if (layerData.type === "polygon") {
@@ -7979,16 +8084,18 @@ function syncPolygonOutlineControlVisibility(isPolygon: boolean, showOutlineStyl
   }
 }
 
-function styleTypeSupportsCssEffects(styleType: "point" | "polyline" | "polygon" | null) {
+function styleTypeSupportsCssEffects(styleType: StylePanelType) {
+  if (styleType === "volume") return false;
   return !(currentViewMode === "3d" && (styleType === "point" || styleType === "polyline" || styleType === "polygon"));
 }
 
-function styleTypeSupportsBlendMode(styleType: "point" | "polyline" | "polygon" | null) {
+function styleTypeSupportsBlendMode(styleType: StylePanelType) {
+  if (styleType === "volume") return false;
   return !(currentViewMode === "3d" && (styleType === "point" || styleType === "polyline" || styleType === "polygon"));
 }
 
 function shouldUseCollapsedEffectsToggle(
-  styleType: "point" | "polyline" | "polygon" | null,
+  styleType: StylePanelType,
   layerData?: LayerData
 ) {
   if (styleType !== "point") {
@@ -8004,7 +8111,7 @@ function shouldUseCollapsedEffectsToggle(
 }
 
 function syncLayerEffectsControlVisibility(
-  styleType: "point" | "polyline" | "polygon" | null,
+  styleType: StylePanelType,
   options?: { hideBlendMode?: boolean; hideEffectsToggle?: boolean }
 ) {
   const blendModeRow = document.getElementById("layer-blend-mode-row") as HTMLElement | null;
@@ -8091,6 +8198,19 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     syncPolygonExtrusionControlVisibility(style.style);
     syncPolygonOutlineControlVisibility(true, layerData.type === "feature");
     updatePolygonStyleOptionColors(style.color, style.outlineColor);
+  } else if (styleType === "volume") {
+    const style = layerData.volumeStyle ?? defaultVolumeStyle;
+    setCalciteValue(getEl("volume-emitter-mode-select"), "emitter");
+    setCalciteValue(getEl("volume-emitter-radius-input"), style.emitterRadius ?? defaultVolumeStyle.emitterRadius ?? 18);
+    setCalciteValue(getEl("volume-fire-lifetime-input"), style.fireLifetime ?? defaultVolumeStyle.fireLifetime ?? 1.5);
+    setCalciteValue(getEl("volume-smoke-lifetime-input"), style.smokeLifetime ?? defaultVolumeStyle.smokeLifetime ?? 7.6);
+    setCalciteValue(getEl("volume-fire-speed-input"), style.fireSpeed ?? defaultVolumeStyle.fireSpeed ?? 58);
+    setCalciteValue(getEl("volume-smoke-speed-input"), style.smokeSpeed ?? defaultVolumeStyle.smokeSpeed ?? 20);
+    setCalciteValue(getEl("volume-variation-input"), style.variation ?? defaultVolumeStyle.variation ?? 0.65);
+    setCalciteValue(getEl("volume-turbulence-input"), style.turbulence ?? defaultVolumeStyle.turbulence ?? 12);
+    setCalciteValue(getEl("volume-wind-x-input"), style.windX ?? defaultVolumeStyle.windX ?? 3.3);
+    setCalciteValue(getEl("volume-wind-y-input"), style.windY ?? defaultVolumeStyle.windY ?? 1.1);
+    setCalciteValue(getEl("volume-buoyancy-input"), style.buoyancy ?? defaultVolumeStyle.buoyancy ?? 28);
   }
 
   const effectSettings = layerData.layerEffectSettings ?? defaultLayerEffectSettings;
@@ -8111,9 +8231,10 @@ function syncStylePanelFromLayer(layerData: LayerData) {
 
   syncLayerEffectsControlVisibility(styleType, {
     hideBlendMode:
-      styleType === "point" &&
-      currentViewMode === "3d" &&
-      pointStyleUses3DObjectLayer((layerData.pointStyle ?? defaultPointStyle).style),
+      styleType === "volume" ||
+      (styleType === "point" &&
+        currentViewMode === "3d" &&
+        pointStyleUses3DObjectLayer((layerData.pointStyle ?? defaultPointStyle).style)),
     hideEffectsToggle: !shouldUseCollapsedEffectsToggle(styleType, layerData)
   });
 
@@ -8167,6 +8288,9 @@ function applyLayerEffects(layerData: LayerData) {
   layerData.layer.blendMode = blend;
 
   if (!styleTypeSupportsCssEffects(styleType)) {
+    if (layerData.type === "volume") {
+      syncVolumeBoxOverlay(layerData, view);
+    }
     return;
   }
 
@@ -8182,6 +8306,8 @@ function applyLayerEffects(layerData: LayerData) {
   layerData.layer.effect = buildLayerEffectString(settings);
   if (layerData.type === "text") {
     syncTextMeshOverlay(layerData, view);
+  } else if (layerData.type === "volume") {
+    syncVolumeBoxOverlay(layerData, view);
   }
 }
 
@@ -8278,6 +8404,46 @@ function applyStyleSettings(shouldClose: boolean) {
     syncPolygonOutlineControlVisibility(true, layerData.type === "feature");
     updatePolygonAnimationPreview(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
     updatePolygonStyleOptionColors(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
+  } else if (styleType === "volume") {
+    layerData.volumeStyle = {
+      ...(layerData.volumeStyle ?? defaultVolumeStyle),
+      emitterMode: "emitter",
+      emitterRadius: readNumber(
+        (getEl("volume-emitter-radius-input") as any).value,
+        defaultVolumeStyle.emitterRadius ?? 18
+      ),
+      fireLifetime: readNumber(
+        (getEl("volume-fire-lifetime-input") as any).value,
+        defaultVolumeStyle.fireLifetime ?? 1.5
+      ),
+      smokeLifetime: readNumber(
+        (getEl("volume-smoke-lifetime-input") as any).value,
+        defaultVolumeStyle.smokeLifetime ?? 7.6
+      ),
+      fireSpeed: readNumber(
+        (getEl("volume-fire-speed-input") as any).value,
+        defaultVolumeStyle.fireSpeed ?? 58
+      ),
+      smokeSpeed: readNumber(
+        (getEl("volume-smoke-speed-input") as any).value,
+        defaultVolumeStyle.smokeSpeed ?? 20
+      ),
+      variation: clamp(
+        readNumber((getEl("volume-variation-input") as any).value, defaultVolumeStyle.variation ?? 0.65),
+        0,
+        1.5
+      ),
+      turbulence: readNumber(
+        (getEl("volume-turbulence-input") as any).value,
+        defaultVolumeStyle.turbulence ?? 12
+      ),
+      windX: readNumber((getEl("volume-wind-x-input") as any).value, defaultVolumeStyle.windX ?? 3.3),
+      windY: readNumber((getEl("volume-wind-y-input") as any).value, defaultVolumeStyle.windY ?? 1.1),
+      buoyancy: readNumber(
+        (getEl("volume-buoyancy-input") as any).value,
+        defaultVolumeStyle.buoyancy ?? 28
+      )
+    };
   }
 
   layerData.layerBlendMode = String((getEl("layer-blend-mode-select") as any).value || "normal");
@@ -8664,6 +8830,41 @@ function buildPolygonSymbolForCurrentView(style: any) {
   return currentViewMode === "3d" ? buildPolygonSymbol3D(style) : buildPolygonSymbol2D(style);
 }
 
+function buildVolumeAnchorSymbol(style: any) {
+  const volumeStyle = style ?? defaultVolumeStyle;
+  const fillColor = parseColorToRgba(volumeStyle.color || defaultVolumeStyle.color);
+  const edgeColor = parseColorToRgba(volumeStyle.edgeColor || defaultVolumeStyle.edgeColor);
+  if (currentViewMode === "3d") {
+    return {
+      type: "point-3d",
+      symbolLayers: [
+        {
+          type: "icon",
+          resource: { primitive: "circle" },
+          size: 9,
+          material: {
+            color: [fillColor.r, fillColor.g, fillColor.b, 0.22]
+          },
+          outline: {
+            color: [edgeColor.r, edgeColor.g, edgeColor.b, 0.75],
+            size: 1
+          }
+        }
+      ]
+    } as any;
+  }
+  return {
+    type: "simple-marker",
+    style: "circle",
+    size: 11,
+    color: [fillColor.r, fillColor.g, fillColor.b, 0.28],
+    outline: {
+      color: [edgeColor.r, edgeColor.g, edgeColor.b, 0.9],
+      width: 1.5
+    }
+  } as any;
+}
+
 function buildTextSymbol2D(layerData: LayerData) {
   const size = clamp(Number(layerData.textSize) || 14, MIN_TEXT_SIZE, MAX_TEXT_SIZE);
   return {
@@ -8812,6 +9013,18 @@ function applyLayerStyle(layerData: LayerData) {
   applyLayerModeProperties(layerData);
   if (layerData.type === "text") {
     applyTextSymbols(layerData);
+    return;
+  }
+  if (layerData.type === "volume") {
+    const style = layerData.volumeStyle ?? defaultVolumeStyle;
+    layerData.layer.graphics.forEach((graphic: any) => {
+      graphic.symbol = buildVolumeAnchorSymbol(style);
+    });
+    if (currentViewMode === "3d") {
+      syncVolumeBoxOverlay(layerData, view);
+    } else {
+      destroyVolumeBoxOverlay(layerData, view);
+    }
     return;
   }
   if (layerData.type === "point") {
@@ -8974,6 +9187,10 @@ function handleSketchUpdate(event: any) {
       scheduleTextMeshOverlayRefresh();
       return;
     }
+    if (layerData.type === "volume") {
+      applyLayerStyle(layerData);
+      return;
+    }
     clearLayerOverlayLayers(layerData);
   });
   graphicsLayers.forEach((layerData) => {
@@ -9006,21 +9223,24 @@ function getFeatureStyleType(layerData: LayerData) {
   return "point";
 }
 
+type StylePanelType = "point" | "polyline" | "polygon" | "volume" | null;
+
 function getStyleTypeForLayer(layerData: LayerData) {
   if (layerData.type === "feature") {
-    return getFeatureStyleType(layerData);
+    return getFeatureStyleType(layerData) as StylePanelType;
   }
-  return layerData.type === "text" ? null : layerData.type;
+  return layerData.type === "text" ? null : (layerData.type as StylePanelType);
 }
 
 function setStyleSectionVisibility(
-  type: "point" | "polyline" | "polygon" | null,
+  type: StylePanelType,
   showFeatureExtras: boolean,
   showEffects: boolean
 ) {
   const pointSection = getEl("point-style-section");
   const lineSection = getEl("line-style-section");
   const polygonSection = getEl("polygon-style-section");
+  const volumeSection = getEl("volume-style-section");
   const pointAdvanced = getEl("point-advanced-section");
   const pointFollowTerrainRow = document.getElementById("point-follow-terrain-row") as HTMLElement | null;
   const lineFollowTerrainRow = document.getElementById("line-follow-terrain-row") as HTMLElement | null;
@@ -9028,11 +9248,13 @@ function setStyleSectionVisibility(
   const polygonExtrudeRow = document.getElementById("polygon-extrude-height-row") as HTMLElement | null;
   const polygonExtrudeNote = document.getElementById("polygon-extrude-note") as HTMLElement | null;
   const effectsSection = getEl("layer-effects-section");
-  const showEffectsSection = showEffects && !(currentViewMode === "3d" && type === "polygon");
+  const showEffectsSection =
+    showEffects && type !== "volume" && !(currentViewMode === "3d" && type === "polygon");
 
   pointSection.style.display = type === "point" ? "block" : "none";
   lineSection.style.display = type === "polyline" ? "block" : "none";
   polygonSection.style.display = type === "polygon" ? "block" : "none";
+  volumeSection.style.display = type === "volume" ? "block" : "none";
   effectsSection.style.display = showEffectsSection ? "block" : "none";
 
     pointAdvanced.style.display = type === "point" ? "block" : "none";
@@ -9566,6 +9788,17 @@ function updatePolygonAnimationPreview(fillColor: string, outlineColor: string) 
   containers.forEach((container) => {
     container.style.setProperty("--preview-fill-color", fillColor);
     container.style.setProperty("--preview-outline-color", outlineColor);
+  });
+}
+
+function updateVolumeAnimationPreview(color: string, edgeColor: string) {
+  const containers = Array.from(
+    document.querySelectorAll(".animation-type-options")
+  ) as HTMLElement[];
+  if (!containers.length) return;
+  containers.forEach((container) => {
+    container.style.setProperty("--preview-volume-color", color);
+    container.style.setProperty("--preview-volume-edge-color", edgeColor);
   });
 }
 
@@ -10191,6 +10424,12 @@ function updateAnimationOptions() {
         !getFollowPathAnimation(layerData) &&
         getEligibleFollowPathLayers(layerData).length > 0;
     }
+    if (layerData.type === "volume" && (type.value === "fadeIn" || type.value === "fadeOut")) {
+      return false;
+    }
+    if (type.value === "smoke" || type.value === "fire") {
+      return currentViewMode === "3d" && layerData.type === "volume";
+    }
     if (type.value !== "extrude") return true;
     return (
       currentViewMode === "3d" &&
@@ -10200,6 +10439,10 @@ function updateAnimationOptions() {
   });
   const baseTypes = types.filter((type) => !webglAnimationTypes.has(type.value));
   const webglTypes = types.filter((type) => webglAnimationTypes.has(type.value));
+
+  if (baseTypeSection) {
+    baseTypeSection.style.display = baseTypes.length ? "block" : "none";
+  }
 
   const renderTypeOptions = (
     container: HTMLElement,
@@ -10239,6 +10482,9 @@ function updateAnimationOptions() {
   } else if (layerData.type === "polygon") {
     const style = layerData.polygonStyle ?? defaultPolygonStyle;
     updatePolygonAnimationPreview(style.color, style.outlineColor);
+  } else if (layerData.type === "volume") {
+    const style = layerData.volumeStyle ?? defaultVolumeStyle;
+    updateVolumeAnimationPreview(style.color, style.edgeColor);
   }
 
   if (layerData.type === "feature" && featureSettings) {

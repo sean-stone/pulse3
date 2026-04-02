@@ -224,6 +224,8 @@ const createPlaybackController = (accessors: PlaybackAccessors, config: Playback
       });
     });
 
+    config.applyAnimationsAtTime(accessors.getCurrentTime());
+
     if (config.isExporting()) {
       config.stopExportRecording();
     }

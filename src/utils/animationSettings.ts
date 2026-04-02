@@ -6,7 +6,8 @@ import type {
   LineStyle,
   PointKeyframe,
   PointStyle,
-  PolygonStyle
+  PolygonStyle,
+  VolumeStyle
 } from "../types";
 
 export interface AnimationSettingsSnapshot {
@@ -24,6 +25,7 @@ export interface AnimationSettingsSnapshot {
     lineFollowTerrain3D?: boolean;
     polygonStyle?: PolygonStyle;
     polygonZOffset?: number;
+    volumeStyle?: VolumeStyle;
     textContent?: string;
     textSize?: number;
     textColor?: string;
@@ -67,6 +69,7 @@ export function buildAnimationSettingsSnapshot(
       lineFollowTerrain3D: layer.lineFollowTerrain3D,
       polygonStyle: layer.polygonStyle ? { ...layer.polygonStyle } : undefined,
       polygonZOffset: layer.polygonZOffset,
+      volumeStyle: layer.volumeStyle ? { ...layer.volumeStyle } : undefined,
       textContent: layer.textContent,
       textSize: layer.textSize,
       textColor: layer.textColor,
