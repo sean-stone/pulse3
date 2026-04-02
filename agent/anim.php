@@ -687,7 +687,7 @@ $schema = [
                                     "name" => ["type" => "string"],
                                     "type" => [
                                         "type" => "string",
-                                        "enum" => ["point", "polyline", "polygon", "text", "feature"]
+                                        "enum" => ["point", "polyline", "polygon", "text", "feature", "particles", "volume"]
                                     ],
                                     "animations" => [
                                         "type" => "array",
@@ -710,7 +710,9 @@ $schema = [
                                                                 "drawReverse",
                                                                 "fill",
                                                                 "typewriter",
-                                                                "field"
+                                                                "field",
+                                                                "smoke",
+                                                                "fire"
                                                             ]
                                                         ],
                                                         "duration" => ["type" => "number"],
@@ -1008,6 +1010,144 @@ $schema = [
                                             ]
                                         ]
                                     ],
+                                    "particleStyle" => [
+                                        "anyOf" => [
+                                            [
+                                                "type" => "object",
+                                                "additionalProperties" => false,
+                                                "properties" => [
+                                                    "width" => ["type" => "number"],
+                                                    "depth" => ["type" => "number"],
+                                                    "height" => ["type" => "number"],
+                                                    "floorOffset" => ["type" => "number"],
+                                                    "opacity" => ["type" => "number"],
+                                                    "slices" => ["type" => "number"],
+                                                    "color" => ["type" => "string"],
+                                                    "edgeColor" => ["type" => "string"],
+                                                    "preset" => [
+                                                        "type" => ["string", "null"],
+                                                        "enum" => [
+                                                            "balanced",
+                                                            "bonfire",
+                                                            "jet-flame",
+                                                            "heavy-smoke",
+                                                            "steam-vent",
+                                                            "dust-plume",
+                                                            null
+                                                        ]
+                                                    ],
+                                                    "emitterMode" => [
+                                                        "type" => ["string", "null"],
+                                                        "enum" => ["box", "emitter", null]
+                                                    ],
+                                                    "emitterRadius" => ["type" => ["number", "null"]],
+                                                    "fireLifetime" => ["type" => ["number", "null"]],
+                                                    "smokeLifetime" => ["type" => ["number", "null"]],
+                                                    "fireSpeed" => ["type" => ["number", "null"]],
+                                                    "smokeSpeed" => ["type" => ["number", "null"]],
+                                                    "variation" => ["type" => ["number", "null"]],
+                                                    "turbulence" => ["type" => ["number", "null"]],
+                                                    "windX" => ["type" => ["number", "null"]],
+                                                    "windY" => ["type" => ["number", "null"]],
+                                                    "buoyancy" => ["type" => ["number", "null"]]
+                                                ],
+                                                "required" => [
+                                                    "width",
+                                                    "depth",
+                                                    "height",
+                                                    "floorOffset",
+                                                    "opacity",
+                                                    "slices",
+                                                    "color",
+                                                    "edgeColor",
+                                                    "preset",
+                                                    "emitterMode",
+                                                    "emitterRadius",
+                                                    "fireLifetime",
+                                                    "smokeLifetime",
+                                                    "fireSpeed",
+                                                    "smokeSpeed",
+                                                    "variation",
+                                                    "turbulence",
+                                                    "windX",
+                                                    "windY",
+                                                    "buoyancy"
+                                                ]
+                                            ],
+                                            [
+                                                "type" => "null"
+                                            ]
+                                        ]
+                                    ],
+                                    "volumeStyle" => [
+                                        "anyOf" => [
+                                            [
+                                                "type" => "object",
+                                                "additionalProperties" => false,
+                                                "properties" => [
+                                                    "width" => ["type" => "number"],
+                                                    "depth" => ["type" => "number"],
+                                                    "height" => ["type" => "number"],
+                                                    "floorOffset" => ["type" => "number"],
+                                                    "opacity" => ["type" => "number"],
+                                                    "slices" => ["type" => "number"],
+                                                    "color" => ["type" => "string"],
+                                                    "edgeColor" => ["type" => "string"],
+                                                    "preset" => [
+                                                        "type" => ["string", "null"],
+                                                        "enum" => [
+                                                            "balanced",
+                                                            "bonfire",
+                                                            "jet-flame",
+                                                            "heavy-smoke",
+                                                            "steam-vent",
+                                                            "dust-plume",
+                                                            null
+                                                        ]
+                                                    ],
+                                                    "emitterMode" => [
+                                                        "type" => ["string", "null"],
+                                                        "enum" => ["box", "emitter", null]
+                                                    ],
+                                                    "emitterRadius" => ["type" => ["number", "null"]],
+                                                    "fireLifetime" => ["type" => ["number", "null"]],
+                                                    "smokeLifetime" => ["type" => ["number", "null"]],
+                                                    "fireSpeed" => ["type" => ["number", "null"]],
+                                                    "smokeSpeed" => ["type" => ["number", "null"]],
+                                                    "variation" => ["type" => ["number", "null"]],
+                                                    "turbulence" => ["type" => ["number", "null"]],
+                                                    "windX" => ["type" => ["number", "null"]],
+                                                    "windY" => ["type" => ["number", "null"]],
+                                                    "buoyancy" => ["type" => ["number", "null"]]
+                                                ],
+                                                "required" => [
+                                                    "width",
+                                                    "depth",
+                                                    "height",
+                                                    "floorOffset",
+                                                    "opacity",
+                                                    "slices",
+                                                    "color",
+                                                    "edgeColor",
+                                                    "preset",
+                                                    "emitterMode",
+                                                    "emitterRadius",
+                                                    "fireLifetime",
+                                                    "smokeLifetime",
+                                                    "fireSpeed",
+                                                    "smokeSpeed",
+                                                    "variation",
+                                                    "turbulence",
+                                                    "windX",
+                                                    "windY",
+                                                    "buoyancy"
+                                                ]
+                                            ],
+                                            [
+                                                "type" => "null"
+                                            ]
+                                        ]
+                                    ],
                                     "textContent" => ["type" => ["string", "null"]],
                                     "textSize" => ["type" => ["number", "null"]],
                                     "textColor" => ["type" => ["string", "null"]],
@@ -1103,6 +1243,8 @@ $schema = [
                                     "pointStyle",
                                     "lineStyle",
                                     "polygonStyle",
+                                    "particleStyle",
+                                    "volumeStyle",
                                     "textContent",
                                     "textSize",
                                     "textColor",
@@ -1144,7 +1286,8 @@ $instructions = trim(
     "polyline=[draw, drawReverse, fadeIn, fadeOut], " .
     "polygon=[fadeIn, fadeOut, fill, pulse], " .
     "text=[fadeIn, fadeOut, typewriter, bounce], " .
-    "feature=[field]. " .
+    "feature=[field], " .
+    "particles=[smoke, fire]. " .
     "Valid point styles: " .
     "[circle, square, diamond, triangle, cross, x, home, map-pin, star, hexagon, pentagon, octagon, heart, drop, shield, flag, " .
     "phosphor-map-pin, phosphor-map-pin-line, phosphor-map-pin-plus, phosphor-map-pin-simple, phosphor-map-pin-simple-line, " .
@@ -1177,6 +1320,10 @@ $instructions = trim(
     "(fov, qualityProfile, atmosphereQuality, glowEnabled, glowIntensity, cinematicFxEnabled, exposure, contrast, saturation, letterbox, noiseLevel, scanlineLevel, vignetteLevel, jitter, chromaticAberration), optional app.scene.lighting, and optional extent. " .
     "Provide properties._pulse.timeline.durationOverride (number or null). " .
     "Provide properties._pulse.layers[] with id, name, type, animations, and any needed style fields. " .
+    "Use type='particles' for smoke/fire particle emitters; avoid legacy type='volume'. " .
+    "For particles layers, only use smoke or fire animations. " .
+    "For particles layers, provide particleStyle with width, depth, height, floorOffset, opacity, slices, color, edgeColor, preset, emitterMode, emitterRadius, fireLifetime, smokeLifetime, fireSpeed, smokeSpeed, variation, turbulence, windX, windY, and buoyancy. " .
+    "Copy particleStyle to volumeStyle for compatibility. " .
     "For point followPath animations, set pathLayerId to a matching polyline layer id and include orientToPath, reverse, and smoothFollow booleans. " .
     "For each feature, set properties._pulse.layerId to a matching layer id."
 );
@@ -1424,6 +1571,38 @@ function clamp_duration($value, $max) {
     return $num > $max ? $max : $num;
 }
 
+function normalize_particle_layer(array $layer): array {
+    $type = $layer["type"] ?? null;
+    if ($type === "volume") {
+        $layer["type"] = "particles";
+    }
+
+    $particleStyle = $layer["particleStyle"] ?? null;
+    $volumeStyle = $layer["volumeStyle"] ?? null;
+    if ($particleStyle === null && is_array($volumeStyle)) {
+        $particleStyle = $volumeStyle;
+    }
+    if ($volumeStyle === null && is_array($particleStyle)) {
+        $volumeStyle = $particleStyle;
+    }
+    if ($particleStyle !== null) {
+        $layer["particleStyle"] = $particleStyle;
+    }
+    if ($volumeStyle !== null) {
+        $layer["volumeStyle"] = $volumeStyle;
+    }
+
+    return $layer;
+}
+
+if (isset($snapshot["properties"]["_pulse"]["layers"]) && is_array($snapshot["properties"]["_pulse"]["layers"])) {
+    foreach ($snapshot["properties"]["_pulse"]["layers"] as &$layer) {
+        if (!is_array($layer)) continue;
+        $layer = normalize_particle_layer($layer);
+    }
+    unset($layer);
+}
+
 // Cap timeline duration and per-animation duration.
 if (isset($snapshot["properties"]["_pulse"]["timeline"]["durationOverride"])) {
     $durationOverride = $snapshot["properties"]["_pulse"]["timeline"]["durationOverride"];
@@ -1460,7 +1639,9 @@ function normalize_non_overlapping_animations(array $layer): array {
         "polyline" => ["draw", "drawReverse", "fadeIn", "fadeOut"],
         "point" => ["followPath", "fadeIn", "fadeOut", "pulse", "bounce", "spin", "grow"],
         "text" => ["typewriter", "fadeIn", "fadeOut", "bounce"],
-        "feature" => ["field"]
+        "feature" => ["field"],
+        "particles" => ["smoke", "fire"],
+        "volume" => ["smoke", "fire"]
     ];
     $priorityMap = [];
     foreach (($priority[$type] ?? []) as $idx => $t) {
@@ -1747,7 +1928,9 @@ function validate_snapshot(array $data): ?string {
         "polyline" => ["draw", "drawReverse", "fadeIn", "fadeOut"],
         "polygon" => ["fadeIn", "fadeOut", "fill", "pulse"],
         "text" => ["fadeIn", "fadeOut", "typewriter", "bounce"],
-        "feature" => ["field"]
+        "feature" => ["field"],
+        "particles" => ["smoke", "fire"],
+        "volume" => ["smoke", "fire"]
     ];
     $allowedPointStyles = [
         "circle",
@@ -1909,6 +2092,15 @@ function validate_snapshot(array $data): ?string {
         "vivid-light",
         "xor"
     ];
+    $allowedParticlePresets = [
+        "balanced",
+        "bonfire",
+        "jet-flame",
+        "heavy-smoke",
+        "steam-vent",
+        "dust-plume"
+    ];
+    $allowedEmitterModes = ["box", "emitter"];
     $layerIds = [];
     $layerTypesById = [];
     foreach ($pulse["layers"] as $layer) {
@@ -1980,8 +2172,22 @@ function validate_snapshot(array $data): ?string {
         if ($blend !== null && (!is_string($blend) || !in_array($blend, $allowedBlendModes, true))) {
             return "Invalid blend mode";
         }
+        foreach (["particleStyle", "volumeStyle"] as $particleStyleKey) {
+            $particleStyle = $layer[$particleStyleKey] ?? null;
+            if (!is_array($particleStyle)) {
+                continue;
+            }
+            $preset = $particleStyle["preset"] ?? null;
+            if ($preset !== null && (!is_string($preset) || !in_array($preset, $allowedParticlePresets, true))) {
+                return "Invalid particle preset";
+            }
+            $emitterMode = $particleStyle["emitterMode"] ?? null;
+            if ($emitterMode !== null && (!is_string($emitterMode) || !in_array($emitterMode, $allowedEmitterModes, true))) {
+                return "Invalid particle emitter mode";
+            }
+        }
         $layerIds[$id] = true;
-        $layerTypesById[$id] = $layerType;
+        $layerTypesById[$id] = $layerType === "volume" ? "particles" : $layerType;
     }
     foreach ($pulse["layers"] as $layer) {
         if (!is_array($layer) || ($layer["type"] ?? null) !== "point") {
