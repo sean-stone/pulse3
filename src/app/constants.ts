@@ -3,6 +3,7 @@ import type {
   LayerEffectSettings,
   LayerType,
   LineStyle,
+  ParticleStyle,
   PointKeyframe,
   PointStyle,
   PolygonStyle,
@@ -49,7 +50,7 @@ export const defaultPolygonStyle: PolygonStyle = {
   outlineStyle: "solid",
   extrudeHeight: 0
 };
-export const defaultVolumeStyle: VolumeStyle = {
+export const defaultParticleStyle: ParticleStyle = {
   width: 220,
   depth: 220,
   height: 140,
@@ -58,6 +59,7 @@ export const defaultVolumeStyle: VolumeStyle = {
   slices: 22,
   color: "#c9dcff",
   edgeColor: "#f4fbff",
+  preset: "balanced",
   emitterMode: "emitter",
   emitterRadius: 18,
   fireLifetime: 1.5,
@@ -70,6 +72,7 @@ export const defaultVolumeStyle: VolumeStyle = {
   windY: 1.1,
   buoyancy: 28
 };
+export const defaultVolumeStyle: VolumeStyle = defaultParticleStyle;
 export const DEFAULT_TEXT_MESH_DEPTH_PERCENT = 22;
 export const MIN_TEXT_SIZE = 8;
 export const MAX_TEXT_SIZE = 200;
@@ -119,6 +122,7 @@ export type ProjectLayerSnapshot = {
   lineFollowTerrain3D?: boolean;
   polygonStyle?: PolygonStyle;
   polygonZOffset?: number;
+  particleStyle?: ParticleStyle;
   volumeStyle?: VolumeStyle;
   textContent?: string;
   textSize?: number;

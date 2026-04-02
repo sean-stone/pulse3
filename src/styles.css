@@ -3593,7 +3593,8 @@ calcite-accordion-item::part(toggle-icon) {
   box-shadow: none;
 }
 
-.animation-type-preview--volume {
+.animation-type-preview--volume,
+.animation-type-preview--particles {
   width: 12px;
   height: 12px;
   border-radius: 3px;
@@ -4049,7 +4050,8 @@ calcite-accordion-item::part(toggle-icon) {
   animation: preview-fireworks-pop 2.1s ease-out infinite;
 }
 
-.animation-type-preview--volume.animation-type-preview--smoke {
+.animation-type-preview--volume.animation-type-preview--smoke,
+.animation-type-preview--particles.animation-type-preview--smoke {
   background:
     radial-gradient(circle at 44% 34%, rgba(255, 255, 255, 0.42) 0 2px, transparent 2.2px),
     radial-gradient(circle at 62% 60%, rgba(228, 233, 238, 0.58) 0 2.5px, transparent 2.8px),
@@ -4065,7 +4067,8 @@ calcite-accordion-item::part(toggle-icon) {
   animation: preview-volume-smoke 2.2s ease-in-out infinite;
 }
 
-.animation-type-preview--volume.animation-type-preview--fire {
+.animation-type-preview--volume.animation-type-preview--fire,
+.animation-type-preview--particles.animation-type-preview--fire {
   background:
     radial-gradient(circle at 50% 78%, rgba(255, 247, 214, 0.95) 0 1.6px, transparent 2px),
     radial-gradient(circle at 48% 52%, rgba(255, 195, 110, 0.88) 0 2.6px, transparent 3px),

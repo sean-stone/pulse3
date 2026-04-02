@@ -7,6 +7,13 @@ import type { LayerAnimation, LayerData, LineStyle, PointKeyframe, PointStyle, P
 
 import type { ProjectLayerSnapshot, ProjectSnapshot } from "./constants";
 import { PROJECT_VERSION, defaultVolumeStyle } from "./constants";
+import {
+  getParticleStyle,
+  isParticleLayer,
+  isParticleLayerType,
+  normalizeParticleLayerType,
+  setParticleStyle
+} from "./particles";
 
 type SnapshotBuildConfig = {
   view: any;
@@ -168,10 +175,11 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
     const runtimeId = String(layerData.layer?.id || "").trim();
     const layerId = runtimeId || `layer-${index}`;
     layerIds.set(layerData, layerId);
+    const particleStyle = isParticleLayer(layerData) ? getParticleStyle(layerData) : undefined;
     return {
       id: layerId,
       name: layerData.name,
-      type: layerData.type,
+      type: normalizeParticleLayerType(layerData.type),
       animations: layerData.animations.map((anim) => ({ ...anim })),
       pointKeyframes: layerData.pointKeyframes?.map((frame) => ({ ...frame })),
       pointStyle: layerData.pointStyle ? { ...layerData.pointStyle } : undefined,
@@ -180,7 +188,8 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
       lineFollowTerrain3D: layerData.lineFollowTerrain3D,
       polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
       polygonZOffset: layerData.polygonZOffset,
-      volumeStyle: layerData.volumeStyle ? { ...layerData.volumeStyle } : undefined,
+      particleStyle: particleStyle ? { ...particleStyle } : undefined,
+      volumeStyle: particleStyle ? { ...particleStyle } : undefined,
       textContent: layerData.textContent,
       textSize: layerData.textSize,
       textColor: layerData.textColor,
@@ -212,7 +221,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
 
   const features: ProjectSnapshot["features"] = [];
   savableLayers.forEach((layerData, index) => {
-    if (layerData.type === "feature") return;
+      if (layerData.type === "feature") return;
     const layerId = layerIds.get(layerData) || `layer-${index}`;
     layerData.layer.graphics.forEach((graphic: any) => {
       config.ensureGeometryCache(layerData, graphic);
@@ -464,7 +473,10 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
 
         config.view.map.add(featureLayer);
         layersToAwait.push(featureLayer);
-        const layerData: LayerData = {
+      const particleStyle = isParticleLayerType(layerSnapshot.type)
+        ? getParticleStyle(layerSnapshot as any)
+        : undefined;
+      const layerData: LayerData = {
           layer: featureLayer,
           name: config.sanitizePlainText(layerSnapshot.name, "Feature Layer"),
           type: "feature",
@@ -490,7 +502,8 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
           polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
             ? Number(layerSnapshot.polygonZOffset)
             : undefined,
-          volumeStyle: layerSnapshot.volumeStyle ? { ...layerSnapshot.volumeStyle } : undefined,
+          particleStyle: particleStyle ? { ...particleStyle } : undefined,
+          volumeStyle: particleStyle ? { ...particleStyle } : undefined,
           layerBlendMode: layerSnapshot.layerBlendMode,
           layerEffectSettings: layerSnapshot.layerEffectSettings
             ? { ...layerSnapshot.layerEffectSettings }
@@ -547,10 +560,13 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
       config.view.map.add(newLayer);
       layersToAwait.push(newLayer);
 
+      const particleStyle = isParticleLayerType(layerSnapshot.type)
+        ? getParticleStyle(layerSnapshot as any)
+        : undefined;
       const layerData: LayerData = {
         layer: newLayer,
         name: config.sanitizePlainText(layerSnapshot.name, "Layer"),
-        type: layerSnapshot.type,
+        type: normalizeParticleLayerType(layerSnapshot.type),
         color: "#0a4c66",
         animations: layerSnapshot.animations?.length
           ? layerSnapshot.animations.map((anim) => ({ ...anim }))
@@ -564,7 +580,8 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         polygonZOffset: Number.isFinite(Number(layerSnapshot.polygonZOffset))
           ? Number(layerSnapshot.polygonZOffset)
           : undefined,
-        volumeStyle: layerSnapshot.volumeStyle ? { ...layerSnapshot.volumeStyle } : undefined,
+        particleStyle: particleStyle ? { ...particleStyle } : undefined,
+        volumeStyle: particleStyle ? { ...particleStyle } : undefined,
         textContent: layerSnapshot.textContent,
         textSize: layerSnapshot.textSize,
         textColor: layerSnapshot.textColor,
@@ -591,8 +608,8 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         layerData.lineStyle = { ...config.defaultLineStyle };
       } else if (layerData.type === "polygon" && !layerData.polygonStyle) {
         layerData.polygonStyle = { ...config.defaultPolygonStyle };
-      } else if (layerData.type === "volume" && !layerData.volumeStyle) {
-        layerData.volumeStyle = { ...defaultVolumeStyle };
+      } else if (isParticleLayer(layerData) && !layerData.particleStyle && !layerData.volumeStyle) {
+        setParticleStyle(layerData, defaultVolumeStyle);
       }
       if (layerData.type === "polygon" && !Number.isFinite(Number(layerData.polygonZOffset))) {
         layerData.polygonZOffset = 0;

@@ -1,8 +1,10 @@
 import Mesh from "@arcgis/core/geometry/Mesh";
 import Graphic from "@arcgis/core/Graphic";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import Polyline from "@arcgis/core/geometry/Polyline";
 
 import type { LayerData, VolumeStyle } from "../types";
+import { getParticleStyle, isParticleLayer } from "./particles";
 import { destroyVolumePlume, syncVolumePlume } from "./volumePlume";
 
 type Rgba = [number, number, number, number];
@@ -24,6 +26,7 @@ type PlaneTextureOptions = {
 };
 
 const volumeTextureCache = new Map<VolumeTextureKind, HTMLCanvasElement | null>();
+const PARTICLE_GIZMO_LAYER_KEY = "__particleGizmoLayer";
 
 const isSceneView3D = (view: any) => String(view?.type || "") === "3d";
 
@@ -192,7 +195,7 @@ const getAnimationActivity = (progress: number, min: number) =>
   clamp(min + (1 - min) * Math.sin(Math.PI * clamp(progress, 0, 1)), min, 1);
 
 const readVolumeStyle = (layerData: LayerData): VolumeStyle => {
-  const style = layerData.volumeStyle;
+  const style = getParticleStyle(layerData);
   return {
     width: clamp(toFinite(style?.width, 220), 10, 100000),
     depth: clamp(toFinite(style?.depth, 220), 10, 100000),
@@ -248,6 +251,192 @@ const destroyVolumeMeshOverlay = (layerData: LayerData, view?: any) => {
   overlay.removeAll();
   view?.map?.remove?.(overlay);
   delete (layerData as any).__volumeLayer;
+};
+
+const getOrCreateParticleGizmoLayer = (layerData: LayerData, view: any) => {
+  const existing = (layerData as any)[PARTICLE_GIZMO_LAYER_KEY] as GraphicsLayer | undefined;
+  if (existing) return existing;
+  const layer = new GraphicsLayer({
+    listMode: "hide",
+    opacity: 1
+  });
+  (layer as any).__pulseVolumeLayerData = layerData;
+  view?.map?.add(layer);
+  (layerData as any)[PARTICLE_GIZMO_LAYER_KEY] = layer;
+  return layer;
+};
+
+const destroyParticleGizmoOverlay = (layerData: LayerData, view?: any) => {
+  const overlay = (layerData as any)[PARTICLE_GIZMO_LAYER_KEY] as GraphicsLayer | undefined;
+  if (!overlay) return;
+  overlay.removeAll();
+  view?.map?.remove?.(overlay);
+  delete (layerData as any)[PARTICLE_GIZMO_LAYER_KEY];
+};
+
+const tagOverlayGraphics = (layerData: LayerData, anchorGraphic: any, graphics: Graphic[]) => {
+  graphics.forEach((graphic) => {
+    (graphic as any).__pulseVolumeAnchorGraphic = anchorGraphic;
+    (graphic as any).__pulseVolumeLayerData = layerData;
+  });
+  return graphics;
+};
+
+const buildCirclePath = (point: any, radius: number, segments = 48) => {
+  const x = Number(point?.x || 0);
+  const y = Number(point?.y || 0);
+  const z = Number(point?.z || 0);
+  const path: number[][] = [];
+  for (let index = 0; index <= segments; index += 1) {
+    const angle = (index / segments) * Math.PI * 2;
+    path.push([
+      x + Math.cos(angle) * radius,
+      y + Math.sin(angle) * radius,
+      z
+    ]);
+  }
+  return path;
+};
+
+const buildArrowPaths = (point: any, directionX: number, directionY: number, length: number) => {
+  const x = Number(point?.x || 0);
+  const y = Number(point?.y || 0);
+  const z = Number(point?.z || 0);
+  const magnitude = Math.hypot(directionX, directionY);
+  if (magnitude <= 0.001) {
+    return null;
+  }
+  const dirX = directionX / magnitude;
+  const dirY = directionY / magnitude;
+  const headLength = Math.max(length * 0.22, 6);
+  const headWidth = Math.max(length * 0.1, 3.5);
+  const endX = x + dirX * length;
+  const endY = y + dirY * length;
+  const baseX = endX - dirX * headLength;
+  const baseY = endY - dirY * headLength;
+  const perpX = -dirY;
+  const perpY = dirX;
+  return {
+    shaft: [
+      [x, y, z],
+      [endX, endY, z]
+    ],
+    leftWing: [
+      [endX, endY, z],
+      [baseX + perpX * headWidth, baseY + perpY * headWidth, z]
+    ],
+    rightWing: [
+      [endX, endY, z],
+      [baseX - perpX * headWidth, baseY - perpY * headWidth, z]
+    ],
+    endpoint: [endX, endY, z] as [number, number, number]
+  };
+};
+
+const buildGizmoLineSymbol = (color: number[], size: number) =>
+  ({
+    type: "line-3d",
+    symbolLayers: [
+      {
+        type: "path",
+        profile: "circle",
+        width: size,
+        height: size,
+        material: { color }
+      }
+    ]
+  }) as any;
+
+const buildGizmoPointSymbol = (color: number[], size: number) =>
+  ({
+    type: "point-3d",
+    symbolLayers: [
+      {
+        type: "icon",
+        resource: { primitive: "circle" },
+        size,
+        material: { color },
+        outline: {
+          color: [255, 255, 255, 0.8],
+          size: 1
+        }
+      }
+    ]
+  }) as any;
+
+const syncParticleGizmoOverlay = (layerData: LayerData, view: any) => {
+  const anchorGraphic =
+    (layerData.layer?.graphics?.getItemAt?.(0) as any) ??
+    layerData.layer?.graphics?.items?.[0] ??
+    null;
+  const point = anchorGraphic?.geometry;
+  const animationState = readVolumeAnimationState(layerData);
+  if (!point || point.type !== "point" || animationState) {
+    destroyParticleGizmoOverlay(layerData, view);
+    return;
+  }
+
+  const overlayLayer = getOrCreateParticleGizmoLayer(layerData, view);
+  syncOverlayLayerState(overlayLayer, layerData);
+  overlayLayer.removeAll();
+
+  const style = getParticleStyle(layerData);
+  const radius = Math.max(2, Number(style.emitterRadius) || 18);
+  const windX = Number(style.windX) || 0;
+  const windY = Number(style.windY) || 0;
+  const windMagnitude = Math.hypot(windX, windY);
+  const windLength = Math.max(radius * 1.7, windMagnitude * 14);
+  const ringColor = [146, 196, 255, 0.82];
+  const windColor = [255, 188, 118, 0.88];
+  const coreColor = [255, 245, 206, 0.86];
+
+  const ringGraphic = new Graphic({
+    geometry: new Polyline({
+      paths: [buildCirclePath(point, radius)],
+      spatialReference: point.spatialReference
+    }),
+    symbol: buildGizmoLineSymbol(ringColor, 1.6)
+  });
+
+  const graphics: Graphic[] = [ringGraphic];
+  const arrow = buildArrowPaths(point, windX, windY, windLength);
+  if (arrow) {
+    graphics.push(
+      new Graphic({
+        geometry: new Polyline({
+          paths: [arrow.shaft],
+          spatialReference: point.spatialReference
+        }),
+        symbol: buildGizmoLineSymbol(windColor, 1.2)
+      }),
+      new Graphic({
+        geometry: new Polyline({
+          paths: [arrow.leftWing, arrow.rightWing],
+          spatialReference: point.spatialReference
+        }),
+        symbol: buildGizmoLineSymbol(windColor, 1.1)
+      }),
+      new Graphic({
+        geometry: {
+          type: "point",
+          x: arrow.endpoint[0],
+          y: arrow.endpoint[1],
+          z: arrow.endpoint[2],
+          spatialReference: point.spatialReference
+        } as any,
+        symbol: buildGizmoPointSymbol(windColor, 8)
+      })
+    );
+  }
+
+  graphics.push(
+    new Graphic({
+      geometry: point.clone ? point.clone() : point,
+      symbol: buildGizmoPointSymbol(coreColor, 7)
+    })
+  );
+
+  overlayLayer.addMany(tagOverlayGraphics(layerData, anchorGraphic, graphics));
 };
 
 const buildMeshGeometry = (point: any, positions: number[], faces: number[], uv?: number[]) => {
@@ -908,6 +1097,7 @@ const buildVolumeGraphics = (layerData: LayerData, anchorGraphic: any) => {
 export const destroyVolumeBoxOverlay = (layerData: LayerData, view?: any) => {
   destroyVolumePlume(layerData, view);
   destroyVolumeMeshOverlay(layerData, view);
+  destroyParticleGizmoOverlay(layerData, view);
 };
 
 export const resolveVolumeBoxHitGraphic = (graphic: any) => {
@@ -925,14 +1115,16 @@ export const resolveVolumeBoxHitGraphic = (graphic: any) => {
 };
 
 export const syncVolumeBoxOverlay = (layerData: LayerData, view: any) => {
-  if (!view || layerData.type !== "volume" || !isSceneView3D(view)) {
+  if (!view || !isParticleLayer(layerData) || !isSceneView3D(view)) {
     destroyVolumeBoxOverlay(layerData, view);
     return;
   }
 
   if (syncVolumePlume(layerData, view)) {
     destroyVolumeMeshOverlay(layerData, view);
+    syncParticleGizmoOverlay(layerData, view);
     return;
   }
   destroyVolumeMeshOverlay(layerData, view);
+  syncParticleGizmoOverlay(layerData, view);
 };

@@ -319,10 +319,10 @@ describe("animation playback text opacity", () => {
     expect(Number(boatGraphic.symbol.angle)).toBeCloseTo(45, 5);
   });
 
-  test("stores smoke playback state for volume layers while the clip is active", () => {
+  test("stores smoke playback state for particle layers while the clip is active", () => {
     const layerData: LayerData = {
       name: "Smoke Box",
-      type: "volume",
+      type: "particles",
       layer: {
         opacity: 1,
         blendMode: "normal",
@@ -336,7 +336,7 @@ describe("animation playback text opacity", () => {
           duration: 2
         } as any
       ],
-      volumeStyle: {
+      particleStyle: {
         width: 220,
         depth: 220,
         height: 140,
@@ -344,7 +344,8 @@ describe("animation playback text opacity", () => {
         opacity: 0.32,
         slices: 14,
         color: "#c9dcff",
-        edgeColor: "#f4fbff"
+        edgeColor: "#f4fbff",
+        preset: "balanced"
       }
     };
 
@@ -358,10 +359,10 @@ describe("animation playback text opacity", () => {
     expect(layerData.layer.opacity).toBe(1);
   });
 
-  test("clears volume playback state when playback is not previewing", () => {
+  test("clears particle playback state when playback is not previewing", () => {
     const layerData: LayerData = {
       name: "Smoke Box",
-      type: "volume",
+      type: "particles",
       layer: {
         opacity: 0.4,
         blendMode: "normal",
@@ -375,7 +376,7 @@ describe("animation playback text opacity", () => {
           duration: 2
         } as any
       ],
-      volumeStyle: {
+      particleStyle: {
         width: 220,
         depth: 220,
         height: 140,
@@ -383,7 +384,8 @@ describe("animation playback text opacity", () => {
         opacity: 0.32,
         slices: 14,
         color: "#c9dcff",
-        edgeColor: "#f4fbff"
+        edgeColor: "#f4fbff",
+        preset: "balanced"
       }
     };
     (layerData as any).__volumeAnimationState = {

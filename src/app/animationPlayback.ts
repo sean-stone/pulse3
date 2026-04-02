@@ -52,6 +52,7 @@ import {
 } from "./pointOrientation";
 import type { PointSymbolOrientation } from "./pointOrientation";
 import { getInactiveRevealGeometryMode } from "./revealTiming";
+import { isParticleLayer } from "./particles";
 import { isMeshTextRenderMode, syncTextMeshOverlay } from "./textMesh";
 import { syncVolumeBoxOverlay } from "./volumeBox";
 
@@ -89,7 +90,7 @@ const setVolumeAnimationPlaybackState = (
   layerData: LayerData,
   state: VolumeAnimationPlaybackState | null
 ) => {
-  if (layerData.type !== "volume") return;
+  if (!isParticleLayer(layerData)) return;
   if (state) {
     (layerData as any).__volumeAnimationState = state;
   } else {
@@ -1165,7 +1166,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           applyTextSymbolState(graphic, layerData, baseText, baseSize, 1, useExplicit3DTextOpacity);
         });
         syncTextMeshOverlay(layerData, view);
-      } else if (layerData.type === "volume") {
+      } else if (isParticleLayer(layerData)) {
         syncVolumeBoxOverlay(layerData, view);
       }
       if (pointKeyframe) {
@@ -1561,7 +1562,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       layerData.layer.opacity = useExplicit3DTextOpacity ? 1 : baseLayerOpacity;
     }
 
-    if (layerData.type === "volume") {
+    if (isParticleLayer(layerData)) {
       setVolumeAnimationPlaybackState(
         layerData,
         activeVolumeEffect && activeVolumeEffectProgress !== null
@@ -4303,7 +4304,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       if (useExplicit3DTextOpacity && isPreviewing) {
         view?.requestRender?.();
       }
-    } else if (layerData.type === "volume") {
+    } else if (isParticleLayer(layerData)) {
       syncVolumeBoxOverlay(layerData, view);
     }
   });

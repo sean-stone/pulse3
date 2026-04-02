@@ -10,7 +10,7 @@ type ProjectSnapshotValidationResult =
       error: string;
     };
 
-const validLayerTypes = new Set(["point", "polyline", "polygon", "text", "feature", "volume"]);
+const validLayerTypes = new Set(["point", "polyline", "polygon", "text", "feature", "particles", "volume"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

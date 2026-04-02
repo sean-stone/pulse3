@@ -86,6 +86,12 @@
     { value: "timeGradient", label: "Time Gradient" },
     { value: "prismShift", label: "Prism Shift" }
   ],
+  particles: [
+    { value: "fadeIn", label: "Fade In" },
+    { value: "fadeOut", label: "Fade Out" },
+    { value: "smoke", label: "Smoke" },
+    { value: "fire", label: "Fire" }
+  ],
   volume: [
     { value: "fadeIn", label: "Fade In" },
     { value: "fadeOut", label: "Fade Out" },

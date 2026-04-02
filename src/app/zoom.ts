@@ -2,6 +2,7 @@ import Extent from "@arcgis/core/geometry/Extent";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 
 import type { LayerData } from "../types";
+import { isParticleLayer } from "./particles";
 
 type ZoomConfig = {
   getView: () => any;
@@ -45,7 +46,7 @@ const estimateExtentSizeMeters = (extent: Extent | null) => {
 };
 
 const getSceneTargetScale = (layerData: LayerData, extent: Extent | null) => {
-  if (layerData.type === "point" || layerData.type === "volume") {
+  if (layerData.type === "point" || isParticleLayer(layerData)) {
     return SCENE_POINT_TARGET_SCALE;
   }
   if (layerData.type === "text") {

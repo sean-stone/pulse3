@@ -913,6 +913,18 @@ function Modals() {
 
           <div id="volume-style-section" style={{ display: "none" }}>
             <calcite-label style={{ marginTop: 12 }}>
+              Preset
+              <calcite-select id="volume-preset-select" scale="m">
+                <calcite-option value="balanced">Balanced</calcite-option>
+                <calcite-option value="bonfire">Bonfire</calcite-option>
+                <calcite-option value="jet-flame">Jet Flame</calcite-option>
+                <calcite-option value="heavy-smoke">Heavy Smoke</calcite-option>
+                <calcite-option value="steam-vent">Steam Vent</calcite-option>
+                <calcite-option value="dust-plume">Dust Plume</calcite-option>
+              </calcite-select>
+            </calcite-label>
+
+            <calcite-label style={{ marginTop: 12 }}>
               Emitter Mode
               <calcite-select id="volume-emitter-mode-select" scale="m">
                 <calcite-option value="emitter">Particles</calcite-option>
@@ -1042,6 +1054,7 @@ function Modals() {
 
             <div className="style-helper-copy">
               3D only. These settings shape the particles renderer. In 2D this layer shows a compact anchor marker.
+              In 3D, the selected emitter also shows a radius ring and wind guide while editing.
             </div>
           </div>
 

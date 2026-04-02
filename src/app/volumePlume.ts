@@ -20,8 +20,10 @@ import {
 } from "three";
 
 import type { LayerData, VolumeStyle } from "../types";
+import { getParticleStyle, isParticleLayer } from "./particles";
 
 type VolumeEffectKind = "smoke" | "fire";
+type ParticleSpriteKind = VolumeEffectKind | "ember";
 type Rgba = [number, number, number, number];
 type VolumeEmitterMode = "box" | "emitter";
 type VolumePlumeAnimationState = {
@@ -64,6 +66,8 @@ type VolumePlumeManager = {
 type VolumePlumeObjectSet = {
   fireGeometry: BufferGeometry;
   firePoints: Points;
+  emberGeometry: BufferGeometry;
+  emberPoints: Points;
   smokeGeometry: BufferGeometry;
   smokePoints: Points;
 };
@@ -141,7 +145,7 @@ const PARTICLE_FRAGMENT_SHADER = `
 `;
 
 const readVolumeStyle = (layerData: LayerData): ResolvedVolumePlumeStyle => {
-  const style = layerData.volumeStyle;
+  const style = getParticleStyle(layerData);
   const width = clamp(toFinite(style?.width, 220), 10, 100000);
   const depth = clamp(toFinite(style?.depth, 220), 10, 100000);
   const height = clamp(toFinite(style?.height, 140), 10, 100000);
@@ -354,11 +358,11 @@ const appendSmokeParticles = (
 const appendFireParticles = (target: number[], entry: VolumePlumeEntry, anchor: VolumePlumeAnchor, count: number) => {
   const { style, progress, time, opacity } = entry;
   const activity = getAnimationActivity(progress, 0.55);
-  const flameHeight = style.height * (0.58 + 0.18 * activity);
-  const warmCore = normalizeRgba([255, 228, 166, 1]);
-  const yellow = normalizeRgba([255, 184, 82, 1]);
-  const orange = normalizeRgba([255, 104, 36, 1]);
-  const ember = normalizeRgba([154, 34, 14, 1]);
+  const flameHeight = style.height * (0.62 + 0.2 * activity);
+  const warmCore = normalizeRgba([255, 236, 182, 1]);
+  const yellow = normalizeRgba([255, 192, 86, 1]);
+  const orange = normalizeRgba([255, 114, 40, 1]);
+  const ember = normalizeRgba([160, 40, 14, 1]);
 
   for (let index = 0; index < count; index += 1) {
     const seed = anchor.seed + index * 7.19;
@@ -368,12 +372,12 @@ const appendFireParticles = (target: number[], entry: VolumePlumeEntry, anchor: 
     const remaining = 1 - age;
     const ignition = clamp(age / 0.12, 0, 1);
     const angle = seededUnit(seed + 4.67) * TAU + lifeSeconds * (4.8 + seededUnit(seed + 3.17) * 3.6);
-    const baseRadius = style.emitterRadius * (0.12 + seededUnit(seed + 5.21) * 0.9);
-    const columnRadius = baseRadius * (0.24 + remaining * (0.9 + style.variation * 0.18));
+    const baseRadius = style.emitterRadius * (0.08 + seededUnit(seed + 5.21) * 0.72);
+    const columnRadius = baseRadius * (0.14 + remaining * (0.68 + style.variation * 0.16));
     const curlAmplitude =
-      style.turbulence * 0.26 * (0.22 + remaining * 0.72) * (0.45 + seededUnit(seed + 6.33) * 0.55);
-    const windOffsetX = style.windX * lifeSeconds * lifeSeconds * 0.055 + style.windX * lifeSeconds * 0.035;
-    const windOffsetY = style.windY * lifeSeconds * lifeSeconds * 0.055 + style.windY * lifeSeconds * 0.035;
+      style.turbulence * 0.24 * (0.18 + remaining * 0.68) * (0.45 + seededUnit(seed + 6.33) * 0.55);
+    const windOffsetX = style.windX * lifeSeconds * lifeSeconds * 0.05 + style.windX * lifeSeconds * 0.03;
+    const windOffsetY = style.windY * lifeSeconds * lifeSeconds * 0.05 + style.windY * lifeSeconds * 0.03;
     const x =
       Math.cos(angle) * columnRadius +
       Math.sin(angle * 0.43 + lifeSeconds * 4.2 + seed) * curlAmplitude * 0.16 +
@@ -385,7 +389,7 @@ const appendFireParticles = (target: number[], entry: VolumePlumeEntry, anchor: 
     const riseSpeed = style.fireSpeed * (0.78 + seededUnit(seed + 7.93) * 0.44);
     const z = style.floorOffset + Math.min(flameHeight, riseSpeed * lifeSeconds + style.buoyancy * lifeSeconds * lifeSeconds * 0.1);
     const position = transformLocalOffset(anchor.transform, x, y, z);
-    const alpha = clamp(opacity * activity * ignition * (0.05 + remaining * 0.22), 0.012, 0.24);
+    const alpha = clamp(opacity * activity * ignition * (0.04 + remaining * 0.16), 0.01, 0.18);
     let color = yellow;
     if (age < 0.16) {
       color = [warmCore[0], warmCore[1], warmCore[2], alpha];
@@ -406,8 +410,54 @@ const appendFireParticles = (target: number[], entry: VolumePlumeEntry, anchor: 
         alpha * (1 - t * 0.34)
       ];
     }
-    const size = style.emitterRadius * (0.9 + remaining * 1.65 + seededUnit(seed + 8.11) * 0.28);
+    const size = style.emitterRadius * (0.44 + remaining * 1.22 + seededUnit(seed + 8.11) * 0.18);
     pushParticle(target, position, size, color as Rgba, 0.24);
+  }
+};
+
+const appendEmberParticles = (target: number[], entry: VolumePlumeEntry, anchor: VolumePlumeAnchor, count: number) => {
+  const { style, progress, time, opacity } = entry;
+  const activity = getAnimationActivity(progress, 0.46);
+  const hot = normalizeRgba([255, 204, 102, 1]);
+  const ember = normalizeRgba([255, 128, 44, 1]);
+  const ash = normalizeRgba([112, 40, 18, 1]);
+
+  for (let index = 0; index < count; index += 1) {
+    const seed = anchor.seed + index * 13.71;
+    const particleLifetime = Math.max(0.24, style.fireLifetime * (0.48 + seededUnit(seed + 2.7) * 0.42));
+    const age = fract(seededUnit(seed + 0.7) + time / particleLifetime);
+    const remaining = 1 - age;
+    const lifeSeconds = age * particleLifetime;
+    const launchAngle = seededUnit(seed + 4.9) * TAU;
+    const launchRadius = style.emitterRadius * (0.08 + seededUnit(seed + 3.3) * 0.32);
+    const baseX = Math.cos(launchAngle) * launchRadius;
+    const baseY = Math.sin(launchAngle) * launchRadius * 0.75;
+    const driftX = style.windX * lifeSeconds * 0.12 + Math.sin(seed + time * 1.8) * style.turbulence * 0.04;
+    const driftY = style.windY * lifeSeconds * 0.12 + Math.cos(seed + time * 1.6) * style.turbulence * 0.04;
+    const rise =
+      style.floorOffset +
+      style.fireSpeed * lifeSeconds * (0.82 + seededUnit(seed + 7.1) * 0.5) +
+      style.buoyancy * lifeSeconds * lifeSeconds * 0.16;
+    const position = transformLocalOffset(anchor.transform, baseX + driftX, baseY + driftY, rise);
+    const alpha = clamp(opacity * activity * (0.06 + remaining * 0.24), 0.015, 0.28);
+    const tint =
+      age < 0.2
+        ? hot
+        : age < 0.56
+          ? [
+              hot[0] + (ember[0] - hot[0]) * ((age - 0.2) / 0.36),
+              hot[1] + (ember[1] - hot[1]) * ((age - 0.2) / 0.36),
+              hot[2] + (ember[2] - hot[2]) * ((age - 0.2) / 0.36),
+              alpha
+            ]
+          : [
+              ember[0] + (ash[0] - ember[0]) * ((age - 0.56) / 0.44),
+              ember[1] + (ash[1] - ember[1]) * ((age - 0.56) / 0.44),
+              ember[2] + (ash[2] - ember[2]) * ((age - 0.56) / 0.44),
+              alpha * (1 - (age - 0.56) / 0.44 * 0.5)
+            ];
+    const size = Math.max(1.6, style.emitterRadius * (0.06 + remaining * 0.18));
+    pushParticle(target, position, size, tint as Rgba, 0.12);
   }
 };
 
@@ -432,7 +482,7 @@ const drawSoftBlob = (
   context.restore();
 };
 
-const buildSpriteCanvas = (kind: VolumeEffectKind) => {
+const buildSpriteCanvas = (kind: ParticleSpriteKind) => {
   if (typeof document === "undefined") {
     return null;
   }
@@ -461,7 +511,20 @@ const buildSpriteCanvas = (kind: VolumeEffectKind) => {
         0.8 + seededUnit(index * 7.39 + 6) * 0.56
       );
     }
-  } else {
+    context.globalCompositeOperation = "destination-out";
+    for (let index = 0; index < 6; index += 1) {
+      drawSoftBlob(
+        context,
+        size * (0.34 + seededUnit(index * 1.91 + 7) * 0.32),
+        size * (0.34 + seededUnit(index * 2.71 + 8) * 0.32),
+        size * (0.08 + seededUnit(index * 3.17 + 9) * 0.08),
+        0.2 + seededUnit(index * 4.01 + 10) * 0.12,
+        0.9,
+        0.9
+      );
+    }
+    context.globalCompositeOperation = "lighter";
+  } else if (kind === "fire") {
     for (let index = 0; index < 7; index += 1) {
       const t = index / 6;
       drawSoftBlob(
@@ -485,23 +548,35 @@ const buildSpriteCanvas = (kind: VolumeEffectKind) => {
     outerGlow.addColorStop(1, "rgba(0,0,0,0)");
     context.fillStyle = outerGlow;
     context.fillRect(0, 0, size, size);
+  } else {
+    const streak = context.createLinearGradient(size * 0.2, size * 0.9, size * 0.8, size * 0.1);
+    streak.addColorStop(0, "rgba(255,120,40,0)");
+    streak.addColorStop(0.45, "rgba(255,174,72,0.88)");
+    streak.addColorStop(1, "rgba(255,244,196,0)");
+    context.fillStyle = streak;
+    context.beginPath();
+    context.ellipse(size * 0.5, size * 0.5, size * 0.14, size * 0.38, -0.32, 0, TAU);
+    context.fill();
+
+    drawSoftBlob(context, size * 0.48, size * 0.55, size * 0.11, 0.9, 0.4, 1.8);
+    drawSoftBlob(context, size * 0.56, size * 0.43, size * 0.08, 0.72, 0.32, 1.22);
   }
 
   context.globalCompositeOperation = "destination-in";
   drawSoftBlob(
     context,
     size * 0.5,
-    size * (kind === "fire" ? 0.56 : 0.5),
-    size * (kind === "fire" ? 0.34 : 0.44),
+    size * (kind === "fire" ? 0.56 : kind === "ember" ? 0.5 : 0.5),
+    size * (kind === "fire" ? 0.34 : kind === "ember" ? 0.22 : 0.44),
     1,
-    kind === "fire" ? 0.62 : 1,
-    kind === "fire" ? 1.54 : 1.04
+    kind === "fire" ? 0.62 : kind === "ember" ? 0.36 : 1,
+    kind === "fire" ? 1.54 : kind === "ember" ? 1.9 : 1.04
   );
 
   return canvas;
 };
 
-const createSpriteTexture = (kind: VolumeEffectKind) => {
+const createSpriteTexture = (kind: ParticleSpriteKind) => {
   const canvas = buildSpriteCanvas(kind);
   if (!canvas) {
     return null;
@@ -523,8 +598,10 @@ class VolumePlumeRenderNode extends RenderNode {
   private outputTarget: WebGLRenderTarget | null = null;
   private smokeMaterial: ShaderMaterial | null = null;
   private fireMaterial: ShaderMaterial | null = null;
+  private emberMaterial: ShaderMaterial | null = null;
   private smokeTexture: CanvasTexture | null = null;
   private fireTexture: CanvasTexture | null = null;
+  private emberTexture: CanvasTexture | null = null;
   private objectSets: VolumePlumeObjectSet[] = [];
   private smokeData: number[] = [];
   private fireData: number[] = [];
@@ -545,25 +622,30 @@ class VolumePlumeRenderNode extends RenderNode {
   override destroy(): void {
     this.objectSets.forEach((objectSet) => {
       objectSet.fireGeometry.dispose();
+      objectSet.emberGeometry.dispose();
       objectSet.smokeGeometry.dispose();
     });
     this.objectSets.length = 0;
 
     this.smokeMaterial?.dispose();
     this.fireMaterial?.dispose();
+    this.emberMaterial?.dispose();
     this.outputTarget?.dispose();
     this.smokeTexture?.dispose();
     this.fireTexture?.dispose();
+    this.emberTexture?.dispose();
     this.renderer?.dispose();
 
     this.smokeMaterial = null;
     this.fireMaterial = null;
+    this.emberMaterial = null;
     this.outputTarget = null;
     this.renderer = null;
     this.scene = null;
     this.threeCamera = null;
     this.smokeTexture = null;
     this.fireTexture = null;
+    this.emberTexture = null;
     this.hasRenderedFrame = false;
 
     this.detachFromRenderer();
@@ -618,7 +700,15 @@ class VolumePlumeRenderNode extends RenderNode {
   }
 
   private ensureRenderer() {
-    if (this.renderer && this.scene && this.threeCamera && this.outputTarget && this.smokeMaterial && this.fireMaterial) {
+    if (
+      this.renderer &&
+      this.scene &&
+      this.threeCamera &&
+      this.outputTarget &&
+      this.smokeMaterial &&
+      this.fireMaterial &&
+      this.emberMaterial
+    ) {
       return;
     }
 
@@ -656,29 +746,37 @@ class VolumePlumeRenderNode extends RenderNode {
 
     this.smokeTexture = createSpriteTexture("smoke");
     this.fireTexture = createSpriteTexture("fire");
+    this.emberTexture = createSpriteTexture("ember");
     this.smokeMaterial = this.createMaterial(this.smokeTexture, {
       blending: NormalBlending,
-      alphaBoost: 0.92,
-      colorBoost: 0.05
+      alphaBoost: 0.88,
+      colorBoost: 0.04
     });
     this.fireMaterial = this.createMaterial(this.fireTexture, {
       blending: NormalBlending,
-      alphaBoost: 0.88,
-      colorBoost: 0.22
+      alphaBoost: 0.8,
+      colorBoost: 0.18
+    });
+    this.emberMaterial = this.createMaterial(this.emberTexture, {
+      blending: AdditiveBlending,
+      alphaBoost: 1.1,
+      colorBoost: 0.62
     });
   }
 
   private createObjectSet(): VolumePlumeObjectSet {
-    if (!this.scene || !this.smokeMaterial || !this.fireMaterial) {
+    if (!this.scene || !this.smokeMaterial || !this.fireMaterial || !this.emberMaterial) {
       throw new Error("Volume plume Three.js scene is not initialized.");
     }
 
     const fireGeometry = new BufferGeometry();
+    const emberGeometry = new BufferGeometry();
     const smokeGeometry = new BufferGeometry();
     const firePoints = new Points(fireGeometry, this.fireMaterial);
+    const emberPoints = new Points(emberGeometry, this.emberMaterial);
     const smokePoints = new Points(smokeGeometry, this.smokeMaterial);
 
-    [firePoints, smokePoints].forEach((points) => {
+    [firePoints, emberPoints, smokePoints].forEach((points) => {
       points.matrixAutoUpdate = false;
       points.matrixWorldAutoUpdate = false;
       points.matrix.identity();
@@ -688,11 +786,14 @@ class VolumePlumeRenderNode extends RenderNode {
     });
 
     this.scene.add(firePoints);
+    this.scene.add(emberPoints);
     this.scene.add(smokePoints);
 
     return {
       fireGeometry,
       firePoints,
+      emberGeometry,
+      emberPoints,
       smokeGeometry,
       smokePoints
     };
@@ -764,6 +865,8 @@ class VolumePlumeRenderNode extends RenderNode {
       const objectSet = this.objectSets[index];
       objectSet.firePoints.visible = false;
       objectSet.fireGeometry.setDrawRange(0, 0);
+      objectSet.emberPoints.visible = false;
+      objectSet.emberGeometry.setDrawRange(0, 0);
       objectSet.smokePoints.visible = false;
       objectSet.smokeGeometry.setDrawRange(0, 0);
     }
@@ -777,7 +880,15 @@ class VolumePlumeRenderNode extends RenderNode {
     }
 
     this.ensureRenderer();
-    if (!this.renderer || !this.scene || !this.threeCamera || !this.outputTarget || !this.smokeMaterial || !this.fireMaterial) {
+    if (
+      !this.renderer ||
+      !this.scene ||
+      !this.threeCamera ||
+      !this.outputTarget ||
+      !this.smokeMaterial ||
+      !this.fireMaterial ||
+      !this.emberMaterial
+    ) {
       return output;
     }
 
@@ -804,6 +915,7 @@ class VolumePlumeRenderNode extends RenderNode {
 
     this.smokeMaterial.uniforms.uPointScale.value = pointScale;
     this.fireMaterial.uniforms.uPointScale.value = pointScale;
+    this.emberMaterial.uniforms.uPointScale.value = pointScale;
 
     let objectIndex = 0;
     for (const entry of this.manager.entries.values()) {
@@ -819,13 +931,18 @@ class VolumePlumeRenderNode extends RenderNode {
         entry.effect === "fire"
           ? Math.round(clamp(entry.style.slices * 4.8, 84, 280))
           : 0;
+      const emberCount =
+        entry.effect === "fire"
+          ? Math.round(clamp(entry.style.slices * 1.9, 18, 86))
+          : 0;
 
       this.ensureObjectCount(objectIndex + entry.anchors.length);
 
       for (const anchor of entry.anchors) {
         const objectSet = this.objectSets[objectIndex];
         objectSet.firePoints.renderOrder = objectIndex * 2;
-        objectSet.smokePoints.renderOrder = objectIndex * 2 + 1;
+        objectSet.emberPoints.renderOrder = objectIndex * 2 + 1;
+        objectSet.smokePoints.renderOrder = objectIndex * 2 + 2;
         objectSet.firePoints.matrix.identity();
         objectSet.firePoints.matrix.setPosition(
           anchor.originRender[0],
@@ -833,6 +950,13 @@ class VolumePlumeRenderNode extends RenderNode {
           anchor.originRender[2]
         );
         objectSet.firePoints.matrixWorld.copy(objectSet.firePoints.matrix);
+        objectSet.emberPoints.matrix.identity();
+        objectSet.emberPoints.matrix.setPosition(
+          anchor.originRender[0],
+          anchor.originRender[1],
+          anchor.originRender[2]
+        );
+        objectSet.emberPoints.matrixWorld.copy(objectSet.emberPoints.matrix);
         objectSet.smokePoints.matrix.identity();
         objectSet.smokePoints.matrix.setPosition(
           anchor.originRender[0],
@@ -843,15 +967,18 @@ class VolumePlumeRenderNode extends RenderNode {
 
         this.fireData.length = 0;
         this.smokeData.length = 0;
+        const emberData: number[] = [];
 
         if (entry.effect === "smoke") {
           appendSmokeParticles(this.smokeData, entry, anchor, smokeCount, 1, 0, 1);
         } else {
           appendFireParticles(this.fireData, entry, anchor, fireCount);
+          appendEmberParticles(emberData, entry, anchor, emberCount);
           appendSmokeParticles(this.smokeData, entry, anchor, smokeCount, 0.78, entry.style.height * 0.14, 0.96);
         }
 
         objectSet.firePoints.visible = this.updateGeometry(objectSet.fireGeometry, this.fireData);
+        objectSet.emberPoints.visible = this.updateGeometry(objectSet.emberGeometry, emberData);
         objectSet.smokePoints.visible = this.updateGeometry(objectSet.smokeGeometry, this.smokeData);
         objectIndex += 1;
       }
@@ -935,7 +1062,7 @@ const destroyManagerIfEmpty = (manager: VolumePlumeManager | null | undefined) =
 };
 
 const buildEntry = (layerData: LayerData, view: any): VolumePlumeEntry | null => {
-  if (layerData.type !== "volume" || String(view?.type || "") !== "3d") return null;
+  if (!isParticleLayer(layerData) || String(view?.type || "") !== "3d") return null;
   const animationState = getVolumeAnimationState(layerData);
   if (!animationState) return null;
   const style = readVolumeStyle(layerData);

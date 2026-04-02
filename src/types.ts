@@ -1,4 +1,19 @@
-export type LayerType = "point" | "polyline" | "polygon" | "text" | "feature" | "volume";
+export type ParticlePreset =
+  | "balanced"
+  | "bonfire"
+  | "jet-flame"
+  | "heavy-smoke"
+  | "steam-vent"
+  | "dust-plume";
+
+export type LayerType =
+  | "point"
+  | "polyline"
+  | "polygon"
+  | "text"
+  | "feature"
+  | "particles"
+  | "volume";
 export type PointKeyframeEasing = "linear" | "ease-in" | "ease-out" | "ease-in-out";
 export type TextRenderMode = "flat" | "scene-3d" | "mesh-3d";
 
@@ -56,7 +71,7 @@ export interface PolygonStyle {
   extrudeHeight?: number;
 }
 
-export interface VolumeStyle {
+export interface ParticleStyle {
   width: number;
   depth: number;
   height: number;
@@ -65,6 +80,7 @@ export interface VolumeStyle {
   slices: number;
   color: string;
   edgeColor: string;
+  preset?: ParticlePreset;
   emitterMode?: "box" | "emitter";
   emitterRadius?: number;
   fireLifetime?: number;
@@ -77,6 +93,8 @@ export interface VolumeStyle {
   windY?: number;
   buoyancy?: number;
 }
+
+export type VolumeStyle = ParticleStyle;
 
 export interface LayerEffectSettings {
   brightness: number;
@@ -120,6 +138,7 @@ export interface LayerData {
   lineFollowTerrain3D?: boolean;
   polygonStyle?: PolygonStyle;
   polygonZOffset?: number;
+  particleStyle?: ParticleStyle;
   volumeStyle?: VolumeStyle;
   featureLayerUrl?: string;
   featureFields?: Array<{ name: string; type: string }>;

@@ -86,6 +86,15 @@ import {
   resolveVolumeBoxHitGraphic,
   syncVolumeBoxOverlay
 } from "./app/volumeBox";
+import {
+  getParticlePresetDefaults,
+  getParticleStyle,
+  isParticleLayer,
+  isParticleLayerType,
+  normalizeParticleLayerType,
+  normalizeParticlePreset,
+  setParticleStyle
+} from "./app/particles";
 import "jszip/dist/jszip.min.js";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
@@ -1160,13 +1169,13 @@ function ensureSketchViewModel(layer: GraphicsLayer) {
         if (currentViewMode === "3d" && getPointWebStyleSymbolSpec(style)) {
           void applyPointModelSymbolToLayer(layerData, style);
         }
-      } else if (layerData.type === "volume") {
+      } else if (isParticleLayer(layerData)) {
         graphic.geometry = new Point({
           x: Number((graphic.geometry as any)?.x),
           y: Number((graphic.geometry as any)?.y),
           spatialReference: (graphic.geometry as any)?.spatialReference
         });
-        graphic.symbol = buildVolumeAnchorSymbol(layerData.volumeStyle ?? defaultVolumeStyle);
+        graphic.symbol = buildVolumeAnchorSymbol(getParticleStyle(layerData));
         syncVolumeBoxOverlay(layerData, view);
       } else if (layerData.type === "polyline") {
         const style = layerData.lineStyle ?? defaultLineStyle;
@@ -2842,7 +2851,7 @@ async function handleMapContextMenu(event: MouseEvent) {
     },
     {
       label: "Add particles",
-      onSelect: () => void startDrawing("volume")
+      onSelect: () => void startDrawing("particles")
     },
     { type: "divider" },
     {
@@ -3038,7 +3047,7 @@ function applyLayerModeProperties(layerData: LayerData) {
     layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0 };
     return;
   }
-  if (layerData.type === "volume") {
+  if (isParticleLayer(layerData)) {
     layerAny.elevationInfo = { mode: "relative-to-ground", offset: 0 };
     return;
   }
@@ -5171,6 +5180,7 @@ function resolveInteractiveLayerHit(graphic: any) {
 function getLayerOverlayLayers(layerData: LayerData) {
   return [
     (layerData as any).__volumeLayer,
+    (layerData as any).__particleGizmoLayer,
     (layerData as any).__textMeshLayer,
     (layerData as any).__arrowLayer,
     (layerData as any).__barrageLayer,
@@ -6125,7 +6135,7 @@ function setupEventListeners() {
   getEl("add-line-btn").addEventListener("click", () => startDrawing("polyline"));
   getEl("add-polygon-btn").addEventListener("click", () => startDrawing("polygon"));
   getEl("add-text-btn").addEventListener("click", () => startDrawing("text"));
-  getEl("add-volume-btn").addEventListener("click", () => startDrawing("volume"));
+  getEl("add-volume-btn").addEventListener("click", () => startDrawing("particles"));
   getEl("import-toggle-btn").addEventListener("click", toggleImportOptions);
   getEl("import-geojson-btn").addEventListener("click", () => handleImportClick("geojson"));
   getEl("import-csv-btn").addEventListener("click", () => handleImportClick("csv"));
@@ -6387,6 +6397,7 @@ function setupEventListeners() {
   getEl("polygon-extrude-height-input").addEventListener("calciteInputNumberChange", () =>
     applyStyleSettings(false)
   );
+  getEl("volume-preset-select").addEventListener("calciteSelectChange", () => applyParticlePresetSelection());
   getEl("volume-emitter-mode-select").addEventListener("calciteSelectChange", () => applyStyleSettings(false));
   getEl("volume-emitter-radius-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
   getEl("volume-fire-lifetime-input").addEventListener("calciteInputNumberChange", () => applyStyleSettings(false));
@@ -7214,7 +7225,7 @@ function handleFollowPathReverseChange(event: Event) {
 }
 
 function getLayerTypeLabel(type: LayerType) {
-  if (type === "volume") {
+  if (isParticleLayerType(type)) {
     return "Particles";
   }
   return `${type.charAt(0).toUpperCase() + type.slice(1)}`;
@@ -7229,7 +7240,7 @@ function getDefaultLayerName(type: LayerType, index: number) {
 }
 
 function migrateLegacyVolumeLayerName(layerData: LayerData) {
-  if (layerData.type !== "volume") return;
+  if (!isParticleLayer(layerData)) return;
   const currentName = String(layerData.name || "").trim();
   if (!currentName) return;
 
@@ -7270,7 +7281,7 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
   const layerData: LayerData = {
     layer: newLayer,
     name: safeName,
-    type,
+    type: normalizeParticleLayerType(type),
     color: "#0a4c66",
     animations: [createPlaceholderAnimation()],
     pointKeyframes: []
@@ -7280,8 +7291,8 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.pointStyle = { ...defaultPointStyle };
     layerData.pointFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
-  } else if (type === "volume") {
-    layerData.volumeStyle = { ...defaultVolumeStyle };
+  } else if (isParticleLayerType(type)) {
+    setParticleStyle(layerData, defaultVolumeStyle);
     layerData.layerEffectsEnabled = false;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
@@ -7337,7 +7348,7 @@ function createGraphicForType(
   if (type === "point") {
     const style = defaultPointStyle;
     graphic.symbol = buildPointSymbolForCurrentView(style);
-  } else if (type === "volume") {
+  } else if (isParticleLayerType(type)) {
     graphic.symbol = buildVolumeAnchorSymbol(defaultVolumeStyle);
   } else if (type === "polyline") {
     graphic.symbol = buildLineSymbolForCurrentView(defaultLineStyle);
@@ -7391,7 +7402,7 @@ async function startDrawing(type: LayerType) {
   const drawInfoText =
     type === "point"
       ? "Click on the map to place a point."
-      : type === "volume"
+      : isParticleLayerType(type)
         ? "Click on the map to place particles."
       : type === "text"
         ? "Click on the map to place text."
@@ -7411,7 +7422,7 @@ async function startDrawing(type: LayerType) {
   const layerData: LayerData = {
     layer: newLayer,
     name: layerName,
-    type,
+    type: normalizeParticleLayerType(type),
     color: "#0a4c66",
     animations: [createPlaceholderAnimation()],
     pointKeyframes: []
@@ -7421,8 +7432,8 @@ async function startDrawing(type: LayerType) {
     layerData.pointStyle = { ...defaultPointStyle };
     layerData.pointFollowTerrain3D = false;
     layerData.layerEffectsEnabled = true;
-  } else if (type === "volume") {
-    layerData.volumeStyle = { ...defaultVolumeStyle };
+  } else if (isParticleLayerType(type)) {
+    setParticleStyle(layerData, defaultVolumeStyle);
     layerData.layerEffectsEnabled = false;
   } else if (type === "polyline") {
     layerData.lineStyle = { ...defaultLineStyle };
@@ -7460,6 +7471,7 @@ async function startDrawing(type: LayerType) {
     if (!sketchVm) return;
     const toolMap: Record<string, string> = {
       point: "point",
+      particles: "point",
       volume: "point",
       polyline: "polyline",
       polygon: "polygon"
@@ -7565,6 +7577,7 @@ function getIconForType(type: LayerType) {
       return "polygon";
     case "text":
       return "text-large";
+    case "particles":
     case "volume":
       return "pin";
     case "feature":
@@ -7829,6 +7842,7 @@ async function duplicateLayer(index: number) {
       lineFollowTerrain3D: layerData.lineFollowTerrain3D,
       polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
       polygonZOffset: layerData.polygonZOffset,
+      particleStyle: layerData.particleStyle ? { ...layerData.particleStyle } : undefined,
       volumeStyle: layerData.volumeStyle ? { ...layerData.volumeStyle } : undefined,
       layerBlendMode: layerData.layerBlendMode,
       layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
@@ -7871,6 +7885,7 @@ async function duplicateLayer(index: number) {
     lineFollowTerrain3D: layerData.lineFollowTerrain3D,
     polygonStyle: layerData.polygonStyle ? { ...layerData.polygonStyle } : undefined,
     polygonZOffset: layerData.polygonZOffset,
+    particleStyle: layerData.particleStyle ? { ...layerData.particleStyle } : undefined,
     volumeStyle: layerData.volumeStyle ? { ...layerData.volumeStyle } : undefined,
     textContent: layerData.textContent,
     textSize: layerData.textSize,
@@ -7895,8 +7910,8 @@ async function duplicateLayer(index: number) {
   }
   if (layerData.type === "point") {
     duplicate.pointStyle = duplicate.pointStyle ?? { ...defaultPointStyle };
-  } else if (layerData.type === "volume") {
-    duplicate.volumeStyle = duplicate.volumeStyle ?? { ...defaultVolumeStyle };
+  } else if (isParticleLayer(layerData)) {
+    setParticleStyle(duplicate, getParticleStyle(duplicate));
   } else if (layerData.type === "polyline") {
     duplicate.lineStyle = duplicate.lineStyle ?? { ...defaultLineStyle };
   } else if (layerData.type === "polygon") {
@@ -8085,12 +8100,12 @@ function syncPolygonOutlineControlVisibility(isPolygon: boolean, showOutlineStyl
 }
 
 function styleTypeSupportsCssEffects(styleType: StylePanelType) {
-  if (styleType === "volume") return false;
+  if (styleType === "particles") return false;
   return !(currentViewMode === "3d" && (styleType === "point" || styleType === "polyline" || styleType === "polygon"));
 }
 
 function styleTypeSupportsBlendMode(styleType: StylePanelType) {
-  if (styleType === "volume") return false;
+  if (styleType === "particles") return false;
   return !(currentViewMode === "3d" && (styleType === "point" || styleType === "polyline" || styleType === "polygon"));
 }
 
@@ -8198,8 +8213,9 @@ function syncStylePanelFromLayer(layerData: LayerData) {
     syncPolygonExtrusionControlVisibility(style.style);
     syncPolygonOutlineControlVisibility(true, layerData.type === "feature");
     updatePolygonStyleOptionColors(style.color, style.outlineColor);
-  } else if (styleType === "volume") {
-    const style = layerData.volumeStyle ?? defaultVolumeStyle;
+  } else if (styleType === "particles") {
+    const style = getParticleStyle(layerData);
+    setCalciteValue(getEl("volume-preset-select"), style.preset ?? "balanced");
     setCalciteValue(getEl("volume-emitter-mode-select"), "emitter");
     setCalciteValue(getEl("volume-emitter-radius-input"), style.emitterRadius ?? defaultVolumeStyle.emitterRadius ?? 18);
     setCalciteValue(getEl("volume-fire-lifetime-input"), style.fireLifetime ?? defaultVolumeStyle.fireLifetime ?? 1.5);
@@ -8231,7 +8247,7 @@ function syncStylePanelFromLayer(layerData: LayerData) {
 
   syncLayerEffectsControlVisibility(styleType, {
     hideBlendMode:
-      styleType === "volume" ||
+      styleType === "particles" ||
       (styleType === "point" &&
         currentViewMode === "3d" &&
         pointStyleUses3DObjectLayer((layerData.pointStyle ?? defaultPointStyle).style)),
@@ -8244,6 +8260,27 @@ function syncStylePanelFromLayer(layerData: LayerData) {
   effectsAdvanced.classList.toggle("show", lockEffectsOpen);
   effectsToggleEl.textContent = lockEffectsOpen ? "Show less" : "Show more";
   effectsToggleEl.setAttribute("aria-expanded", String(lockEffectsOpen));
+}
+
+function applyParticlePresetInputs(presetValue: string) {
+  const style = getParticlePresetDefaults(normalizeParticlePreset(presetValue));
+  setCalciteValue(getEl("volume-emitter-mode-select"), "emitter");
+  setCalciteValue(getEl("volume-emitter-radius-input"), style.emitterRadius ?? defaultVolumeStyle.emitterRadius ?? 18);
+  setCalciteValue(getEl("volume-fire-lifetime-input"), style.fireLifetime ?? defaultVolumeStyle.fireLifetime ?? 1.5);
+  setCalciteValue(getEl("volume-smoke-lifetime-input"), style.smokeLifetime ?? defaultVolumeStyle.smokeLifetime ?? 7.6);
+  setCalciteValue(getEl("volume-fire-speed-input"), style.fireSpeed ?? defaultVolumeStyle.fireSpeed ?? 58);
+  setCalciteValue(getEl("volume-smoke-speed-input"), style.smokeSpeed ?? defaultVolumeStyle.smokeSpeed ?? 20);
+  setCalciteValue(getEl("volume-variation-input"), style.variation ?? defaultVolumeStyle.variation ?? 0.65);
+  setCalciteValue(getEl("volume-turbulence-input"), style.turbulence ?? defaultVolumeStyle.turbulence ?? 12);
+  setCalciteValue(getEl("volume-wind-x-input"), style.windX ?? defaultVolumeStyle.windX ?? 3.3);
+  setCalciteValue(getEl("volume-wind-y-input"), style.windY ?? defaultVolumeStyle.windY ?? 1.1);
+  setCalciteValue(getEl("volume-buoyancy-input"), style.buoyancy ?? defaultVolumeStyle.buoyancy ?? 28);
+}
+
+function applyParticlePresetSelection() {
+  const presetValue = String((getEl("volume-preset-select") as any).value || "balanced");
+  applyParticlePresetInputs(presetValue);
+  applyStyleSettings(false);
 }
 
 function confirmStyleSettings() {
@@ -8288,7 +8325,7 @@ function applyLayerEffects(layerData: LayerData) {
   layerData.layer.blendMode = blend;
 
   if (!styleTypeSupportsCssEffects(styleType)) {
-    if (layerData.type === "volume") {
+    if (isParticleLayer(layerData)) {
       syncVolumeBoxOverlay(layerData, view);
     }
     return;
@@ -8306,7 +8343,7 @@ function applyLayerEffects(layerData: LayerData) {
   layerData.layer.effect = buildLayerEffectString(settings);
   if (layerData.type === "text") {
     syncTextMeshOverlay(layerData, view);
-  } else if (layerData.type === "volume") {
+  } else if (isParticleLayer(layerData)) {
     syncVolumeBoxOverlay(layerData, view);
   }
 }
@@ -8404,9 +8441,10 @@ function applyStyleSettings(shouldClose: boolean) {
     syncPolygonOutlineControlVisibility(true, layerData.type === "feature");
     updatePolygonAnimationPreview(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
     updatePolygonStyleOptionColors(layerData.polygonStyle.color, layerData.polygonStyle.outlineColor);
-  } else if (styleType === "volume") {
-    layerData.volumeStyle = {
-      ...(layerData.volumeStyle ?? defaultVolumeStyle),
+  } else if (styleType === "particles") {
+    setParticleStyle(layerData, {
+      ...(getParticleStyle(layerData) ?? defaultVolumeStyle),
+      preset: normalizeParticlePreset((getEl("volume-preset-select") as any).value),
       emitterMode: "emitter",
       emitterRadius: readNumber(
         (getEl("volume-emitter-radius-input") as any).value,
@@ -8443,7 +8481,7 @@ function applyStyleSettings(shouldClose: boolean) {
         (getEl("volume-buoyancy-input") as any).value,
         defaultVolumeStyle.buoyancy ?? 28
       )
-    };
+    });
   }
 
   layerData.layerBlendMode = String((getEl("layer-blend-mode-select") as any).value || "normal");
@@ -9015,8 +9053,8 @@ function applyLayerStyle(layerData: LayerData) {
     applyTextSymbols(layerData);
     return;
   }
-  if (layerData.type === "volume") {
-    const style = layerData.volumeStyle ?? defaultVolumeStyle;
+  if (isParticleLayer(layerData)) {
+    const style = getParticleStyle(layerData);
     layerData.layer.graphics.forEach((graphic: any) => {
       graphic.symbol = buildVolumeAnchorSymbol(style);
     });
@@ -9187,7 +9225,7 @@ function handleSketchUpdate(event: any) {
       scheduleTextMeshOverlayRefresh();
       return;
     }
-    if (layerData.type === "volume") {
+    if (isParticleLayer(layerData)) {
       applyLayerStyle(layerData);
       return;
     }
@@ -9223,11 +9261,14 @@ function getFeatureStyleType(layerData: LayerData) {
   return "point";
 }
 
-type StylePanelType = "point" | "polyline" | "polygon" | "volume" | null;
+type StylePanelType = "point" | "polyline" | "polygon" | "particles" | null;
 
 function getStyleTypeForLayer(layerData: LayerData) {
   if (layerData.type === "feature") {
     return getFeatureStyleType(layerData) as StylePanelType;
+  }
+  if (isParticleLayer(layerData)) {
+    return "particles";
   }
   return layerData.type === "text" ? null : (layerData.type as StylePanelType);
 }
@@ -9249,12 +9290,12 @@ function setStyleSectionVisibility(
   const polygonExtrudeNote = document.getElementById("polygon-extrude-note") as HTMLElement | null;
   const effectsSection = getEl("layer-effects-section");
   const showEffectsSection =
-    showEffects && type !== "volume" && !(currentViewMode === "3d" && type === "polygon");
+    showEffects && type !== "particles" && !(currentViewMode === "3d" && type === "polygon");
 
   pointSection.style.display = type === "point" ? "block" : "none";
   lineSection.style.display = type === "polyline" ? "block" : "none";
   polygonSection.style.display = type === "polygon" ? "block" : "none";
-  volumeSection.style.display = type === "volume" ? "block" : "none";
+  volumeSection.style.display = type === "particles" ? "block" : "none";
   effectsSection.style.display = showEffectsSection ? "block" : "none";
 
     pointAdvanced.style.display = type === "point" ? "block" : "none";
@@ -10418,17 +10459,18 @@ function updateAnimationOptions() {
   optionsContainer.innerHTML = "";
   webglOptionsContainer.innerHTML = "";
 
-  const types = (animationTypes[layerData.type] || animationTypes.point).filter((type) => {
+  const animationTypeKey = isParticleLayer(layerData) ? "particles" : layerData.type;
+  const types = (animationTypes[animationTypeKey] || animationTypes.point).filter((type) => {
     if (type.value === "followPath") {
       return layerData.type === "point" &&
         !getFollowPathAnimation(layerData) &&
         getEligibleFollowPathLayers(layerData).length > 0;
     }
-    if (layerData.type === "volume" && (type.value === "fadeIn" || type.value === "fadeOut")) {
+    if (isParticleLayer(layerData) && (type.value === "fadeIn" || type.value === "fadeOut")) {
       return false;
     }
     if (type.value === "smoke" || type.value === "fire") {
-      return currentViewMode === "3d" && layerData.type === "volume";
+      return currentViewMode === "3d" && isParticleLayer(layerData);
     }
     if (type.value !== "extrude") return true;
     return (
@@ -10459,7 +10501,7 @@ function updateAnimationOptions() {
       });
 
       const preview = document.createElement("span");
-      preview.className = `animation-type-preview animation-type-preview--${layerData.type} animation-type-preview--${type.value}`;
+      preview.className = `animation-type-preview animation-type-preview--${animationTypeKey} animation-type-preview--${type.value}`;
       optionButton.appendChild(preview);
       optionButton.appendChild(document.createTextNode(type.label));
       container.appendChild(optionButton);
@@ -10482,8 +10524,8 @@ function updateAnimationOptions() {
   } else if (layerData.type === "polygon") {
     const style = layerData.polygonStyle ?? defaultPolygonStyle;
     updatePolygonAnimationPreview(style.color, style.outlineColor);
-  } else if (layerData.type === "volume") {
-    const style = layerData.volumeStyle ?? defaultVolumeStyle;
+  } else if (isParticleLayer(layerData)) {
+    const style = getParticleStyle(layerData);
     updateVolumeAnimationPreview(style.color, style.edgeColor);
   }
 

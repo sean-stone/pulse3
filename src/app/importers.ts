@@ -218,6 +218,7 @@ const importGeoJson = async (config: ImportConfig, fileName: string, content: st
       polygon: [],
       text: [],
       feature: [],
+      particles: [],
       volume: []
     };
     featureImports.forEach((featureImport) => {

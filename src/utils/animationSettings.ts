@@ -4,6 +4,7 @@ import type {
   LayerType,
   LayerEffectSettings,
   LineStyle,
+  ParticleStyle,
   PointKeyframe,
   PointStyle,
   PolygonStyle,
@@ -25,6 +26,7 @@ export interface AnimationSettingsSnapshot {
     lineFollowTerrain3D?: boolean;
     polygonStyle?: PolygonStyle;
     polygonZOffset?: number;
+    particleStyle?: ParticleStyle;
     volumeStyle?: VolumeStyle;
     textContent?: string;
     textSize?: number;
@@ -69,6 +71,7 @@ export function buildAnimationSettingsSnapshot(
       lineFollowTerrain3D: layer.lineFollowTerrain3D,
       polygonStyle: layer.polygonStyle ? { ...layer.polygonStyle } : undefined,
       polygonZOffset: layer.polygonZOffset,
+      particleStyle: layer.particleStyle ? { ...layer.particleStyle } : undefined,
       volumeStyle: layer.volumeStyle ? { ...layer.volumeStyle } : undefined,
       textContent: layer.textContent,
       textSize: layer.textSize,
