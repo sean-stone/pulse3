@@ -9471,8 +9471,7 @@ function setColorPickerValue(colorId: string, color: string, fallbackAlpha: numb
   const normalizedHex = `#${hex.replace("#", "").padStart(6, "0")}`;
   const normalizedHexAlpha = `${normalizedHex}${hexAlpha.replace("#", "").slice(-2)}`;
   if (picker) {
-    picker.format = "hexa";
-    picker.value = normalizedHexAlpha;
+    picker.value = safeAlpha < 1 ? normalizedHexAlpha : normalizedHex;
   }
   updateColorPickerSwatch(colorId, safeAlpha < 1 ? `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${safeAlpha})` : hex);
 }

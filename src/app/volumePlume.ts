@@ -622,6 +622,7 @@ const createSpriteTexture = (kind: ParticleSpriteKind) => {
   const texture = new CanvasTexture(canvas);
   texture.minFilter = LinearFilter;
   texture.magFilter = LinearFilter;
+  texture.premultiplyAlpha = false;
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
@@ -734,6 +735,23 @@ class VolumePlumeRenderNode extends RenderNode {
       blending: options.blending,
       toneMapped: false
     });
+  }
+
+  private resetSharedPixelStoreState() {
+    const gl = this.gl as WebGLRenderingContext | WebGL2RenderingContext | null | undefined;
+    if (!gl) {
+      return;
+    }
+
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+
+    const unpackColorspace = (gl as any).UNPACK_COLORSPACE_CONVERSION_WEBGL;
+    const browserDefault = (gl as any).BROWSER_DEFAULT_WEBGL;
+    if (typeof unpackColorspace === "number" && typeof browserDefault === "number") {
+      gl.pixelStorei(unpackColorspace, browserDefault);
+    }
   }
 
   private ensureRenderer() {
@@ -1027,6 +1045,7 @@ class VolumePlumeRenderNode extends RenderNode {
     }
 
     try {
+      this.resetSharedPixelStoreState();
       this.renderer.resetState();
       (this.renderer as any).setRenderTargetFramebuffer(this.outputTarget, (output as any)?.fbo?.glName ?? null);
       this.renderer.setRenderTarget(this.outputTarget);
@@ -1041,15 +1060,16 @@ class VolumePlumeRenderNode extends RenderNode {
           entries: this.manager.entries.size
         });
       }
-      this.renderer.resetState();
     } catch (error) {
       if (!this.didLogRenderFailure) {
         this.didLogRenderFailure = true;
         console.error("Volume plume Three render failed", error);
       }
+    } finally {
       this.renderer.resetState();
+      this.resetSharedPixelStoreState();
+      this.resetWebGLState();
     }
-    this.resetWebGLState();
     return output;
   }
 }
