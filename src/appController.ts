@@ -12,7 +12,6 @@ import WebStyleSymbol from "@arcgis/core/symbols/WebStyleSymbol";
 import { sqlName } from "@arcgis/core/core/sql";
 import Glow from "@arcgis/core/webscene/Glow";
 
-import "gif.js/dist/gif.js";
 import gifWorkerUrl from "gif.js/dist/gif.worker.js?url";
 
 import { animationTypes } from "./animationTypes";
@@ -96,10 +95,12 @@ import {
   setParticleStyle
 } from "./app/particles";
 import "jszip/dist/jszip.min.js";
-import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile } from "@ffmpeg/util";
-import ffmpegCoreUrl from "@ffmpeg/core?url";
-import ffmpegWasmUrl from "@ffmpeg/core/wasm?url";
+type FfmpegRuntime = {
+  FFmpeg: typeof import("@ffmpeg/ffmpeg").FFmpeg;
+  fetchFile: typeof import("@ffmpeg/util").fetchFile;
+};
+
+let ffmpegRuntimePromise: Promise<FfmpegRuntime> | null = null;
 let ffmpegClassWorkerUrl: string | null = null;
 let ffmpegCoreBaseUrl: string | null = null;
 const THUMBTACK_3D_STYLE = "thumbtack3d";
@@ -280,6 +281,18 @@ const appendCacheBust = (url: string) => {
   return `${url}${separator}v=${encodeURIComponent(APP_VERSION)}`;
 };
 
+async function loadFfmpegRuntime() {
+  if (!ffmpegRuntimePromise) {
+    ffmpegRuntimePromise = Promise.all([import("@ffmpeg/ffmpeg"), import("@ffmpeg/util")]).then(
+      ([ffmpegModule, utilModule]) => ({
+        FFmpeg: ffmpegModule.FFmpeg,
+        fetchFile: utilModule.fetchFile
+      })
+    );
+  }
+  return ffmpegRuntimePromise;
+}
+
 async function resolveFfmpegWorkerUrl() {
   if (ffmpegClassWorkerUrl) return ffmpegClassWorkerUrl;
   const baseUrl = import.meta.env.BASE_URL || "/";
@@ -453,7 +466,7 @@ let activeGifEncoder: any | null = null;
 let exportExtentSnapshot: any | null = null;
 let preExportExtentSnapshot: any | null = null;
 let preExportViewpoint: any | null = null;
-let ffmpegInstance: FFmpeg | null = null;
+let ffmpegInstance: import("@ffmpeg/ffmpeg").FFmpeg | null = null;
 let ffmpegLoaded = false;
 let pendingImportType: "geojson" | "csv" | null = null;
 let geoJsonImportModeResolve: ((choice: GeoJsonImportMode | null) => void) | null = null;
@@ -4680,21 +4693,16 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
   if (exportCancelRequested) {
     throw new Error("Export cancelled");
   }
+  const { FFmpeg, fetchFile } = await loadFfmpegRuntime();
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
   }
   if (!ffmpegLoaded) {
     setGifExportStatus("Loading MP4 encoder...");
     const workerUrl = appendCacheBust(await resolveFfmpegWorkerUrl());
-    let coreURL = ffmpegCoreUrl;
-    let wasmURL = ffmpegWasmUrl;
-    if (!coreURL || !wasmURL) {
-      const coreBase = await resolveFfmpegCoreBaseUrl();
-      coreURL = new URL("ffmpeg-core.js", coreBase).toString();
-      wasmURL = new URL("ffmpeg-core.wasm", coreBase).toString();
-    }
-    coreURL = appendCacheBust(coreURL);
-    wasmURL = appendCacheBust(wasmURL);
+    const coreBase = await resolveFfmpegCoreBaseUrl();
+    const coreURL = appendCacheBust(new URL("ffmpeg-core.js", coreBase).toString());
+    const wasmURL = appendCacheBust(new URL("ffmpeg-core.wasm", coreBase).toString());
     await ffmpegInstance.load({ classWorkerURL: workerUrl, coreURL, wasmURL });
     ffmpegLoaded = true;
   }

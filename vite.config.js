@@ -11,12 +11,6 @@ export default defineConfig({
     },
     build: {
         cssCodeSplit: false,
-        assetsInlineLimit: 0,
-        rollupOptions: {
-            output: {
-                manualChunks: undefined,
-                inlineDynamicImports: true
-            }
-        }
+        assetsInlineLimit: 0
     }
 });

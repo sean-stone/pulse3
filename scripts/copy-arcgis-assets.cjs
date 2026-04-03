@@ -13,14 +13,6 @@ const ffmpegCoreSourceDir = path.join(
   "esm"
 );
 const ffmpegCoreTargetDir = path.join(__dirname, "..", "public", "ffmpeg-core");
-const ffmpegCoreTargetDemosDir = path.join(
-  __dirname,
-  "..",
-  "public",
-  "demos",
-  "pulse3",
-  "ffmpeg-core"
-);
 
 function copyDir(src, dest) {
   if (!fs.existsSync(src)) {
@@ -40,4 +32,3 @@ function copyDir(src, dest) {
 
 copyDir(sourceDir, targetDir);
 copyDir(ffmpegCoreSourceDir, ffmpegCoreTargetDir);
-copyDir(ffmpegCoreSourceDir, ffmpegCoreTargetDemosDir);
