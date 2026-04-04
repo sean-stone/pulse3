@@ -325,6 +325,127 @@ const multiplyColorOpacity = (
   return [rgba[0], rgba[1], rgba[2], clamp(rgba[3] * clamp(opacity, 0, 1), 0, 1)];
 };
 
+const overlayPathFallbackByStyle: Record<string, string> = {
+  diamond: "M12 2 L22 12 L12 22 L2 12 Z"
+};
+
+const overlayColorToCssRgba = (color: unknown, fallback: [number, number, number, number]) => {
+  const rgba = toClampedRgbaColor(color, fallback);
+  return `rgba(${rgba[0]}, ${rgba[1]}, ${rgba[2]}, ${rgba[3]})`;
+};
+
+const inferOverlayPathViewBoxSize = (path: string) => {
+  const values = path.match(/-?\d*\.?\d+/g);
+  if (!values?.length) return 24;
+  const maxValue = values.reduce((max, value) => {
+    const next = Math.abs(Number(value));
+    return Number.isFinite(next) ? Math.max(max, next) : max;
+  }, 0);
+  return maxValue > 64 ? 1024 : 24;
+};
+
+const buildOverlayMarkerSvgHref = (
+  path: string,
+  color: unknown,
+  outlineColor: unknown,
+  outlineWidth: unknown
+) => {
+  const trimmedPath = String(path || "").trim();
+  if (!trimmedPath) return null;
+  const viewBoxSize = inferOverlayPathViewBoxSize(trimmedPath);
+  const scale = viewBoxSize / 24;
+  const strokeWidth = Math.max(0, Number(outlineWidth) || 0) * scale;
+  const strokeAttrs =
+    strokeWidth > 0
+      ? ` stroke="${overlayColorToCssRgba(outlineColor, [0, 0, 0, 0])}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round"`
+      : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBoxSize} ${viewBoxSize}"><path d="${trimmedPath}" fill="${overlayColorToCssRgba(color, [255, 255, 255, 1])}"${strokeAttrs}/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+const buildOverlay3DSymbolFromSimpleMarker = (symbol: any) => {
+  const style = String(symbol?.style || "circle").trim();
+  const primitiveByStyle: Record<string, string> = {
+    circle: "circle",
+    square: "square",
+    triangle: "triangle",
+    cross: "cross",
+    x: "x"
+  };
+  const size = Math.max(2, Number(symbol?.size) || 12);
+  const angle = Number.isFinite(Number(symbol?.angle)) ? Number(symbol.angle) : 0;
+  const fillColor = toClampedRgbaColor(symbol?.color, [255, 255, 255, 1]);
+  const strokeColor = toClampedRgbaColor(symbol?.outline?.color, [0, 0, 0, 0]);
+  const outlineSize = Math.max(0, Number(symbol?.outline?.width) || 0);
+  const path =
+    style === "path"
+      ? String(symbol?.path || "").trim()
+      : overlayPathFallbackByStyle[style] ?? "";
+  const href = path
+    ? buildOverlayMarkerSvgHref(path, symbol?.color, symbol?.outline?.color, symbol?.outline?.width)
+    : null;
+  if (href) {
+    return {
+      type: "point-3d",
+      symbolLayers: [
+        {
+          type: "icon",
+          resource: { href },
+          size,
+          angle
+        }
+      ]
+    } as any;
+  }
+  return {
+    type: "point-3d",
+    symbolLayers: [
+      {
+        type: "icon",
+        resource: { primitive: primitiveByStyle[style] ?? "circle" },
+        size,
+        angle,
+        material: {
+          color: fillColor
+        },
+        outline: {
+          color: strokeColor,
+          size: outlineSize
+        }
+      }
+    ]
+  } as any;
+};
+
+const prepareOverlayGraphicsForView = (
+  graphics: Graphic[],
+  view: any,
+  options: { omitTextSymbolsIn3D?: boolean } = {}
+) => {
+  if (!isSceneView3D(view)) {
+    return graphics;
+  }
+  const prepared: Graphic[] = [];
+  graphics.forEach((graphic) => {
+    const symbol = (graphic as any)?.symbol;
+    if (!symbol) {
+      prepared.push(graphic);
+      return;
+    }
+    if (symbol.type === "text") {
+      if (!options.omitTextSymbolsIn3D) {
+        prepared.push(graphic);
+      }
+      return;
+    }
+    if (symbol.type === "simple-marker") {
+      (graphic as any).symbol = buildOverlay3DSymbolFromSimpleMarker(symbol);
+    }
+    prepared.push(graphic);
+  });
+  return prepared;
+};
+
 const applyTextSymbolState = (
   graphic: any,
   layerData: LayerData,
@@ -2038,8 +2159,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           dartLayer.removeAll();
-          if (dartGraphics.length) {
-            dartLayer.addMany(dartGraphics);
+          const preparedDartGraphics = prepareOverlayGraphicsForView(dartGraphics, view);
+          if (preparedDartGraphics.length) {
+            dartLayer.addMany(preparedDartGraphics);
           }
         }
       } else {
@@ -3570,8 +3692,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           flightLayer.removeAll();
-          if (flightGraphics.length) {
-            flightLayer.addMany(flightGraphics);
+          const preparedFlightGraphics = prepareOverlayGraphicsForView(flightGraphics, view, {
+            omitTextSymbolsIn3D: true
+          });
+          if (preparedFlightGraphics.length) {
+            flightLayer.addMany(preparedFlightGraphics);
           }
         }
       } else {
@@ -3685,8 +3810,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           flightLayer.removeAll();
-          if (flightGraphics.length) {
-            flightLayer.addMany(flightGraphics);
+          const preparedFlightGraphics = prepareOverlayGraphicsForView(flightGraphics, view, {
+            omitTextSymbolsIn3D: true
+          });
+          if (preparedFlightGraphics.length) {
+            flightLayer.addMany(preparedFlightGraphics);
           }
         }
       }
@@ -3891,8 +4019,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           waypointLayer.removeAll();
-          if (waypointGraphics.length) {
-            waypointLayer.addMany(waypointGraphics);
+          const preparedWaypointGraphics = prepareOverlayGraphicsForView(waypointGraphics, view, {
+            omitTextSymbolsIn3D: true
+          });
+          if (preparedWaypointGraphics.length) {
+            waypointLayer.addMany(preparedWaypointGraphics);
           }
         }
       } else {
@@ -4030,8 +4161,11 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           waypointLayer.removeAll();
-          if (waypointGraphics.length) {
-            waypointLayer.addMany(waypointGraphics);
+          const preparedWaypointGraphics = prepareOverlayGraphicsForView(waypointGraphics, view, {
+            omitTextSymbolsIn3D: true
+          });
+          if (preparedWaypointGraphics.length) {
+            waypointLayer.addMany(preparedWaypointGraphics);
           }
         }
       }
@@ -4128,8 +4262,9 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
           });
 
           barrageLayer.removeAll();
-          if (barrageGraphics.length) {
-            barrageLayer.addMany(barrageGraphics);
+          const preparedBarrageGraphics = prepareOverlayGraphicsForView(barrageGraphics, view);
+          if (preparedBarrageGraphics.length) {
+            barrageLayer.addMany(preparedBarrageGraphics);
           }
         }
         layerData.layer.opacity = 0;

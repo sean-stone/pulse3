@@ -221,7 +221,8 @@ function resolvePointStyleKey(style: string) {
 }
 
 function isPointStyle3DOptionValue(style: string) {
-  return String(style || "").startsWith("model-");
+  const normalized = String(style || "");
+  return normalized === THUMBTACK_3D_STYLE || normalized.startsWith("model-");
 }
 
 function encodeDynamicWebStyleKey(styleName: string, name: string) {
@@ -3123,6 +3124,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     updateTimeline();
     updateAnimationOptions();
     filterPointStyles();
+    filterLineStyles();
     filterPolygonFillStyles();
     updateGoogle3DTilesToggleVisibility();
     ensureGoogle3DTilesLayerState();
@@ -3174,6 +3176,7 @@ async function setViewMode(mode: ViewMode, options?: { skipSave?: boolean; prese
     updateTimeline();
     updateAnimationOptions();
     filterPointStyles();
+    filterLineStyles();
     filterPolygonFillStyles();
     if (selectedLayerIndex >= 0) {
       selectLayer(selectedLayerIndex, false);
@@ -6350,6 +6353,7 @@ function setupEventListeners() {
     pointStyleSearch.addEventListener("calciteInputChange", filterPointStyles as EventListener);
     filterPointStyles();
   }
+  filterLineStyles();
   getEl("point-size-input").addEventListener("calciteSliderInput", () => {
     const sizeInput = getEl("point-size-input") as any;
     const nextSize = Number(sizeInput?.value);
@@ -7345,7 +7349,7 @@ function createImportedLayer(type: LayerType, name: string, graphics: Graphic[])
     layerData.textFontFamily = "sans-serif";
     layerData.textItalic = false;
     layerData.textUnderline = false;
-    layerData.textRenderMode = "mesh-3d";
+    layerData.textRenderMode = currentViewMode === "3d" ? "mesh-3d" : "flat";
     layerData.textCalloutLine = false;
     layerData.textDepth = DEFAULT_TEXT_MESH_DEPTH_PERCENT;
     layerData.textFixedToWorld = false;
@@ -7493,7 +7497,7 @@ async function startDrawing(type: LayerType) {
     layerData.textFontFamily = "sans-serif";
     layerData.textItalic = false;
     layerData.textUnderline = false;
-    layerData.textRenderMode = "mesh-3d";
+    layerData.textRenderMode = currentViewMode === "3d" ? "mesh-3d" : "flat";
     layerData.textCalloutLine = false;
     layerData.textDepth = DEFAULT_TEXT_MESH_DEPTH_PERCENT;
     layerData.textFixedToWorld = false;
@@ -9328,6 +9332,7 @@ function setStyleSectionVisibility(
   const polygonZOffsetRow = document.getElementById("polygon-zoffset-row") as HTMLElement | null;
   const polygonExtrudeRow = document.getElementById("polygon-extrude-height-row") as HTMLElement | null;
   const polygonExtrudeNote = document.getElementById("polygon-extrude-note") as HTMLElement | null;
+  const volumeControls = document.getElementById("volume-style-controls") as HTMLElement | null;
   const effectsSection = getEl("layer-effects-section");
   const showEffectsSection =
     showEffects && type !== "particles" && !(currentViewMode === "3d" && type === "polygon");
@@ -9356,10 +9361,15 @@ function setStyleSectionVisibility(
   if (polygonExtrudeNote) {
     polygonExtrudeNote.style.display = "none";
   }
+  if (volumeControls) {
+    volumeControls.style.display = type === "particles" && currentViewMode === "3d" ? "block" : "none";
+  }
   syncPolygonOutlineControlVisibility(type === "polygon", showFeatureExtras && type === "polygon");
   if (type === "point") {
     syncPointOrientationControlVisibility(getSelectedPointStyle());
     filterPointStyles();
+  } else if (type === "polyline") {
+    filterLineStyles();
   } else if (type === "polygon") {
     syncPolygonExtrusionControlVisibility(getSelectedPolygonFillStyle());
   }
@@ -9540,6 +9550,18 @@ function filterPointStyles() {
       return;
     }
     title.style.display = hasVisible ? "" : "none";
+  });
+}
+
+function filterLineStyles() {
+  const container = document.getElementById("line-style-options");
+  if (!container) return;
+  const is3D = currentViewMode === "3d";
+  const buttons = Array.from(container.querySelectorAll(".style-option-btn")) as HTMLElement[];
+  buttons.forEach((button) => {
+    const value = String(button.dataset.value || "");
+    const is3DOption = value === "tube-3d";
+    button.style.display = is3D || !is3DOption ? "" : "none";
   });
 }
 
@@ -10028,17 +10050,22 @@ function openTextSettingsModal() {
 }
 
 function updateTextModeControlVisibility(renderMode: string) {
+  const is3DView = currentViewMode === "3d";
+  const renderModeRow = document.getElementById("text-render-mode-row") as HTMLElement | null;
   const calloutRow = document.getElementById("text-3d-callout-row") as HTMLElement | null;
   const depthRow = document.getElementById("text-3d-depth-row") as HTMLElement | null;
   const fixedWorldRow = document.getElementById("text-3d-fixed-world-row") as HTMLElement | null;
+  if (renderModeRow) {
+    renderModeRow.style.display = is3DView ? "" : "none";
+  }
   if (calloutRow) {
-    calloutRow.style.display = renderMode === "scene-3d" ? "" : "none";
+    calloutRow.style.display = is3DView && renderMode === "scene-3d" ? "" : "none";
   }
   if (depthRow) {
-    depthRow.style.display = renderMode === "mesh-3d" ? "" : "none";
+    depthRow.style.display = is3DView && renderMode === "mesh-3d" ? "" : "none";
   }
   if (fixedWorldRow) {
-    fixedWorldRow.style.display = renderMode === "mesh-3d" ? "" : "none";
+    fixedWorldRow.style.display = is3DView && renderMode === "mesh-3d" ? "" : "none";
   }
 }
 

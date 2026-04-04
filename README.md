@@ -155,7 +155,7 @@ Pulse also includes a native route tool in the `More` menu. It posts to `route.p
 Environment variables:
 - `OPENAI_API_KEY` (required)
 - `ARCGIS_API_KEY` (required for native routing and AI-assisted routing)
-- `OPENAI_MODEL` (optional, defaults to `gpt-4.1-mini`)
+- `OPENAI_MODEL` (optional, defaults to `gpt-5.4-mini`)
 - `PULSE_ALLOWED_ORIGIN` (optional, for CORS during dev)
 - `PULSE_SHARED_SECRET` (optional, shared-secret header gate)
 
@@ -195,7 +195,7 @@ This app uses **two** places for secrets:
 ```apacheconf
 # .htaccess (webspace)
 SetEnv OPENAI_API_KEY "your_openai_key_here"
-SetEnv OPENAI_MODEL "gpt-4.1-mini"
+SetEnv OPENAI_MODEL "gpt-5.4-mini"
 SetEnv PULSE_ALLOWED_ORIGIN "https://seanst.one"
 SetEnv PULSE_SHARED_SECRET "your_long_random_string"
 #SetEnv ARCGIS_API_KEY "your_arcgis_key_here"

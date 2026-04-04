@@ -125,6 +125,9 @@ const hasLikelyGeographicCoordinates = (features: ProjectSnapshot["features"] | 
   return false;
 };
 
+const shouldDefaultImportedPointsToTerrain = (snapshotMode: unknown) =>
+  String(snapshotMode || "").trim().toLowerCase() !== "3d";
+
 const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | null => {
   if (!config.view) return null;
   const isSceneView = String((config.view as any)?.type || "") === "3d";
@@ -448,6 +451,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
       : Number.isFinite(storedWkid)
         ? { wkid: storedWkid }
         : config.view.spatialReference;
+    const defaultLegacyPointLayersToTerrain = shouldDefaultImportedPointsToTerrain(meta.app?.mode);
 
     const featuresByLayer = new Map<string, ProjectSnapshot["features"]>();
     (snapshot.features || []).forEach((feature) => {
@@ -536,6 +540,13 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         } else if (!layerData.pointStyle) {
           layerData.pointStyle = { ...config.defaultPointStyle };
         }
+        if (
+          defaultLegacyPointLayersToTerrain &&
+          featureLayer.geometryType === "point" &&
+          layerData.pointFollowTerrain3D === undefined
+        ) {
+          layerData.pointFollowTerrain3D = true;
+        }
         if (featureLayer.geometryType === "polygon" && !Number.isFinite(Number(layerData.polygonZOffset))) {
           layerData.polygonZOffset = 0;
         }
@@ -610,6 +621,13 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         layerData.polygonStyle = { ...config.defaultPolygonStyle };
       } else if (isParticleLayer(layerData) && !layerData.particleStyle && !layerData.volumeStyle) {
         setParticleStyle(layerData, defaultVolumeStyle);
+      }
+      if (
+        defaultLegacyPointLayersToTerrain &&
+        layerData.type === "point" &&
+        layerData.pointFollowTerrain3D === undefined
+      ) {
+        layerData.pointFollowTerrain3D = true;
       }
       if (layerData.type === "polygon" && !Number.isFinite(Number(layerData.polygonZOffset))) {
         layerData.polygonZOffset = 0;
