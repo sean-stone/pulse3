@@ -562,6 +562,10 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
         input.value = layerData.name;
         input.setAttribute("scale", "s");
         input.className = "timeline-layer-input";
+        const blockLabelSelection = (event: Event) => event.stopPropagation();
+        input.addEventListener("pointerdown", blockLabelSelection);
+        input.addEventListener("mousedown", blockLabelSelection);
+        input.addEventListener("click", blockLabelSelection);
         const finish = (commit: boolean) => {
           if (commit) {
             const next = config.sanitizePlainText(input.value, layerData.name);
@@ -704,7 +708,13 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
 
       label.appendChild(actions);
 
-      label.addEventListener("click", () => config.selectLayer(layerIndex));
+      label.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest(".timeline-layer-input")) {
+          return;
+        }
+        config.selectLayer(layerIndex);
+      });
       layersPanel.appendChild(label);
     });
 

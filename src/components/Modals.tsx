@@ -1,3 +1,23 @@
+import projectSamplesData from "../app/projectSamples.json";
+import parisBerlinThumbnail from "../images/paris-berlin.png";
+import planeFlyThumbnail from "../images/plane-fly.png";
+import weatherThumbnail from "../images/weather.png";
+
+type ProjectSample = {
+  id: string;
+  title: string;
+  mode: "2d" | "3d";
+  thumbnailIcon: string;
+  project: unknown;
+};
+
+const projectSamples = projectSamplesData as ProjectSample[];
+const sampleThumbnailImages: Record<string, string> = {
+  "images/paris-berlin.png": parisBerlinThumbnail,
+  "images/plane-fly.png": planeFlyThumbnail,
+  "images/weather.png": weatherThumbnail,
+};
+
 function Modals() {
   return (
     <>
@@ -1389,6 +1409,59 @@ function Modals() {
               scale="m"
             ></calcite-input>
           </calcite-label>
+          <div className="text-template-helper" aria-label="Calculated text templates">
+            <div className="text-template-controls">
+              <calcite-select id="text-template-token-select" scale="s">
+                <calcite-option value="" selected>
+                  Pick dynamic variable
+                </calcite-option>
+                <calcite-option value="Now {time_mmss} ({progress_pct:.0}%)">
+                  Template: Now {"{time_mmss}"} ({"{progress_pct:.0}"}%)
+                </calcite-option>
+                <calcite-option value="Lat {lat:.5}, Lon {lon:.5}">
+                  Template: Lat {"{lat:.5}"}, Lon {"{lon:.5}"}
+                </calcite-option>
+                <calcite-option value="Elevation {elevation_m:.0} m">
+                  Template: Elevation {"{elevation_m:.0}"} m
+                </calcite-option>
+                <calcite-option value="Length {line_length:.1} m">
+                  Template: Length {"{line_length:.1}"} m
+                </calcite-option>
+                <calcite-option value="Area {area:.1} m2">
+                  Template: Area {"{area:.1}"} m2
+                </calcite-option>
+                <calcite-option value="Perimeter {perimeter:.1} m">
+                  Template: Perimeter {"{perimeter:.1}"} m
+                </calcite-option>
+                <calcite-option value="{time_s:.1}">{`{time_s:.1} (seconds)`}</calcite-option>
+                <calcite-option value="{time_mmss}">{`{time_mmss} (mm:ss)`}</calcite-option>
+                <calcite-option value="{progress_pct:.0}">{`{progress_pct:.0} (progress %)`}</calcite-option>
+                <calcite-option value="{lat:.5}">{`{lat:.5} (latitude)`}</calcite-option>
+                <calcite-option value="{lon:.5}">{`{lon:.5} (longitude)`}</calcite-option>
+                <calcite-option value="{elevation_m:.0}">{`{elevation_m:.0} (elevation m)`}</calcite-option>
+                <calcite-option value="{line_length:.1}">{`{line_length:.1} (line length)`}</calcite-option>
+                <calcite-option value="{area:.1}">{`{area:.1} (area)`}</calcite-option>
+                <calcite-option value="{perimeter:.1}">{`{perimeter:.1} (perimeter)`}</calcite-option>
+                <calcite-option value="{x:.2}">{`{x:.2} (x)`}</calcite-option>
+                <calcite-option value="{y:.2}">{`{y:.2} (y)`}</calcite-option>
+                <calcite-option value="{z:.2}">{`{z:.2} (z)`}</calcite-option>
+              </calcite-select>
+              <calcite-button id="text-template-insert-btn" appearance="outline" scale="s" icon-start="plus">
+                Insert
+              </calcite-button>
+            </div>
+            <div className="text-template-helper-note">
+              Use dynamic variables in your text, for example: <code>Now {`{time_mmss}`}</code> or{" "}
+              <code>Lat {`{lat:.5}`}, Lon {`{lon:.5}`}</code>. Geometry-only values (length, area, perimeter)
+              update even when playback is paused.
+            </div>
+          </div>
+          <calcite-label style={{ marginTop: 12 }}>
+            Measure source layer
+            <calcite-select id="text-measure-source-select" scale="m">
+              <calcite-option value="">This text graphic (default)</calcite-option>
+            </calcite-select>
+          </calcite-label>
           <calcite-label id="text-render-mode-row" style={{ marginTop: 12 }}>
             Text Type
             <calcite-select id="text-render-mode-select" scale="m">
@@ -1464,10 +1537,82 @@ function Modals() {
           </calcite-label>
         </div>
       </div>
-      <calcite-dialog
-        id="keyboard-shortcuts-modal"
-        heading="Keyboard shortcuts"
-        scale="s"
+        <calcite-dialog
+          id="project-import-modal"
+          className="project-import-modal"
+          heading="Open project"
+          scale="s"
+          overlay-positioning="fixed"
+          placement="center"
+        >
+          <div className="project-import">
+            <div
+              id="project-import-dropzone"
+              className="project-import-dropzone"
+              role="button"
+              tabIndex={0}
+              aria-label="Drag a Pulse project file here or select a file"
+            >
+              <div className="project-import-dropzone-icon" aria-hidden="true">
+                <calcite-icon icon="upload-to" scale="l"></calcite-icon>
+              </div>
+              <div className="project-import-dropzone-title">Drag project file here</div>
+              <div className="project-import-dropzone-text">Open a saved Pulse .json or .geojson project file.</div>
+              <calcite-button
+                id="project-import-select-btn"
+                icon-start="folder-open"
+                scale="s"
+                appearance="solid"
+                style={{
+                  "--calcite-button-text-color": "#ffffff",
+                  "--calcite-button-icon-color": "#ffffff",
+                }}
+              >
+                Select file
+              </calcite-button>
+            </div>
+
+            <div id="project-import-status" className="project-import-status" role="status" aria-live="polite"></div>
+
+            <section className="project-samples" aria-label="Example projects">
+              <div className="project-samples-heading">Example projects</div>
+              <div className="project-samples-track" role="list">
+                {projectSamples.map((sample) => (
+                  <button
+                    key={sample.id}
+                    type="button"
+                    className="project-sample-card"
+                    data-project-sample-id={sample.id}
+                    role="listitem"
+                  >
+                    <span className="project-sample-thumb" aria-hidden="true">
+                      {sampleThumbnailImages[sample.thumbnailIcon] ? (
+                        <img
+                          src={sampleThumbnailImages[sample.thumbnailIcon]}
+                          alt=""
+                          className="project-sample-thumb-image"
+                        />
+                      ) : (
+                        <calcite-icon icon={sample.thumbnailIcon} scale="m"></calcite-icon>
+                      )}
+                    </span>
+                    <span className="project-sample-title">{sample.title}</span>
+                    <span className="project-sample-meta">{sample.mode.toUpperCase()}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+          <div slot="footer" className="dialog-footer">
+            <calcite-button id="project-import-cancel" appearance="outline">
+              Cancel
+            </calcite-button>
+          </div>
+        </calcite-dialog>
+        <calcite-dialog
+          id="keyboard-shortcuts-modal"
+          heading="Keyboard shortcuts"
+          scale="s"
         overlay-positioning="fixed"
         placement="center"
       >

@@ -132,6 +132,7 @@ export interface LayerData {
   textFixedToWorld?: boolean;
   textWorldHeight?: number;
   textWorldRotation?: number;
+  textMeasureSourceLayerId?: string;
   pointStyle?: PointStyle;
   pointFollowTerrain3D?: boolean;
   lineStyle?: LineStyle;

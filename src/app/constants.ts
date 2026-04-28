@@ -136,6 +136,7 @@ export type ProjectLayerSnapshot = {
   textFixedToWorld?: boolean;
   textWorldHeight?: number;
   textWorldRotation?: number;
+  textMeasureSourceLayerId?: string;
   featureLayerUrl?: string;
   featureFields?: Array<{ name: string; type: string }>;
   featureField?: string;

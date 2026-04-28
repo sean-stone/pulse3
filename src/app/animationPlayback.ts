@@ -1,5 +1,6 @@
 import * as bufferOperator from "@arcgis/core/geometry/operators/bufferOperator";
 import * as densifyOperator from "@arcgis/core/geometry/operators/densifyOperator";
+import * as areaOperator from "@arcgis/core/geometry/operators/areaOperator";
 import * as geodeticDensifyOperator from "@arcgis/core/geometry/operators/geodeticDensifyOperator";
 import * as geodeticLengthOperator from "@arcgis/core/geometry/operators/geodeticLengthOperator";
 import * as lengthOperator from "@arcgis/core/geometry/operators/lengthOperator";
@@ -528,6 +529,265 @@ const applyTextSymbolState = (
     }
   }
   return false;
+};
+
+type TextTemplateContext = {
+  timeSeconds: number;
+  progressPercent: number;
+  geometry: any;
+  layerData?: LayerData;
+  graphicsLayers?: LayerData[];
+  view?: any;
+};
+
+const TOKEN_PATTERN = /{([a-z_]+)(?::\.(\d+))?}/gi;
+
+const formatTokenNumber = (value: number | null, precisionText: string | undefined, fallbackPrecision: number) => {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  const parsedPrecision = Number.parseInt(String(precisionText ?? ""), 10);
+  const precision = Number.isFinite(parsedPrecision)
+    ? clamp(parsedPrecision, 0, 8)
+    : fallbackPrecision;
+  return Number(value).toFixed(precision);
+};
+
+const toGeographicCoordinates = (geometry: any): { lat: number | null; lon: number | null } => {
+  if (!geometry || geometry.type !== "point") {
+    return { lat: null, lon: null };
+  }
+  const x = Number(geometry.x);
+  const y = Number(geometry.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { lat: null, lon: null };
+  }
+  const sr = geometry.spatialReference ?? {};
+  const wkid = Number(sr?.wkid);
+  if (sr?.isGeographic || wkid === 4326) {
+    return { lat: y, lon: x };
+  }
+  if (sr?.isWebMercator || wkid === 3857 || wkid === 102100 || wkid === 102113) {
+    try {
+      const geographic = webMercatorUtils.webMercatorToGeographic(geometry) as Point | null;
+      const lon = Number((geographic as any)?.x);
+      const lat = Number((geographic as any)?.y);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return { lat, lon };
+      }
+    } catch {
+      // Fall through to null coordinates.
+    }
+  }
+  return { lat: null, lon: null };
+};
+
+const resolveElevationMeters = (geometry: any, view: any): number | null => {
+  if (!geometry || geometry.type !== "point") {
+    return null;
+  }
+  const x = Number(geometry?.x);
+  const y = Number(geometry?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  const z = Number(geometry?.z);
+  if (Number.isFinite(z)) {
+    return z;
+  }
+  const elevatedPoint = view?.groundView?.elevationSampler?.queryElevation?.(geometry) as
+    | { z?: number }
+    | null
+    | undefined;
+  const groundZ = Number(elevatedPoint?.z);
+  if (Number.isFinite(groundZ)) {
+    return groundZ;
+  }
+  return null;
+};
+
+const toPathLength = (path: any): number => {
+  if (!Array.isArray(path) || path.length < 2) return 0;
+  let total = 0;
+  for (let i = 1; i < path.length; i += 1) {
+    const prev = path[i - 1];
+    const curr = path[i];
+    const x1 = Number(prev?.[0]);
+    const y1 = Number(prev?.[1]);
+    const z1 = Number(prev?.[2]);
+    const x2 = Number(curr?.[0]);
+    const y2 = Number(curr?.[1]);
+    const z2 = Number(curr?.[2]);
+    if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
+      continue;
+    }
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const hasZ = Number.isFinite(z1) && Number.isFinite(z2);
+    const dz = hasZ ? z2 - z1 : 0;
+    total += Math.hypot(dx, dy, dz);
+  }
+  return total;
+};
+
+const toRingArea = (ring: any): number => {
+  if (!Array.isArray(ring) || ring.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const curr = ring[i];
+    const next = ring[(i + 1) % ring.length];
+    const x1 = Number(curr?.[0]);
+    const y1 = Number(curr?.[1]);
+    const x2 = Number(next?.[0]);
+    const y2 = Number(next?.[1]);
+    if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) {
+      continue;
+    }
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
+};
+
+const resolveGeometryMetrics = (
+  geometry: any
+): { lineLength: number | null; area: number | null; perimeter: number | null } => {
+  if (!geometry || typeof geometry !== "object") {
+    return { lineLength: null, area: null, perimeter: null };
+  }
+  if (geometry.type === "polyline") {
+    try {
+      const isGeographic = Boolean((geometry?.spatialReference as any)?.isGeographic);
+      const lengthValue = isGeographic
+        ? geodeticLengthOperator.execute(geometry)
+        : lengthOperator.execute(geometry);
+      if (Number.isFinite(Number(lengthValue))) {
+        return { lineLength: Number(lengthValue), area: null, perimeter: null };
+      }
+    } catch {
+      // Fall back to coordinate-space math.
+    }
+    const paths = Array.isArray(geometry?.paths) ? geometry.paths : [];
+    const fallbackLength = paths.reduce((sum: number, path: any) => sum + toPathLength(path), 0);
+    return {
+      lineLength: Number.isFinite(fallbackLength) ? fallbackLength : null,
+      area: null,
+      perimeter: null
+    };
+  }
+  if (geometry.type === "polygon") {
+    let areaValue: number | null = null;
+    try {
+      const areaResult = areaOperator.execute(geometry);
+      if (Number.isFinite(Number(areaResult))) {
+        areaValue = Math.abs(Number(areaResult));
+      }
+    } catch {
+      const rings = Array.isArray(geometry?.rings) ? geometry.rings : [];
+      const fallbackArea = rings.reduce((sum: number, ring: any) => sum + toRingArea(ring), 0);
+      if (Number.isFinite(fallbackArea)) {
+        areaValue = Math.abs(fallbackArea);
+      }
+    }
+
+    let perimeterValue: number | null = null;
+    try {
+      const ringPolyline = new Polyline({
+        spatialReference: geometry?.spatialReference,
+        paths: geometry?.rings ?? []
+      });
+      const isGeographic = Boolean((geometry?.spatialReference as any)?.isGeographic);
+      const perimeterResult = isGeographic
+        ? geodeticLengthOperator.execute(ringPolyline)
+        : lengthOperator.execute(ringPolyline);
+      if (Number.isFinite(Number(perimeterResult))) {
+        perimeterValue = Number(perimeterResult);
+      }
+    } catch {
+      const rings = Array.isArray(geometry?.rings) ? geometry.rings : [];
+      const fallbackPerimeter = rings.reduce((sum: number, ring: any) => sum + toPathLength(ring), 0);
+      if (Number.isFinite(fallbackPerimeter)) {
+        perimeterValue = fallbackPerimeter;
+      }
+    }
+
+    return {
+      lineLength: null,
+      area: areaValue,
+      perimeter: perimeterValue
+    };
+  }
+  return { lineLength: null, area: null, perimeter: null };
+};
+
+const resolveTextTemplateGeometry = (context: TextTemplateContext) => {
+  const fallbackGeometry = context.geometry;
+  const sourceLayerId = String(context.layerData?.textMeasureSourceLayerId || "").trim();
+  if (!sourceLayerId) {
+    return fallbackGeometry;
+  }
+  const sourceLayer = context.graphicsLayers?.find(
+    (candidate) => String(candidate?.layer?.id || "") === sourceLayerId
+  );
+  if (!sourceLayer || (sourceLayer.type !== "polyline" && sourceLayer.type !== "polygon")) {
+    return fallbackGeometry;
+  }
+  const sourceGraphic = sourceLayer.layer?.graphics?.find?.((graphic: any) => {
+    const geometryType = String(graphic?.geometry?.type || "");
+    return geometryType === "polyline" || geometryType === "polygon";
+  });
+  return sourceGraphic?.geometry ?? fallbackGeometry;
+};
+
+const resolveTextTemplate = (template: string, context: TextTemplateContext) => {
+  if (!template || template.indexOf("{") === -1) {
+    return template;
+  }
+  const geometry = resolveTextTemplateGeometry(context);
+  const x = Number(geometry?.x);
+  const y = Number(geometry?.y);
+  const z = Number(geometry?.z);
+  const elevation = resolveElevationMeters(geometry, context.view);
+  const geographic = toGeographicCoordinates(geometry);
+  const geometryMetrics = resolveGeometryMetrics(geometry);
+  const totalSeconds = Math.max(0, Number(context.timeSeconds) || 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  const mmss = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  const progress = clamp(Number(context.progressPercent) || 0, 0, 100);
+  return template.replace(TOKEN_PATTERN, (match, tokenRaw: string, precisionRaw: string | undefined) => {
+    const token = String(tokenRaw || "").toLowerCase();
+    switch (token) {
+      case "x":
+        return formatTokenNumber(Number.isFinite(x) ? x : null, precisionRaw, 2);
+      case "y":
+        return formatTokenNumber(Number.isFinite(y) ? y : null, precisionRaw, 2);
+      case "z":
+        return formatTokenNumber(elevation, precisionRaw, 2);
+      case "lat":
+        return formatTokenNumber(geographic.lat, precisionRaw, 5);
+      case "lon":
+        return formatTokenNumber(geographic.lon, precisionRaw, 5);
+      case "elevation_m":
+        return formatTokenNumber(elevation, precisionRaw, 0);
+      case "line_length":
+      case "line_length_m":
+        return formatTokenNumber(geometryMetrics.lineLength, precisionRaw, 1);
+      case "area":
+      case "area_m2":
+        return formatTokenNumber(geometryMetrics.area, precisionRaw, 1);
+      case "perimeter":
+      case "perimeter_m":
+        return formatTokenNumber(geometryMetrics.perimeter, precisionRaw, 1);
+      case "time_s":
+        return formatTokenNumber(totalSeconds, precisionRaw, 1);
+      case "time_mmss":
+        return mmss;
+      case "progress_pct":
+        return formatTokenNumber(progress, precisionRaw, 0);
+      default:
+        return match;
+    }
+  });
 };
 
 const applyPolygonTimeGradient3D = (layerData: LayerData, progress: number) => {
@@ -1242,6 +1502,22 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     if (!hasRealAnimations && !hasLayerPointKeyframes) {
       setVolumeAnimationPlaybackState(layerData, null);
       layerData.layer.opacity = 1;
+      if (layerData.type === "text") {
+        const baseText = layerData.textContent || "Text";
+        const baseSize = layerData.textSize ?? 14;
+        layerData.layer.graphics.forEach((graphic: any) => {
+            const resolvedText = resolveTextTemplate(baseText, {
+              timeSeconds: time,
+              progressPercent: 0,
+              geometry: graphic?.geometry,
+              layerData,
+              graphicsLayers: config.getGraphicsLayers(),
+              view
+            });
+          applyTextSymbolState(graphic, layerData, resolvedText, baseSize, 1, useExplicit3DTextOpacity);
+        });
+        syncTextMeshOverlay(layerData, view);
+      }
       return;
     }
     if (!isPreviewing) {
@@ -1284,7 +1560,15 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         const baseText = layerData.textContent || "Text";
         const baseSize = layerData.textSize ?? 14;
         layerData.layer.graphics.forEach((graphic: any) => {
-          applyTextSymbolState(graphic, layerData, baseText, baseSize, 1, useExplicit3DTextOpacity);
+            const resolvedText = resolveTextTemplate(baseText, {
+              timeSeconds: time,
+              progressPercent: 0,
+              geometry: graphic?.geometry,
+              layerData,
+              graphicsLayers: config.getGraphicsLayers(),
+              view
+            });
+          applyTextSymbolState(graphic, layerData, resolvedText, baseSize, 1, useExplicit3DTextOpacity);
         });
         syncTextMeshOverlay(layerData, view);
       } else if (isParticleLayer(layerData)) {
@@ -1322,6 +1606,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
     let hasActiveAnimation = false;
     let latestEndedAnimation: LayerAnimation | null = null;
     let latestEndedAnimationEnd = Number.NEGATIVE_INFINITY;
+    let maxAnimationEnd = Number.NEGATIVE_INFINITY;
     let extrudeProgress: number | null = null;
     let glowProgress: number | null = null;
     let glowMode: "soft" | "pulse" | null = null;
@@ -1363,6 +1648,7 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
         return;
       }
       const animEnd = anim.start + anim.duration;
+      maxAnimationEnd = Math.max(maxAnimationEnd, animEnd);
       minAnimationStart = Math.min(minAnimationStart, anim.start);
       if (
         anim.type === "draw" ||
@@ -2927,16 +3213,31 @@ const applyAnimationsAtTime = (config: AnimationPlaybackConfig, time: number) =>
       if (layerData.type === "text") {
         const baseText = layerData.textContent || "Text";
         const baseSize = layerData.textSize ?? 14;
+        const hasValidAnimationWindow =
+          Number.isFinite(minAnimationStart) &&
+          Number.isFinite(maxAnimationEnd) &&
+          maxAnimationEnd > minAnimationStart;
+        const layerProgressPercent = hasValidAnimationWindow
+          ? clamp(((time - minAnimationStart) / (maxAnimationEnd - minAnimationStart)) * 100, 0, 100)
+          : 0;
         layerData.layer.graphics.forEach((graphic: any) => {
-          let text = baseText;
+            const resolvedBaseText = resolveTextTemplate(baseText, {
+              timeSeconds: time,
+              progressPercent: layerProgressPercent,
+              geometry: graphic?.geometry,
+              layerData,
+              graphicsLayers: config.getGraphicsLayers(),
+              view
+            });
+          let text = resolvedBaseText;
         if (hasTypewriterAnimation) {
           if (activeTypewriter) {
-            const length = Math.max(0, Math.floor(baseText.length * activeTypewriter.progress));
-            text = baseText.slice(0, length);
+            const length = Math.max(0, Math.floor(resolvedBaseText.length * activeTypewriter.progress));
+            text = resolvedBaseText.slice(0, length);
           } else if (time < minTypewriterStart) {
             text = "";
             } else if (time > maxTypewriterEnd) {
-              text = baseText;
+              text = resolvedBaseText;
             }
           }
           applyTextSymbolState(

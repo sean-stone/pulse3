@@ -51,6 +51,7 @@ import {
   sanitizePlainText
 } from "./app/constants";
 import type { ProjectSnapshot } from "./app/constants";
+import projectSamplesData from "./app/projectSamples.json";
 import { createBootController } from "./app/bootstrap";
 import type { ArcgisViewHostElement, ViewMode } from "./app/bootstrap";
 import {
@@ -123,6 +124,15 @@ type RouteCreateResponse = {
     wkid?: number;
   } | null;
 };
+type ProjectSampleCatalogEntry = {
+  id: string;
+  title: string;
+  mode: "2d" | "3d";
+  thumbnailIcon: string;
+  project: unknown;
+};
+
+const projectSamples = projectSamplesData as ProjectSampleCatalogEntry[];
 const POINT_WEBSTYLE_PRESET_STYLES = [
   "EsriRealisticTransportationStyle",
   "EsriRealisticStreetSceneStyle",
@@ -372,7 +382,9 @@ import { createPlaybackController } from "./app/playback";
 import {
   handleExportProject,
   handleImportProjectClick,
-  handleProjectFileChange
+  handleProjectFileChange,
+  importProjectFile,
+  importProjectSnapshot
 } from "./app/projectIo";
 import {
   applyProjectSnapshot as applyProjectSnapshotFromState,
@@ -469,6 +481,7 @@ let preExportExtentSnapshot: any | null = null;
 let preExportViewpoint: any | null = null;
 let ffmpegInstance: import("@ffmpeg/ffmpeg").FFmpeg | null = null;
 let ffmpegLoaded = false;
+let lastMp4FrameCount = 0;
 let pendingImportType: "geojson" | "csv" | null = null;
 let geoJsonImportModeResolve: ((choice: GeoJsonImportMode | null) => void) | null = null;
 let lastPointSizeInput = DEFAULT_PIN_SIZE;
@@ -754,6 +767,8 @@ let sceneCameraFxPreviewCaptureToken = 0;
 let sceneCameraFxPreviewCaptureInFlight = false;
 let sceneCameraFxPreviewCaptureRequested = false;
 let sceneDaylightPersistenceBound = false;
+let sceneDaylightFxButtonBound = false;
+const SCENE_DAYLIGHT_FX_POPOVER_OFFSET = 28;
 const SCENE_CAMERA_FOV_IDS = ["scene-camera-fov", "camera-layer-scene-camera-fov"];
 const SCENE_QUALITY_PROFILE_IDS = ["scene-quality-profile", "camera-layer-scene-quality-profile"];
 const SCENE_ATMOSPHERE_QUALITY_IDS = ["scene-atmosphere-quality", "camera-layer-scene-atmosphere-quality"];
@@ -999,7 +1014,9 @@ const projectIoConfig = {
     return `${safeName || "Pulse Project Export"}.json`;
   },
   setProjectError,
-  applyProjectSnapshot
+  applyProjectSnapshot,
+  setProjectImportStatus,
+  onProjectImported: closeProjectImportModal
 };
 const importConfig: ImportConfig = {
   getView: () => view,
@@ -1740,12 +1757,45 @@ function tickSceneCameraFxOverlayLoop() {
   sceneCameraFxAnimationFrame = window.requestAnimationFrame(tickSceneCameraFxOverlayLoop);
 }
 
+function isSceneDaylightExpanded() {
+  const sceneDaylight = document.getElementById("scene-daylight-expand") as any;
+  return Boolean(sceneDaylight?.expanded || sceneDaylight?.hasAttribute?.("expanded"));
+}
+
+function syncSceneDaylightFxPopoverOffset(shouldRender = shouldRenderSceneCameraFxOverlay()) {
+  const sceneDaylight = document.getElementById("scene-daylight-expand") as HTMLElement | null;
+  const popover = sceneDaylight?.shadowRoot?.querySelector("calcite-popover") as any;
+  if (!popover) return;
+
+  popover.offsetDistance = shouldRender ? SCENE_DAYLIGHT_FX_POPOVER_OFFSET : 0;
+  void popover.reposition?.();
+}
+
+function scheduleSceneDaylightFxPopoverOffsetSync(shouldRender = shouldRenderSceneCameraFxOverlay()) {
+  window.requestAnimationFrame(() => {
+    syncSceneDaylightFxPopoverOffset(shouldRender);
+    window.requestAnimationFrame(() => syncSceneDaylightFxPopoverOffset(shouldRender));
+  });
+}
+
+function syncSceneDaylightFxButtonState(shouldRender = shouldRenderSceneCameraFxOverlay()) {
+  const isExpanded = shouldRender && isSceneDaylightExpanded();
+  document.body.classList.toggle("scene-camera-fx-active", shouldRender);
+  document.body.classList.toggle("scene-daylight-expanded", isExpanded);
+  const button = document.getElementById("scene-daylight-fx-button") as HTMLElement | null;
+  if (button) {
+    button.setAttribute("aria-pressed", isExpanded ? "true" : "false");
+  }
+  scheduleSceneDaylightFxPopoverOffsetSync(shouldRender);
+}
+
 function updateSceneCameraFxOverlayState() {
   const shouldRender = shouldRenderSceneCameraFxOverlay();
   const mapWrapper = document.getElementById("map-wrapper") as HTMLElement | null;
   if (mapWrapper) {
     mapWrapper.style.filter = shouldRender ? getSceneCameraFxCssFilter() : "";
   }
+  syncSceneDaylightFxButtonState(shouldRender);
   if (!shouldRender) {
     stopSceneCameraFxOverlayLoop();
     renderSceneCameraFxOverlayFrame();
@@ -2562,6 +2612,32 @@ function bindSceneDaylightPersistence() {
   sceneDaylightPersistenceBound = true;
   daylightEl.addEventListener("arcgisPropertyChange", () => {
     scheduleProjectSave();
+  });
+}
+
+function bindSceneDaylightFxButton() {
+  if (sceneDaylightFxButtonBound) return;
+  const button = document.getElementById("scene-daylight-fx-button") as HTMLElement | null;
+  const sceneDaylight = document.getElementById("scene-daylight-expand") as any;
+  if (!button || !sceneDaylight) return;
+
+  sceneDaylightFxButtonBound = true;
+  button.addEventListener("click", () => {
+    const nextExpanded = !isSceneDaylightExpanded();
+    sceneDaylight.expanded = nextExpanded;
+    if (nextExpanded) {
+      sceneDaylight.setAttribute?.("expanded", "");
+    } else {
+      sceneDaylight.removeAttribute?.("expanded");
+    }
+    syncSceneDaylightFxButtonState();
+    window.requestAnimationFrame(updateSceneCameraFxOverlayState);
+  });
+
+  ["arcgisPropertyChange", "calciteExpandToggle", "click"].forEach((eventName) => {
+    sceneDaylight.addEventListener(eventName, () => {
+      syncSceneDaylightFxButtonState();
+    });
   });
 }
 
@@ -3424,6 +3500,125 @@ function flashProjectError(message: string, duration = 3200) {
       setProjectError(null);
     }
   }, duration);
+}
+
+function setProjectImportStatus(message: string | null, kind: "error" | "info" | "success" = "info") {
+  const statusEl = document.getElementById("project-import-status");
+  if (!statusEl) return;
+  statusEl.textContent = message || "";
+  statusEl.classList.toggle("is-error", kind === "error" && Boolean(message));
+  statusEl.classList.toggle("is-success", kind === "success" && Boolean(message));
+}
+
+function setProjectImportBusy(isBusy: boolean) {
+  const modal = document.getElementById("project-import-modal");
+  const selectButton = document.getElementById("project-import-select-btn") as HTMLButtonElement | null;
+  const sampleButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-project-sample-id]"));
+  modal?.toggleAttribute("aria-busy", isBusy);
+  if (selectButton) {
+    selectButton.toggleAttribute("disabled", isBusy);
+  }
+  sampleButtons.forEach((button) => {
+    button.toggleAttribute("disabled", isBusy);
+  });
+}
+
+function openProjectImportModal() {
+  const modal = document.getElementById("project-import-modal") as any;
+  if (!modal) return;
+  setProjectImportStatus(null);
+  document.getElementById("project-import-dropzone")?.classList.remove("is-dragover");
+  modal.open = true;
+}
+
+function closeProjectImportModal() {
+  const modal = document.getElementById("project-import-modal") as any;
+  if (!modal) return;
+  modal.open = false;
+  setProjectImportBusy(false);
+  document.getElementById("project-import-dropzone")?.classList.remove("is-dragover");
+}
+
+async function importDroppedProjectFile(file: File) {
+  setProjectImportBusy(true);
+  setProjectImportStatus(`Opening ${file.name}...`, "info");
+  try {
+    await importProjectFile(projectIoConfig, file);
+  } finally {
+    setProjectImportBusy(false);
+  }
+}
+
+async function importProjectSample(sampleId: string) {
+  const sample = projectSamples.find((entry) => entry.id === sampleId);
+  if (!sample) {
+    setProjectImportStatus("Unable to load sample project. The sample was not found.", "error");
+    return;
+  }
+  setProjectImportBusy(true);
+  setProjectImportStatus(`Opening ${sample.title}...`, "info");
+  try {
+    await importProjectSnapshot(projectIoConfig, sample.project);
+  } finally {
+    setProjectImportBusy(false);
+  }
+}
+
+function bindProjectImportDialogListeners() {
+  const modal = document.getElementById("project-import-modal") as any;
+  const dropzone = document.getElementById("project-import-dropzone") as HTMLElement | null;
+  const selectButton = document.getElementById("project-import-select-btn") as HTMLElement | null;
+  const cancelButton = document.getElementById("project-import-cancel") as HTMLElement | null;
+  const samplesTrack = document.querySelector(".project-samples-track") as HTMLElement | null;
+  if (!modal || !dropzone || !selectButton || !cancelButton || !samplesTrack) return;
+
+  const openFilePicker = () => handleImportProjectClick(projectIoConfig);
+  selectButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openFilePicker();
+  });
+  cancelButton.addEventListener("click", closeProjectImportModal);
+  modal.addEventListener("calciteDialogClose", () => {
+    setProjectImportStatus(null);
+    setProjectImportBusy(false);
+    dropzone.classList.remove("is-dragover");
+  });
+  dropzone.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement | null)?.closest?.("#project-import-select-btn")) return;
+    openFilePicker();
+  });
+  dropzone.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openFilePicker();
+  });
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.add("is-dragover");
+    });
+  });
+  dropzone.addEventListener("dragleave", (event: DragEvent) => {
+    const relatedTarget = event.relatedTarget as Node | null;
+    if (relatedTarget && dropzone.contains(relatedTarget)) return;
+    dropzone.classList.remove("is-dragover");
+  });
+  dropzone.addEventListener("drop", (event: DragEvent) => {
+    event.preventDefault();
+    dropzone.classList.remove("is-dragover");
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) {
+      setProjectImportStatus("Drop a Pulse .json or .geojson project file.", "error");
+      return;
+    }
+    void importDroppedProjectFile(file);
+  });
+  samplesTrack.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement | null)?.closest?.("[data-project-sample-id]") as HTMLElement | null;
+    const sampleId = button?.dataset.projectSampleId;
+    if (!sampleId || button.hasAttribute("disabled")) return;
+    void importProjectSample(sampleId);
+  });
 }
 
 function resolveCountryName(attributes?: Record<string, any>) {
@@ -4710,6 +4905,26 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
     ffmpegLoaded = true;
   }
 
+  const cleanupMp4Workspace = async (frameCount: number) => {
+    if (!ffmpegInstance) return;
+    const maxFramesToDelete = Math.max(frameCount, lastMp4FrameCount);
+    for (let i = 0; i < maxFramesToDelete; i += 1) {
+      const name = `frame-${String(i + 1).padStart(4, "0")}.png`;
+      try {
+        await (ffmpegInstance as any).deleteFile?.(name);
+      } catch {
+        // Ignore missing files.
+      }
+    }
+    try {
+      await (ffmpegInstance as any).deleteFile?.("out.mp4");
+    } catch {
+      // Ignore missing file.
+    }
+  };
+
+  await cleanupMp4Workspace(frames.length);
+
   for (let i = 0; i < frames.length; i += 1) {
     if (exportCancelRequested) {
       throw new Error("Export cancelled");
@@ -4791,6 +5006,8 @@ async function encodeMp4FromFrames(frames: string[], fps: number, qualityLevel: 
   if (bytes.byteLength === 0) {
     throw new Error("FFmpeg produced empty output.");
   }
+  await cleanupMp4Workspace(frames.length);
+  lastMp4FrameCount = frames.length;
   const safeBytes = Uint8Array.from(bytes);
   const blob = new Blob([safeBytes.buffer], { type: "video/mp4" });
   return { blob, codec: codecUsed };
@@ -6480,14 +6697,74 @@ function setupEventListeners() {
     const value = (event?.target as any)?.value;
     applyTextSettings(false, value !== undefined ? { content: String(value) } : undefined);
   };
+  const insertTextTemplateToken = (token: string) => {
+    const safeToken = String(token || "").trim();
+    if (!safeToken) return;
+    const contentInput = getEl("text-content-input") as any;
+    if (!contentInput) return;
+    const currentValue = String(contentInput?.value ?? "");
+    const nativeInput = contentInput?.shadowRoot?.querySelector?.("input, textarea") as
+      | HTMLInputElement
+      | HTMLTextAreaElement
+      | null;
+    const start = Number(nativeInput?.selectionStart);
+    const end = Number(nativeInput?.selectionEnd);
+    let nextValue = currentValue;
+    let caretPosition = nextValue.length;
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      const rangeStart = Math.max(0, Number(start));
+      const rangeEnd = Math.max(rangeStart, Number(end));
+      nextValue = `${currentValue.slice(0, rangeStart)}${safeToken}${currentValue.slice(rangeEnd)}`;
+      caretPosition = rangeStart + safeToken.length;
+    } else {
+      nextValue = `${currentValue}${safeToken}`;
+      caretPosition = nextValue.length;
+    }
+    contentInput.value = nextValue;
+    applyTextSettings(false, { content: nextValue });
+    requestAnimationFrame(() => {
+      try {
+        const focusInput = contentInput?.shadowRoot?.querySelector?.("input, textarea") as
+          | HTMLInputElement
+          | HTMLTextAreaElement
+          | null;
+        if (focusInput && Number.isFinite(caretPosition)) {
+          focusInput.focus();
+          focusInput.setSelectionRange(caretPosition, caretPosition);
+        } else {
+          contentInput?.focus?.();
+        }
+      } catch {
+        contentInput?.focus?.();
+      }
+    });
+  };
   getEl("text-content-input").addEventListener("calciteInputInput", handleTextContentInput);
   getEl("text-content-input").addEventListener("calciteInputChange", handleTextContentInput);
   getEl("text-content-input").addEventListener("input", handleTextContentInput);
+  getEl("text-template-insert-btn").addEventListener("click", () => {
+    const tokenSelect = getEl("text-template-token-select") as any;
+    const token = String(tokenSelect?.value || "");
+    if (!token) {
+      tokenSelect?.focus?.();
+      return;
+    }
+    insertTextTemplateToken(token);
+    tokenSelect.value = "";
+  });
+  getEl("text-template-token-select").addEventListener("calciteSelectChange", () => {
+    const tokenSelect = getEl("text-template-token-select") as any;
+    const token = String(tokenSelect?.value || "");
+    if (!token) return;
+    insertTextTemplateToken(token);
+    tokenSelect.value = "";
+  });
   getEl("text-render-mode-select").addEventListener("calciteSelectChange", () => {
     const renderModeSelect = getEl("text-render-mode-select") as any;
     updateTextModeControlVisibility(String(renderModeSelect?.value || "scene-3d"));
     applyTextSettings(false);
   });
+  getEl("text-measure-source-select").addEventListener("calciteSelectChange", () => applyTextSettings(false));
   getEl("text-font-select").addEventListener("calciteSelectChange", () => applyTextSettings(false));
   getEl("text-size-slider").addEventListener("calciteSliderInput", () => applyTextSettings(false));
   getEl("text-3d-depth-slider").addEventListener("calciteSliderInput", () => applyTextSettings(false));
@@ -6499,6 +6776,7 @@ function setupEventListeners() {
   getEl("text-3d-callout-toggle").addEventListener("calciteSwitchChange", () => applyTextSettings(false));
 
   getEl("play-button").addEventListener("click", handlePlayFromStart);
+  bindSceneDaylightFxButton();
   getEl("scene-mode-btn").addEventListener("click", () => {
     void toggleViewMode();
   });
@@ -6612,10 +6890,13 @@ function setupEventListeners() {
     void handleAutoSaveAction();
   });
   getEl("menu-save-as-btn").addEventListener("click", () => handleExportProject(projectIoConfig));
-  getEl("menu-open-project-btn").addEventListener("click", () => handleImportProjectClick(projectIoConfig));
-  getEl("project-file-input").addEventListener("change", (event: Event) =>
-    handleProjectFileChange(projectIoConfig, event)
-  );
+  getEl("menu-open-project-btn").addEventListener("click", openProjectImportModal);
+  getEl("project-file-input").addEventListener("change", (event: Event) => {
+    setProjectImportBusy(true);
+    void handleProjectFileChange(projectIoConfig, event).finally(() => {
+      setProjectImportBusy(false);
+    });
+  });
   getEl("timeline-duplicate-btn").addEventListener("click", duplicateSelectedTimelineAnimation);
   getEl("timeline-start-btn").addEventListener("click", goToStart);
   getEl("timeline-end-btn").addEventListener("click", goToEnd);
@@ -6693,10 +6974,21 @@ function setupEventListeners() {
     const target = event.target as HTMLElement | null;
     if (isEditableTarget(target)) return;
     if (event.key === "Delete" || event.key === "Backspace") {
-      removeSelectedTimelineAnimation();
+      const hasTimelineSelection = Boolean(
+        timelineState.selectedTimelineAnimation || timelineState.selectedTimelineKeyframe
+      );
+      if (hasTimelineSelection) {
+        removeSelectedTimelineAnimation();
+        return;
+      }
+      if (selectedLayerIndex >= 0) {
+        event.preventDefault();
+        void removeLayer(selectedLayerIndex);
+      }
     }
   });
 
+  bindProjectImportDialogListeners();
   bindConfirmDialogListeners();
   bindGeoJsonImportModeDialogListeners();
 }
@@ -6808,7 +7100,7 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   }
   if (key === "o" && event.shiftKey) {
     event.preventDefault();
-    handleImportProjectClick(projectIoConfig);
+    openProjectImportModal();
     return;
   }
   if (key === "e" && event.shiftKey) {
@@ -7940,6 +8232,7 @@ async function duplicateLayer(index: number) {
     textFixedToWorld: layerData.textFixedToWorld,
     textWorldHeight: layerData.textWorldHeight,
     textWorldRotation: layerData.textWorldRotation,
+    textMeasureSourceLayerId: layerData.textMeasureSourceLayerId,
     layerBlendMode: layerData.layerBlendMode,
     layerEffectSettings: layerData.layerEffectSettings ? { ...layerData.layerEffectSettings } : undefined,
     layerEffectsEnabled: layerData.layerEffectsEnabled
@@ -10072,6 +10365,7 @@ function updateTextModeControlVisibility(renderMode: string) {
 function syncTextPanelFromLayer(layerData: LayerData) {
   const contentInput = document.getElementById("text-content-input") as any;
   if (!contentInput) return;
+  const tokenSelect = document.getElementById("text-template-token-select") as any;
   const sizeSlider = document.getElementById("text-size-slider") as any;
   const depthSlider = document.getElementById("text-3d-depth-slider") as any;
   const colorInput = document.getElementById("text-color-input") as HTMLInputElement | null;
@@ -10081,6 +10375,7 @@ function syncTextPanelFromLayer(layerData: LayerData) {
   const underlineToggle = document.getElementById("text-underline-toggle") as any;
   const calloutToggle = document.getElementById("text-3d-callout-toggle") as any;
   const fixedWorldToggle = document.getElementById("text-3d-fixed-world-toggle") as any;
+  const measureSourceSelect = document.getElementById("text-measure-source-select") as any;
 
   contentInput.value = layerData.textContent || "Text";
   if (sizeSlider) sizeSlider.value = clamp(Number(layerData.textSize) || 14, MIN_TEXT_SIZE, MAX_TEXT_SIZE);
@@ -10093,7 +10388,47 @@ function syncTextPanelFromLayer(layerData: LayerData) {
   if (underlineToggle) underlineToggle.checked = Boolean(layerData.textUnderline);
   if (calloutToggle) calloutToggle.checked = Boolean(layerData.textCalloutLine);
   if (fixedWorldToggle) fixedWorldToggle.checked = Boolean(layerData.textFixedToWorld);
+  if (measureSourceSelect) {
+    syncTextMeasureSourceControl(layerData);
+  }
+  if (tokenSelect) tokenSelect.value = "";
   updateTextModeControlVisibility(renderMode);
+}
+
+function getEligibleTextMeasureLayers(layerData?: LayerData | null) {
+  return graphicsLayers.filter((candidate) => {
+    if (!candidate || candidate === layerData) return false;
+    return candidate.type === "polyline" || candidate.type === "polygon";
+  });
+}
+
+function syncTextMeasureSourceControl(layerData: LayerData) {
+  const select = document.getElementById("text-measure-source-select") as any;
+  if (!select) return;
+  const selectedId = String(layerData.textMeasureSourceLayerId || "").trim();
+  const candidates = getEligibleTextMeasureLayers(layerData);
+  select.innerHTML = "";
+
+  const selfOption = document.createElement("calcite-option");
+  selfOption.value = "";
+  selfOption.textContent = "This text graphic (default)";
+  select.appendChild(selfOption);
+
+  candidates.forEach((candidate) => {
+    const option = document.createElement("calcite-option");
+    option.value = String(candidate.layer?.id || "");
+    option.textContent = candidate.name;
+    select.appendChild(option);
+  });
+
+  if (selectedId && !candidates.some((candidate) => String(candidate.layer?.id || "") === selectedId)) {
+    const missingOption = document.createElement("calcite-option");
+    missingOption.value = selectedId;
+    missingOption.textContent = "Missing source layer";
+    select.appendChild(missingOption);
+  }
+
+  setCalciteValue(select as HTMLElement, selectedId);
 }
 
 function openAiModal() {
@@ -10386,10 +10721,12 @@ function applyTextSettings(
   const underlineToggle = getEl("text-underline-toggle") as any;
   const calloutToggle = getEl("text-3d-callout-toggle") as any;
   const fixedWorldToggle = getEl("text-3d-fixed-world-toggle") as any;
+  const measureSourceSelect = getEl("text-measure-source-select") as any;
   const isItalic = Boolean(italicToggle?.checked);
   const isUnderline = Boolean(underlineToggle?.checked);
   const hasCalloutLine = Boolean(calloutToggle?.checked);
   const fixedToWorld = Boolean(fixedWorldToggle?.checked);
+  const measureSourceLayerIdRaw = String(measureSourceSelect?.value || "").trim();
 
   layerData.textContent = content;
   layerData.textSize = Number.isFinite(size)
@@ -10403,6 +10740,7 @@ function applyTextSettings(
   layerData.textCalloutLine = hasCalloutLine;
   layerData.textDepth = Number.isFinite(depth) ? depth : DEFAULT_TEXT_MESH_DEPTH_PERCENT;
   layerData.textFixedToWorld = fixedToWorld;
+  layerData.textMeasureSourceLayerId = measureSourceLayerIdRaw || undefined;
   if (renderMode === "mesh-3d" && fixedToWorld) {
     const sizeChanged = Math.abs((Number.isFinite(size) ? size : previousSize) - previousSize) > 0.001;
     if (!previousFixedToWorld || previousRenderMode !== "mesh-3d" || sizeChanged) {
@@ -10416,6 +10754,7 @@ function applyTextSettings(
   updateTextModeControlVisibility(renderMode);
 
   applyTextSymbols(layerData);
+  applyAnimationsAtTime(currentTime);
 
   scheduleProjectSave();
 

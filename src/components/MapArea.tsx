@@ -33,6 +33,19 @@ function MapArea() {
       >
         Play from start
       </calcite-button>
+      <calcite-button
+        id="scene-daylight-fx-button"
+        icon-start="brightness"
+        scale="l"
+        appearance="solid"
+        kind="brand"
+        aria-label="Daylight"
+        title="Daylight"
+        style={{
+          "--calcite-button-text-color": "#ffffff",
+          "--calcite-button-icon-color": "#ffffff",
+        }}
+      ></calcite-button>
 
       <div id="map-context-menu" className="map-context-menu" role="menu" aria-hidden="true">
         <div id="map-context-menu-title" className="map-context-menu__header">

@@ -1,16 +1,29 @@
 import { useEffect, useState } from "react";
 
+import { STORAGE_CONSENT_KEY } from "./app/constants";
 import { bootApp } from "./appController";
 import MapArea from "./components/MapArea";
 import SidePanel from "./components/SidePanel";
 import Timeline from "./components/Timeline";
+import WelcomeSplash from "./components/WelcomeSplash";
+
+function canPersistThemePreference() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage?.getItem(STORAGE_CONSENT_KEY) === "granted";
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   const [themeMode, setThemeMode] = useState<"light" | "dark">(() => {
-    if (typeof window === "undefined") return "light";
-    const saved = window.localStorage?.getItem("pulse-theme");
-    if (saved === "light" || saved === "dark") return saved;
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    if (typeof window === "undefined") return "dark";
+    if (canPersistThemePreference()) {
+      const saved = window.localStorage?.getItem("pulse-theme");
+      if (saved === "light" || saved === "dark") return saved;
+    }
+    return "dark";
   });
 
   useEffect(() => {
@@ -24,7 +37,9 @@ export default function App() {
     document.body.classList.toggle("calcite-mode-light", !isDark);
     document.documentElement.classList.toggle("calcite-mode-dark", isDark);
     document.documentElement.classList.toggle("calcite-mode-light", !isDark);
-    window.localStorage?.setItem("pulse-theme", themeMode);
+    if (canPersistThemePreference()) {
+      window.localStorage?.setItem("pulse-theme", themeMode);
+    }
   }, [themeMode]);
 
   const menuButtonStyle =
@@ -77,6 +92,7 @@ export default function App() {
 
   return (
     <>
+      <WelcomeSplash />
       <div id="map-loading-overlay" aria-live="polite" aria-busy="true">
         <div className="map-loading-swarm" aria-hidden="true">
           <span className="map-loading-dot"></span>

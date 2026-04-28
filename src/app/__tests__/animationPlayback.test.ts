@@ -403,3 +403,306 @@ describe("animation playback text opacity", () => {
     expect(layerData.layer.opacity).toBe(1);
   });
 });
+
+describe("animation playback text templates", () => {
+  test("resolves timeline tokens from current playback time", () => {
+    const graphic = {
+      geometry: { type: "point", x: 0, y: 0, spatialReference: { wkid: 4326 } },
+      symbol: {
+        type: "text",
+        text: "Text",
+        color: [34, 35, 58, 1],
+        font: {
+          size: 14,
+          family: "sans-serif"
+        }
+      }
+    };
+    const layerData: LayerData = {
+      name: "Timed text",
+      type: "text",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [graphic]
+      },
+      animations: [
+        {
+          type: "fadeIn",
+          start: 0,
+          duration: 10
+        } as any
+      ],
+      pointKeyframes: [],
+      textContent: "t={time_s:.1}s {time_mmss} {progress_pct:.0}%",
+      textSize: 14,
+      textColor: "#22323a",
+      textRenderMode: "flat"
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, { type: "2d" }), 3.4);
+
+    expect(graphic.symbol.text).toBe("t=3.4s 00:03 34%");
+  });
+
+  test("resolves coordinate and elevation tokens from text geometry", () => {
+    const graphic = {
+      geometry: { type: "point", x: 2.3522, y: 48.8566, z: 35, spatialReference: { wkid: 4326 } },
+      symbol: {
+        type: "text",
+        text: "Text",
+        color: [34, 35, 58, 1],
+        font: {
+          size: 14,
+          family: "sans-serif"
+        }
+      }
+    };
+    const layerData: LayerData = {
+      name: "Coordinate text",
+      type: "text",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [graphic]
+      },
+      animations: [
+        {
+          type: "fadeIn",
+          start: 0,
+          duration: 1
+        } as any
+      ],
+      pointKeyframes: [],
+      textContent: "Lat {lat:.2}, Lon {lon:.2}, Elev {elevation_m:.0} m",
+      textSize: 14,
+      textColor: "#22323a",
+      textRenderMode: "flat"
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, { type: "2d" }), 0.5);
+
+    expect(graphic.symbol.text).toBe("Lat 48.86, Lon 2.35, Elev 35 m");
+  });
+
+  test("resolves elevation from terrain sampler when point z is missing", () => {
+    const graphic = {
+      geometry: { type: "point", x: -0.1278, y: 51.5074, spatialReference: { wkid: 4326 } },
+      symbol: {
+        type: "text",
+        text: "Text",
+        color: [34, 35, 58, 1],
+        font: {
+          size: 14,
+          family: "sans-serif"
+        }
+      }
+    };
+    const layerData: LayerData = {
+      name: "Terrain text",
+      type: "text",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [graphic]
+      },
+      animations: [
+        {
+          type: "fadeIn",
+          start: 0,
+          duration: 1
+        } as any
+      ],
+      pointKeyframes: [],
+      textContent: "Elevation {elevation_m:.0} m",
+      textSize: 14,
+      textColor: "#22323a",
+      textRenderMode: "flat"
+    };
+    const view = {
+      type: "3d",
+      groundView: {
+        elevationSampler: {
+          queryElevation: () => ({ z: 86.2 })
+        }
+      }
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, view), 0.5);
+
+    expect(graphic.symbol.text).toBe("Elevation 86 m");
+  });
+
+  test("resolves line length token from polyline geometry while paused", () => {
+    const graphic = {
+      geometry: {
+        type: "polyline",
+        spatialReference: { wkid: 3857 },
+        paths: [
+          [
+            [0, 0],
+            [3, 4]
+          ]
+        ]
+      },
+      symbol: {
+        type: "text",
+        text: "Text",
+        color: [34, 35, 58, 1],
+        font: {
+          size: 14,
+          family: "sans-serif"
+        }
+      }
+    };
+    const layerData: LayerData = {
+      name: "Length text",
+      type: "text",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [graphic]
+      },
+      animations: [
+        {
+          type: "fadeIn",
+          start: 0,
+          duration: 10
+        } as any
+      ],
+      pointKeyframes: [],
+      textContent: "Length {line_length:.1}",
+      textSize: 14,
+      textColor: "#22323a",
+      textRenderMode: "flat"
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, { type: "2d" }, { isPlaying: () => false }), 0);
+
+    expect(graphic.symbol.text).toBe("Length 5.0");
+  });
+
+  test("resolves area and perimeter tokens from polygon geometry", () => {
+    const graphic = {
+      geometry: {
+        type: "polygon",
+        spatialReference: { wkid: 3857 },
+        rings: [
+          [
+            [0, 0],
+            [4, 0],
+            [4, 3],
+            [0, 3],
+            [0, 0]
+          ]
+        ]
+      },
+      symbol: {
+        type: "text",
+        text: "Text",
+        color: [34, 35, 58, 1],
+        font: {
+          size: 14,
+          family: "sans-serif"
+        }
+      }
+    };
+    const layerData: LayerData = {
+      name: "Area text",
+      type: "text",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [graphic]
+      },
+      animations: [
+        {
+          type: "fadeIn",
+          start: 0,
+          duration: 10
+        } as any
+      ],
+      pointKeyframes: [],
+      textContent: "Area {area:.1} Perim {perimeter:.1}",
+      textSize: 14,
+      textColor: "#22323a",
+      textRenderMode: "flat"
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, { type: "2d" }), 0);
+
+    expect(graphic.symbol.text).toBe("Area 12.0 Perim 14.0");
+  });
+
+  test("resolves geometry tokens from a linked measure source layer", () => {
+    const sourceLineGraphic = {
+      geometry: {
+        type: "polyline",
+        spatialReference: { wkid: 3857 },
+        paths: [
+          [
+            [0, 0],
+            [0, 6]
+          ]
+        ]
+      }
+    };
+    const textGraphic = {
+      geometry: { type: "point", x: 10, y: 10, spatialReference: { wkid: 4326 } },
+      symbol: {
+        type: "text",
+        text: "Text",
+        color: [34, 35, 58, 1],
+        font: {
+          size: 14,
+          family: "sans-serif"
+        }
+      }
+    };
+    const sourceLayer: LayerData = {
+      name: "Measure line",
+      type: "polyline",
+      layer: {
+        id: "line-source-1",
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [sourceLineGraphic]
+      },
+      animations: [],
+      pointKeyframes: []
+    } as any;
+    const textLayer: LayerData = {
+      name: "Length text",
+      type: "text",
+      layer: {
+        opacity: 1,
+        blendMode: "normal",
+        effect: "",
+        graphics: [textGraphic]
+      },
+      animations: [
+        {
+          type: "fadeIn",
+          start: 0,
+          duration: 2
+        } as any
+      ],
+      pointKeyframes: [],
+      textContent: "Linked {line_length:.1}",
+      textMeasureSourceLayerId: "line-source-1",
+      textSize: 14,
+      textColor: "#22323a",
+      textRenderMode: "flat"
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig([sourceLayer, textLayer], { type: "2d" }), 0);
+
+    expect(textGraphic.symbol.text).toBe("Linked 6.0");
+  });
+});

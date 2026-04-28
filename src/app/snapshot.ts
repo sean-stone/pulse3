@@ -205,6 +205,7 @@ const buildProjectSnapshot = (config: SnapshotBuildConfig): ProjectSnapshot | nu
       textFixedToWorld: layerData.textFixedToWorld,
       textWorldHeight: layerData.textWorldHeight,
       textWorldRotation: layerData.textWorldRotation,
+      textMeasureSourceLayerId: layerData.textMeasureSourceLayerId,
       featureLayerUrl: layerData.featureLayerUrl,
       featureFields: layerData.featureFields?.map((field) => ({ ...field })),
       featureField: layerData.featureField,
@@ -605,6 +606,7 @@ const applyProjectSnapshot = async (config: SnapshotApplyConfig, snapshot: Proje
         textFixedToWorld: layerSnapshot.textFixedToWorld,
         textWorldHeight: layerSnapshot.textWorldHeight,
         textWorldRotation: layerSnapshot.textWorldRotation,
+        textMeasureSourceLayerId: layerSnapshot.textMeasureSourceLayerId,
         customAttribution: layerSnapshot.customAttribution,
         layerBlendMode: layerSnapshot.layerBlendMode,
         layerEffectSettings: layerSnapshot.layerEffectSettings
