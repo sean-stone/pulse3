@@ -943,6 +943,8 @@ const {
   handleTimelineDurationChange,
   handleTimelineDurationAutoFit,
   handleTimelineKeyframeEasingChange,
+  handleTimelineClipCurvePresetChange,
+  handleTimelineClipCurveInputChange,
   toggleTimelineSnap,
   toggleTimelineGrid,
   duplicateSelectedTimelineAnimation,
@@ -6909,6 +6911,15 @@ function setupEventListeners() {
     "calciteSelectChange",
     handleTimelineKeyframeEasingChange as EventListener
   );
+  getEl("timeline-clip-curve-preset").addEventListener(
+    "calciteSelectChange",
+    handleTimelineClipCurvePresetChange as EventListener
+  );
+  ["timeline-curve-x1", "timeline-curve-y1", "timeline-curve-x2", "timeline-curve-y2"].forEach((id) => {
+    const input = getEl(id);
+    input.addEventListener("calciteInputNumberInput", handleTimelineClipCurveInputChange as EventListener);
+    input.addEventListener("calciteInputNumberChange", handleTimelineClipCurveInputChange as EventListener);
+  });
   getEl("camera-keyframe-easing").addEventListener("calciteSelectChange", (event: Event) => {
     const value = String((event.target as any)?.value || "linear");
     setCameraAnimationEasing(value);

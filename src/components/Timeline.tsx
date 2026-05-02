@@ -119,6 +119,25 @@ function Timeline() {
               <calcite-option value="ease-in-out">Ease In/Out</calcite-option>
             </calcite-select>
           </div>
+          <div id="timeline-clip-curve-wrap" className="timeline-clip-curve" hidden>
+            <span className="timeline-keyframe-easing-label">Clip Curve</span>
+            <calcite-select
+              id="timeline-clip-curve-preset"
+              scale="s"
+              aria-label="Selected clip timing curve preset"
+              disabled
+            >
+              <calcite-option value="linear">Linear</calcite-option>
+              <calcite-option value="ease-in">Ease In</calcite-option>
+              <calcite-option value="ease-out">Ease Out</calcite-option>
+              <calcite-option value="ease-in-out">Ease In/Out</calcite-option>
+              <calcite-option value="custom">Custom</calcite-option>
+            </calcite-select>
+            <calcite-input-number id="timeline-curve-x1" scale="s" step="0.01" min="0" max="1" value="0.00" disabled></calcite-input-number>
+            <calcite-input-number id="timeline-curve-y1" scale="s" step="0.01" min="0" max="1" value="0.00" disabled></calcite-input-number>
+            <calcite-input-number id="timeline-curve-x2" scale="s" step="0.01" min="0" max="1" value="1.00" disabled></calcite-input-number>
+            <calcite-input-number id="timeline-curve-y2" scale="s" step="0.01" min="0" max="1" value="1.00" disabled></calcite-input-number>
+          </div>
           <div className="timeline-duration">
             <calcite-button
               id="timeline-duration-autofit"

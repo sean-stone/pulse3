@@ -24,18 +24,39 @@ $openAiMaxOutputTokens = max(512, (int) (getenv("OPENAI_MAX_OUTPUT_TOKENS") ?: 8
 
 header("Content-Type: application/json; charset=utf-8");
 
-$allowedOrigin = getenv("PULSE_ALLOWED_ORIGIN");
-if ($allowedOrigin) {
-    header("Access-Control-Allow-Origin: " . $allowedOrigin);
-    header("Vary: Origin");
+// Validate request origin against allowed domain(s).
+$allowedOrigins = getenv("PULSE_ALLOWED_ORIGIN");
+$originAllowed = false;
+if ($allowedOrigins) {
+    $allowedOriginsList = array_map("trim", explode(",", $allowedOrigins));
+    $requestOrigin = $_SERVER["HTTP_ORIGIN"] ?? null;
+    
+    if ($requestOrigin && in_array($requestOrigin, $allowedOriginsList, true)) {
+        header("Access-Control-Allow-Origin: " . $requestOrigin);
+        header("Vary: Origin");
+        $originAllowed = true;
+    }
+} else {
+    $originAllowed = true;
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
-    if ($allowedOrigin) {
+    if ($originAllowed) {
         header("Access-Control-Allow-Methods: POST, OPTIONS");
-        header("Access-Control-Allow-Headers: Content-Type");
+        header("Access-Control-Allow-Headers: Content-Type, X-Pulse-Token");
+        http_response_code(204);
+        exit;
+    } else {
+        http_response_code(403);
+        echo json_encode(["error" => "Origin not allowed"]);
+        exit;
     }
-    http_response_code(204);
+}
+
+// Reject POST requests from disallowed origins.
+if ($allowedOrigins && !$originAllowed) {
+    http_response_code(403);
+    echo json_encode(["error" => "Origin not allowed"]);
     exit;
 }
 

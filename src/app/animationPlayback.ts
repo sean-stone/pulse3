@@ -122,6 +122,65 @@ const ensureGeodeticOperatorsLoaded = () => {
 
 void ensureGeodeticOperatorsLoaded();
 
+const normalizeTimingCurve = (
+  curve: LayerAnimation["timingCurve"] | null | undefined
+): { x1: number; y1: number; x2: number; y2: number } => {
+  const x1 = clamp(Number(curve?.x1), 0, 1);
+  const y1 = clamp(Number(curve?.y1), 0, 1);
+  const x2 = clamp(Number(curve?.x2), 0, 1);
+  const y2 = clamp(Number(curve?.y2), 0, 1);
+  return {
+    x1: Number.isFinite(x1) ? x1 : 0,
+    y1: Number.isFinite(y1) ? y1 : 0,
+    x2: Number.isFinite(x2) ? x2 : 1,
+    y2: Number.isFinite(y2) ? y2 : 1
+  };
+};
+
+const sampleCubicBezier = (a: number, b: number, c: number, t: number) => ((a * t + b) * t + c) * t;
+const sampleCubicBezierDerivative = (a: number, b: number, c: number, t: number) => (3 * a * t + 2 * b) * t + c;
+
+const evaluateTimingCurve = (
+  progress: number,
+  curve: LayerAnimation["timingCurve"] | null | undefined
+): number => {
+  const clampedProgress = clamp(progress, 0, 1);
+  if (clampedProgress <= 0 || clampedProgress >= 1) return clampedProgress;
+  const { x1, y1, x2, y2 } = normalizeTimingCurve(curve);
+  if (x1 === y1 && x2 === y2) return clampedProgress;
+
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+
+  let t = clampedProgress;
+  for (let i = 0; i < 7; i += 1) {
+    const xAtT = sampleCubicBezier(ax, bx, cx, t) - clampedProgress;
+    const slope = sampleCubicBezierDerivative(ax, bx, cx, t);
+    if (Math.abs(xAtT) < 1e-6 || Math.abs(slope) < 1e-7) break;
+    t -= xAtT / slope;
+    t = clamp(t, 0, 1);
+  }
+
+  let tMin = 0;
+  let tMax = 1;
+  for (let i = 0; i < 10; i += 1) {
+    const xAtT = sampleCubicBezier(ax, bx, cx, t);
+    if (Math.abs(xAtT - clampedProgress) < 1e-6) break;
+    if (xAtT < clampedProgress) {
+      tMin = t;
+    } else {
+      tMax = t;
+    }
+    t = (tMin + tMax) * 0.5;
+  }
+
+  return clamp(sampleCubicBezier(ay, by, cy, t), 0, 1);
+};
+
 const updatePolylineDraw = (
   layerData: LayerData,
   activeAnim: LayerAnimation | null,
@@ -151,7 +210,8 @@ const updatePolylineDraw = (
     graphic.__densifiedGeometry = densified;
 
     if (activeAnim) {
-      const progress = Math.min(1, Math.max(0, (time - activeAnim.start) / activeAnim.duration));
+      const rawProgress = Math.min(1, Math.max(0, (time - activeAnim.start) / activeAnim.duration));
+      const progress = evaluateTimingCurve(rawProgress, activeAnim.timingCurve);
       const reverse = activeAnim.type === "drawReverse";
       graphic.geometry = buildPartialPolyline(densified, progress, reverse);
       return;
@@ -1426,7 +1486,8 @@ const getFollowPathStateAtTime = (
       : time >= animation.start
         ? 1
         : 0;
-  const travelProgress = animation.reverse ? 1 - rawProgress : rawProgress;
+  const curvedProgress = evaluateTimingCurve(rawProgress, animation.timingCurve);
+  const travelProgress = animation.reverse ? 1 - curvedProgress : curvedProgress;
   const travelDistance = total * travelProgress;
   const sample = sampleMarchPoint(segments, travelDistance);
   if (!sample) {

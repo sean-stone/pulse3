@@ -319,6 +319,98 @@ describe("animation playback text opacity", () => {
     expect(Number(boatGraphic.symbol.angle)).toBeCloseTo(45, 5);
   });
 
+  test("applies timing curve to follow-path progress", () => {
+    const routeGeometry = {
+      type: "polyline",
+      spatialReference: { wkid: 3857 },
+      paths: [[[0, 0], [10, 0], [10, 10]]],
+      clone() {
+        return {
+          ...this,
+          paths: this.paths.map((path: number[][]) => path.map((coord) => [...coord]))
+        };
+      }
+    };
+    const routeGraphic = {
+      geometry: routeGeometry,
+      __originalGeometry: routeGeometry,
+      __densifiedGeometry: routeGeometry
+    };
+    const carGraphic = {
+      geometry: { type: "point", x: 0, y: 0, spatialReference: { wkid: 3857 } },
+      symbol: { type: "simple-marker", size: 12, angle: 0 }
+    };
+    const routeLayer: LayerData = {
+      name: "Route 2",
+      type: "polyline",
+      layer: { id: "route-2", opacity: 1, blendMode: "normal", effect: "", graphics: [routeGraphic] },
+      animations: [],
+      lineStyle: { style: "solid", width: 2, color: "#0a4c66" }
+    };
+    const carLayer: LayerData = {
+      name: "Car 2",
+      type: "point",
+      layer: { id: "car-2", opacity: 1, blendMode: "normal", effect: "", graphics: [carGraphic] },
+      animations: [
+        {
+          type: "followPath",
+          start: 0,
+          duration: 10,
+          pathLayerId: "route-2",
+          reverse: false,
+          timingCurve: { x1: 0.95, y1: 0, x2: 1, y2: 0.05 }
+        } as any
+      ],
+      pointKeyframes: [],
+      pointStyle: { style: "circle", size: 12, color: "#0a4c66", outlineColor: "#ffffff", outlineWidth: 1 }
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig([routeLayer, carLayer], { type: "2d" }), 5);
+
+    expect(Number(carGraphic.geometry.x)).toBeLessThan(9);
+    expect(Number(carGraphic.geometry.y)).toBeCloseTo(0, 5);
+  });
+
+  test("applies timing curve to polyline draw progress", () => {
+    const baseGeometry = {
+      type: "polyline",
+      spatialReference: { wkid: 3857 },
+      paths: [[[0, 0], [10, 0], [10, 10]]],
+      clone() {
+        return {
+          ...this,
+          paths: this.paths.map((path: number[][]) => path.map((coord) => [...coord]))
+        };
+      }
+    };
+    const graphic = {
+      geometry: baseGeometry,
+      __originalGeometry: baseGeometry,
+      __densifiedGeometry: baseGeometry
+    };
+    const layerData: LayerData = {
+      name: "Line draw curve",
+      type: "polyline",
+      layer: { opacity: 1, blendMode: "normal", effect: "", graphics: [graphic] },
+      animations: [
+        {
+          type: "draw",
+          start: 0,
+          duration: 10,
+          timingCurve: { x1: 0.95, y1: 0, x2: 1, y2: 0.05 }
+        } as any
+      ],
+      lineStyle: { style: "solid", width: 2, color: "#0a4c66" }
+    };
+
+    applyAnimationsAtTime(createPlaybackConfig(layerData, { type: "2d" }), 5);
+
+    const drawPath = graphic.geometry.paths?.[0] ?? [];
+    const drawPoint = drawPath[drawPath.length - 1];
+    expect(Number(drawPoint?.[0] ?? 0)).toBeLessThan(9);
+    expect(Number(drawPoint?.[1] ?? 0)).toBeCloseTo(0, 5);
+  });
+
   test("stores smoke playback state for particle layers while the clip is active", () => {
     const layerData: LayerData = {
       name: "Smoke Box",

@@ -13,6 +13,8 @@ const TIMELINE_ZOOM_STEP = 20;
 const TIMELINE_AUTO_FIT_PADDING = 56;
 const TIMELINE_AUTO_FIT_EMPTY_PADDING = 96;
 const TIMELINE_CONTENT_END_PADDING = 24;
+const LINEAR_TIMING_CURVE = { x1: 0, y1: 0, x2: 1, y2: 1 };
+const CLIP_CURVE_TARGET_TYPES = new Set(["followPath", "draw", "drawReverse"]);
 
 export type TimelineState = {
   timelineZoom: number;
@@ -78,6 +80,56 @@ export type TimelineConfig = {
 };
 
 export const createTimelineController = (state: TimelineState, config: TimelineConfig) => {
+  const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+  const normalizeTimingCurve = (
+    curve: LayerAnimation["timingCurve"] | null | undefined
+  ): NonNullable<LayerAnimation["timingCurve"]> => {
+    const rawX1 = Number(curve?.x1);
+    const rawY1 = Number(curve?.y1);
+    const rawX2 = Number(curve?.x2);
+    const rawY2 = Number(curve?.y2);
+    const x1 = clamp01(Number.isFinite(rawX1) ? rawX1 : LINEAR_TIMING_CURVE.x1);
+    const y1 = clamp01(Number.isFinite(rawY1) ? rawY1 : LINEAR_TIMING_CURVE.y1);
+    const x2 = clamp01(Number.isFinite(rawX2) ? rawX2 : LINEAR_TIMING_CURVE.x2);
+    const y2 = clamp01(Number.isFinite(rawY2) ? rawY2 : LINEAR_TIMING_CURVE.y2);
+    return { x1, y1, x2, y2 };
+  };
+
+  const curvesClose = (
+    left: NonNullable<LayerAnimation["timingCurve"]>,
+    right: NonNullable<LayerAnimation["timingCurve"]>,
+    epsilon = 0.001
+  ) =>
+    Math.abs(left.x1 - right.x1) <= epsilon &&
+    Math.abs(left.y1 - right.y1) <= epsilon &&
+    Math.abs(left.x2 - right.x2) <= epsilon &&
+    Math.abs(left.y2 - right.y2) <= epsilon;
+
+  const getTimingCurvePreset = (curve: NonNullable<LayerAnimation["timingCurve"]>) => {
+    if (curvesClose(curve, { x1: 0, y1: 0, x2: 1, y2: 1 })) return "linear";
+    if (curvesClose(curve, { x1: 0.42, y1: 0, x2: 1, y2: 1 })) return "ease-in";
+    if (curvesClose(curve, { x1: 0, y1: 0, x2: 0.58, y2: 1 })) return "ease-out";
+    if (curvesClose(curve, { x1: 0.42, y1: 0, x2: 0.58, y2: 1 })) return "ease-in-out";
+    return "custom";
+  };
+
+  const presetToTimingCurve = (preset: string): NonNullable<LayerAnimation["timingCurve"]> => {
+    if (preset === "ease-in") return { x1: 0.42, y1: 0, x2: 1, y2: 1 };
+    if (preset === "ease-out") return { x1: 0, y1: 0, x2: 0.58, y2: 1 };
+    if (preset === "ease-in-out") return { x1: 0.42, y1: 0, x2: 0.58, y2: 1 };
+    return { ...LINEAR_TIMING_CURVE };
+  };
+
+  const getSelectedAnimationRef = () => {
+    if (!state.selectedTimelineAnimation) return null;
+    const { layerIdx, animIdx } = state.selectedTimelineAnimation;
+    const layerData = config.getGraphicsLayers()[layerIdx];
+    const animation = layerData?.animations?.[animIdx];
+    if (!layerData || !animation) return null;
+    return { layerData, animation };
+  };
+
   const applyTimelinePanelWidth = () => {
     const panel = document.getElementById("timeline-layers-panel");
     if (!panel) return;
@@ -375,6 +427,73 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     }
   };
 
+  const updateClipCurveControl = () => {
+    const wrap = document.getElementById("timeline-clip-curve-wrap");
+    const presetSelect = document.getElementById("timeline-clip-curve-preset") as any;
+    const x1Input = document.getElementById("timeline-curve-x1") as any;
+    const y1Input = document.getElementById("timeline-curve-y1") as any;
+    const x2Input = document.getElementById("timeline-curve-x2") as any;
+    const y2Input = document.getElementById("timeline-curve-y2") as any;
+    if (!wrap || !presetSelect || !x1Input || !y1Input || !x2Input || !y2Input) return;
+
+    const selected = getSelectedAnimationRef();
+    const isEditable = Boolean(selected && CLIP_CURVE_TARGET_TYPES.has(String(selected.animation.type || "")));
+    if (!isEditable || !selected) {
+      wrap.setAttribute("hidden", "");
+      presetSelect.setAttribute("disabled", "true");
+      x1Input.setAttribute("disabled", "true");
+      y1Input.setAttribute("disabled", "true");
+      x2Input.setAttribute("disabled", "true");
+      y2Input.setAttribute("disabled", "true");
+      return;
+    }
+
+    wrap.removeAttribute("hidden");
+    presetSelect.removeAttribute("disabled");
+    x1Input.removeAttribute("disabled");
+    y1Input.removeAttribute("disabled");
+    x2Input.removeAttribute("disabled");
+    y2Input.removeAttribute("disabled");
+
+    const curve = normalizeTimingCurve(selected.animation.timingCurve);
+    config.setCalciteValue(presetSelect as HTMLElement, getTimingCurvePreset(curve));
+    config.setCalciteValue(x1Input as HTMLElement, curve.x1.toFixed(2));
+    config.setCalciteValue(y1Input as HTMLElement, curve.y1.toFixed(2));
+    config.setCalciteValue(x2Input as HTMLElement, curve.x2.toFixed(2));
+    config.setCalciteValue(y2Input as HTMLElement, curve.y2.toFixed(2));
+  };
+
+  const applySelectedAnimationCurve = (nextCurve: NonNullable<LayerAnimation["timingCurve"]>) => {
+    const selected = getSelectedAnimationRef();
+    if (!selected) return;
+    selected.animation.timingCurve = normalizeTimingCurve(nextCurve);
+    config.applyAnimationsAtTime(config.getCurrentTime());
+    config.updateLayersList();
+    updateTimeline();
+    config.scheduleProjectSave();
+  };
+
+  const handleTimelineClipCurvePresetChange = () => {
+    const presetSelect = document.getElementById("timeline-clip-curve-preset") as any;
+    const preset = String(presetSelect?.value || "linear");
+    applySelectedAnimationCurve(presetToTimingCurve(preset));
+  };
+
+  const handleTimelineClipCurveInputChange = () => {
+    const x1Input = document.getElementById("timeline-curve-x1") as any;
+    const y1Input = document.getElementById("timeline-curve-y1") as any;
+    const x2Input = document.getElementById("timeline-curve-x2") as any;
+    const y2Input = document.getElementById("timeline-curve-y2") as any;
+    applySelectedAnimationCurve(
+      normalizeTimingCurve({
+        x1: Number(x1Input?.value),
+        y1: Number(y1Input?.value),
+        x2: Number(x2Input?.value),
+        y2: Number(y2Input?.value)
+      })
+    );
+  };
+
   const clearSelectedTimelineAnimation = () => {
     if (state.selectedTimelineClip) {
       state.selectedTimelineClip.classList.remove("selected");
@@ -392,6 +511,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       duplicateButton.setAttribute("disabled", "true");
     }
     updateKeyframeEasingControl();
+    updateClipCurveControl();
   };
 
   const setSelectedTimelineAnimation = (layerIdx: number, animIdx: number, clip?: HTMLElement) => {
@@ -414,6 +534,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       duplicateButton.removeAttribute("disabled");
     }
     updateKeyframeEasingControl();
+    updateClipCurveControl();
   };
 
   const removeSelectedTimelineAnimation = () => {
@@ -793,6 +914,7 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
       clearSelectedTimelineAnimation();
     }
     updateKeyframeEasingControl();
+    updateClipCurveControl();
     config.updatePlayhead();
     config.updateExportWarning();
   };
@@ -1205,6 +1327,8 @@ export const createTimelineController = (state: TimelineState, config: TimelineC
     getNextNonOverlappingStart,
     handleTimelineDurationAutoFit,
     handleTimelineDurationChange,
+    handleTimelineClipCurveInputChange,
+    handleTimelineClipCurvePresetChange,
     handleTimelineKeyframeEasingChange,
     handleTimelineMouseDown,
     handleTimelineScrubMove,
